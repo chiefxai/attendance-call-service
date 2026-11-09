@@ -39,13 +39,19 @@ export interface AssignmentStatus {
   backendDeliveryStatus: string;
 }
 
-export interface AgentLanguagePrompt {\n  dialect: string;\n  systemPrompt: string;\n}\n\nexport interface Agent {
+export interface AgentLanguagePrompt {
+  dialect: string;
+  systemPrompt: string;
+}
+
+export interface Agent {
   id: string;
   name: string;
   active: boolean;
   language: string;
   voice?: string | null;
   systemPrompt?: string;
+  languagePrompts?: Record<string, AgentLanguagePrompt>;
 }
 
 export interface AssignmentPayload {
