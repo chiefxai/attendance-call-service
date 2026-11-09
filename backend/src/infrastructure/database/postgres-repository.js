@@ -541,7 +541,13 @@ class PostgresRepository {
     };
   }
   async buildBackendAttendancePayload(sessionId) {
-    return this.getSessionArtifacts(sessionId);
+    const artifacts = await this.getSessionArtifacts(sessionId);
+    if (!artifacts) return null;
+    return {
+      session: artifacts.session,
+      callAttempts: artifacts.callAttempts,
+      transcripts: artifacts.transcripts,
+    };
   }
   async markBackendDelivered(sessionId, response) {
     await this.pool.query("UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,backend_delivered_at=NOW(),updated_at=NOW() WHERE id=$1", [sessionId, JSON.stringify(response || {})]);
