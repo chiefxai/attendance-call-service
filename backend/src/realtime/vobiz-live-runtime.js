@@ -86,6 +86,14 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     return "en-IN";
   }
 
+  function languageKey(language) {
+    const value = String(language || "en").trim().toLowerCase();
+    if (value.startsWith("ta") || value.includes("tamil")) return "ta";
+    if (value.startsWith("ml") || value.includes("malayalam")) return "ml";
+    if (value.startsWith("te") || value.includes("telugu")) return "te";
+    return "en";
+  }
+
   async function answerHandler(req, res) {
     try {
       if (!await verifyWebhook(req)) return res.status(401).send("Invalid Vobiz signature");
@@ -257,17 +265,21 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         if (!agent?.active) throw new Error("Agent is missing or inactive");
         const client = await clientForOrg(session.organizationId);
         const language = displayLanguage(session.language);
+        const languageConfig = agent.languagePrompts?.[languageKey(session.language)] || {};
+        const dialect = String(languageConfig.dialect || "").trim();
+        const languageInstructions = String(languageConfig.systemPrompt || "").trim();
         const systemPrompt = [
           "You are an AI attendance caller for home care shifts. You are calling the employee only; never call or ask the patient to speak.",
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
-          `Speak unmistakably and naturally in ${language}.`,
+          `Speak unmistakably and naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}.`,
           "Use the supplied session context and the previous call attempts so you remember the full assignment and what has already happened.",
           "Verify the employee and assigned patient. Ask the employee to confirm the patient name and location; do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
           "For check-in, establish whether the employee reached the assigned patient and the actual arrival time. If they have not arrived, ask their expected arrival time and confirm a clear callback time.",
           "For check-out, establish whether the duty is complete and the actual departure time. If they are still working, ask the expected departure time and confirm when to call back.",
           "If any identity, client, time, or assignment detail is uncertain, ask a brief follow-up question. Never invent a time.",
           "After collecting the required information, thank the employee, say goodbye, then call end_call.",
-          "Agent-specific instructions:", agent.systemPrompt || "Confirm attendance accurately and politely.",
+          "General agent instructions:", agent.systemPrompt || "Confirm attendance accurately and politely.",
+          `Instructions for ${language}${dialect ? ` (${dialect})` : ""}:`, languageInstructions || `Use natural spoken ${language} and familiar local wording; remain clear and respectful.`,
           "Full session context:", formatSessionContext(agentContext),
         ].join("\n\n");
         liveSession = await client.live.connect({
