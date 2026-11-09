@@ -170,7 +170,9 @@ a project client. `PUBLIC_BASE_URL` must be the public HTTPS origin, and
 `VOBIZ_STREAM_SECRET` must be a long random secret in production. Configure
 `VERTEX_LIVE_AUDIO_MODEL` for the live audio-to-audio model and
 `VERTEX_CALL_MODEL`, `VERTEX_TRANSCRIPTION_MODEL`, and `VERTEX_SUMMARY_MODEL`
-for the post-call jobs.
+for the post-call jobs. Transcription defaults to `gemini-3.1-flash-lite` in
+the `global` Vertex location; override it with `VERTEX_TRANSCRIPTION_MODEL` and
+`VERTEX_TRANSCRIPTION_LOCATION` when needed.
 See `.env.example` for separate phone-call and queue-processing retry settings.
 The Vertex helper exposes text response generation, Gemini TTS, recording
 transcription, and structured outcome extraction. The MinIO recording adapter imports
