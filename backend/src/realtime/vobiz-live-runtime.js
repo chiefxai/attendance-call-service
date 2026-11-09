@@ -97,8 +97,9 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       const streamUrl = new URL(mediaPath, publicBase);
       streamUrl.protocol = wsProtocol;
       streamUrl.searchParams.set("token", token);
+      const recordingCallbackUrl = new URL("/api/call-service/recordings/callback", publicBase).toString();
       res.set("Content-Type", "text/xml; charset=utf-8");
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Record callbackUrl="${xmlEscape(recordingCallbackUrl)}" callbackMethod="POST" recordSession="true" redirect="false" fileFormat="wav" playBeep="true" maxLength="3600"/><Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
     } catch (error) {
       return res.status(error.status || 503).send("Unable to initialize the voice session");
     }
@@ -240,6 +241,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         const language = displayLanguage(session.language);
         const systemPrompt = [
           "You are an AI attendance caller for home care shifts. You are calling the employee only; never call or ask the patient to speak.",
+          "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
           `Speak unmistakably and naturally in ${language}.`,
           "Use the supplied session context and the previous call attempts so you remember the full assignment and what has already happened.",
           "Verify the employee and assigned patient. Ask the employee to confirm the patient name and location; do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
