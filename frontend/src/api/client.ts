@@ -39,7 +39,7 @@ export interface AssignmentStatus {
   backendDeliveryStatus: string;
 }
 
-export interface Agent {
+export interface AgentLanguagePrompt {\n  dialect: string;\n  systemPrompt: string;\n}\n\nexport interface Agent {
   id: string;
   name: string;
   active: boolean;
@@ -193,12 +193,12 @@ export async function fetchAgents() {
   return response.data;
 }
 
-export async function createAgent(agent: Pick<Agent, "name" | "language" | "voice" | "systemPrompt">) {
+export async function createAgent(agent: Pick<Agent, "name" | "language" | "voice" | "systemPrompt" | "languagePrompts">) {
   const response = await api.post<Agent>("/agents", agent);
   return response.data;
 }
 
-export async function updateAgent(agentId: string, update: Pick<Agent, "language" | "voice" | "systemPrompt">) {
+export async function updateAgent(agentId: string, update: Pick<Agent, "language" | "voice" | "systemPrompt" | "languagePrompts">) {
   const response = await api.patch<Agent>(`/agents/${agentId}`, update);
   return response.data;
 }
