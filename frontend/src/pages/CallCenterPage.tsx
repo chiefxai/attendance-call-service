@@ -30,7 +30,7 @@ function resolveLanguagePrompts(saved?: Record<string, AgentLanguagePrompt>) {
 }
 function makeLanguagePrompt(language: string, dialect: string) {
   const name = languageOptions.find((item) => item.code === language)?.name || "English";
-  return `Speak naturally in ${name} using the ${dialect || defaultLanguagePrompts[language]?.dialect || name} dialect. Use short, friendly, phone-ready phrases and familiar local wording. Ask one clear question at a time. Do not use slang that could sound disrespectful or unclear.`;
+  return `Speak naturally in ${name} using the ${dialect || defaultLanguagePrompts[language]?.dialect || name} dialect. Use locally familiar expressions and colloquial phrasing suited to a respectful attendance call. Keep sentences short and phone-friendly, ask one clear question at a time, and avoid expressions that could confuse or offend.`;
 }
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const localInputValue = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -83,7 +83,7 @@ export function CallCenterPage() {
     if (selectedAgent) {
       mutation.mutate({
         agentId: selectedAgent.id,
-        update: { name: agentName.trim(), language: agentLanguage, voice: agentVoice, systemPrompt: selectedAgent.systemPrompt || "", languagePrompts },
+        update: { name: agentName.trim(), language: agentLanguage, voice: agentVoice, systemPrompt: "", languagePrompts },
       });
     } else {
       createAgentMutation.mutate({
