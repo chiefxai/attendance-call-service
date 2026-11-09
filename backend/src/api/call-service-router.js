@@ -188,6 +188,54 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     } catch (error) { fail(res, error); }
   });
 
+  router.get("/assignments/:id/artifacts", async (req, res) => {
+    try {
+      const artifacts = await repository.getSessionArtifacts(req.params.id);
+      if (!artifacts || artifacts.session.organizationId !== org(req)) return res.status(404).json({ error: "Assignment session not found" });
+      const baseUrl = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+      res.set("Cache-Control", "private, no-store");
+      res.json({
+        session: artifacts.session,
+        callAttempts: artifacts.callAttempts.map((attempt) => ({
+          id: attempt.id,
+          stage: attempt.stage,
+          attemptNumber: attempt.attemptNumber,
+          status: attempt.status,
+          scheduledAt: attempt.scheduledAt,
+          answeredAt: attempt.answeredAt,
+          endedAt: attempt.endedAt,
+          durationSeconds: attempt.durationSeconds,
+          outcome: attempt.outcome,
+          recordingAvailable: Boolean(attempt.recordingObjectKey),
+          recordingUrl: attempt.recordingObjectKey
+            ? `${baseUrl}/api/call-service/assignments/${encodeURIComponent(req.params.id)}/recordings/${encodeURIComponent(attempt.id)}`
+            : null,
+        })),
+        transcripts: artifacts.transcripts,
+        logs: artifacts.logs,
+      });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/assignments/:id/recordings/:attemptId", async (req, res) => {
+    try {
+      const session = await repository.getAttendanceSession(req.params.id);
+      if (!session || session.organizationId !== org(req)) return res.status(404).json({ error: "Assignment session not found" });
+      const attempt = await repository.getCallAttempt(req.params.attemptId);
+      if (!attempt || attempt.sessionId !== session.id || !attempt.recordingObjectKey) {
+        return res.status(404).json({ error: "Recording is not available for this call attempt" });
+      }
+      const buffer = await recordings.getObjectBuffer(attempt.recordingObjectKey);
+      res.set({
+        "Cache-Control": "private, no-store",
+        "Content-Type": attempt.recordingContentType || "application/octet-stream",
+        "Content-Disposition": `inline; filename="attendance-${attempt.id}.audio"`,
+        "Content-Length": String(buffer.length),
+      });
+      return res.status(200).send(buffer);
+    } catch (error) { fail(res, error); }
+  });
+
   router.get("/agents", async (req, res) => {
     try { res.json(await repository.listAgents(org(req))); } catch (error) { fail(res, error); }
   });
