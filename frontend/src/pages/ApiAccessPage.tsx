@@ -38,7 +38,7 @@ export function ApiAccessPage() {
   const keys = useQuery({
     queryKey: ["service-api-keys", Boolean(adminToken)],
     queryFn: () => fetchServiceApiKeys(adminToken),
-    enabled: Boolean(adminToken),
+    enabled: false,
     retry: false,
   });
   const createMutation = useMutation({
@@ -47,12 +47,12 @@ export function ApiAccessPage() {
       setRevealedKey(created.apiKey);
       window.sessionStorage.setItem("attendance_api_key", created.apiKey);
       setAppKey(created.apiKey);
-      await queryClient.invalidateQueries({ queryKey: ["service-api-keys"] });
+      await keys.refetch();
     },
   });
   const revokeMutation = useMutation({
     mutationFn: (id: string) => revokeServiceApiKey(id, adminToken),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["service-api-keys"] }),
+    onSuccess: () => keys.refetch(),
   });
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -79,7 +79,7 @@ export function ApiAccessPage() {
           <Stack component="form" onSubmit={submit} spacing={1.5}>
             <TextField fullWidth size="small" type="password" label="API key admin secret" value={adminToken} onChange={(event) => setAdminToken(event.target.value)} autoComplete="off" />
             <TextField fullWidth size="small" label="Key label" value={label} onChange={(event) => setLabel(event.target.value)} />
-            <Button type="submit" variant="contained" startIcon={createMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <KeyRoundedIcon />} disabled={!adminToken.trim() || !label.trim() || createMutation.isPending}>Create API key</Button>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}><Button type="button" variant="outlined" onClick={() => keys.refetch()} disabled={!adminToken.trim() || keys.isFetching}>Load keys</Button><Button type="submit" variant="contained" startIcon={createMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <KeyRoundedIcon />} disabled={!adminToken.trim() || !label.trim() || createMutation.isPending}>Create API key</Button></Stack>
             {createMutation.isError && <Alert severity="error">{errorText(createMutation.error)}</Alert>}
             {keys.isError && <Alert severity="error">Could not load key list: {errorText(keys.error)}</Alert>}
           </Stack>
