@@ -18,6 +18,7 @@ const languageOptions = [{ code: "ta", name: "Tamil" }, { code: "en", name: "Eng
 const voiceOptions = ["Aoede", "Achird", "Algenib", "Anandhi", "Kavya", "Swarna"];
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const localInputValue = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+const errorText = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 
 export function CallCenterPage() {
   const navigate = useNavigate();
