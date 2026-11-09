@@ -7,13 +7,13 @@ export function DemoDataNotice({ children = "Illustrative preview data — live 
 
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
   return <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "flex-end" }} spacing={2}>
-    <Box>{eyebrow && <Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em">{eyebrow}</Typography>}<Typography variant="h4" sx={{ mt: eyebrow ? .35 : 0 }}>{title}</Typography>{description && <Typography color="text.secondary" sx={{ mt: .75, maxWidth: 760 }}>{description}</Typography>}</Box>
+    <Box>{eyebrow && <Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em">{eyebrow}</Typography>}<Typography variant="h4" sx={{ mt: eyebrow ? .35 : 0, fontSize: { xs: "1.8rem", sm: "2.125rem" }, lineHeight: 1.2, overflowWrap: "anywhere" }}>{title}</Typography>{description && <Typography color="text.secondary" sx={{ mt: .75, maxWidth: 760 }}>{description}</Typography>}</Box>
     {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>{actions}</Stack>}
   </Stack>;
 }
 
 export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accent = "#1557c0", tag }: { label: string; value: string; detail?: string; icon: ReactNode; tint?: string; accent?: string; tag?: string }) {
-  return <Card sx={{ height: "100%" }}><CardContent sx={{ p: 2.25 }}><Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}><Box sx={{ width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: 2.5, bgcolor: tint, color: accent }}>{icon}</Box>{tag && <Chip size="small" label={tag} sx={{ height: 22, bgcolor: tint, color: accent, fontSize: 10, fontWeight: 700 }} />}</Stack><Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>{label}</Typography><Typography sx={{ fontSize: 27, lineHeight: 1.2, fontWeight: 750, letterSpacing: "-.035em", mt: .45 }}>{value}</Typography>{detail && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .65 }}>{detail}</Typography>}</CardContent></Card>;
+  return <Card sx={{ height: "100%", minWidth: 0 }}><CardContent sx={{ p: { xs: 1.75, sm: 2.25 }, minWidth: 0 }}><Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}><Box sx={{ width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: 2.5, bgcolor: tint, color: accent }}>{icon}</Box>{tag && <Chip size="small" label={tag} sx={{ height: 22, bgcolor: tint, color: accent, fontSize: 10, fontWeight: 700 }} />}</Stack><Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>{label}</Typography><Typography sx={{ fontSize: 27, lineHeight: 1.2, fontWeight: 750, letterSpacing: "-.035em", mt: .45 }}>{value}</Typography>{detail && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .65 }}>{detail}</Typography>}</CardContent></Card>;
 }
 
 export function StatusChip({ status }: { status: string }) {
@@ -25,5 +25,5 @@ export function StatusChip({ status }: { status: string }) {
 }
 
 export function SectionCard({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode }) {
-  return <Card sx={{ height: "100%" }}><CardContent sx={{ p: { xs: 2, sm: 2.75 } }}><Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2} sx={{ mb: 2.25 }}><Box><Typography variant="h6" sx={{ fontSize: 17 }}>{title}</Typography>{subtitle && <Typography variant="body2" color="text.secondary" sx={{ mt: .4 }}>{subtitle}</Typography>}</Box>{action}</Stack>{children}</CardContent></Card>;
+  return <Card sx={{ height: "100%", minWidth: 0 }}><CardContent sx={{ p: { xs: 2, sm: 2.75 }, minWidth: 0 }}><Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems="flex-start" spacing={1.5} sx={{ mb: 2.25, minWidth: 0 }}><Box sx={{ minWidth: 0, flex: 1 }}><Typography variant="h6" sx={{ fontSize: 17 }}>{title}</Typography>{subtitle && <Typography variant="body2" color="text.secondary" sx={{ mt: .4 }}>{subtitle}</Typography>}</Box>{action}</Stack>{children}</CardContent></Card>;
 }
