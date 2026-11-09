@@ -69,7 +69,7 @@ function App() {
   );
 
   return (
-    <Box sx={{ display: "flex", minHeight: "100vh" }}>
+    <Box sx={{ display: "flex", minHeight: "100vh", width: "100%", overflowX: "hidden" }}>
       <AppBar position="fixed" elevation={0} color="inherit" sx={{ borderBottom: "1px solid #e8eeeb", bgcolor: "rgba(255,255,255,.9)", backdropFilter: "blur(10px)", width: { md: `calc(100% - ${drawerWidth}px)` }, ml: { md: `${drawerWidth}px` } }}>
         <Toolbar sx={{ minHeight: "72px !important", px: { xs: 2, md: 4 } }}>
           <IconButton onClick={() => setMobileOpen(true)} sx={{ display: { md: "none" }, mr: 1 }} aria-label="Open navigation"><MenuRoundedIcon /></IconButton>
@@ -79,11 +79,11 @@ function App() {
           <Button component={NavLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />} sx={{ ml: 1.5, display: { xs: "none", sm: "inline-flex" } }}>New assignment</Button>
         </Toolbar>
       </AppBar>
-      <Box component="nav" sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }} aria-label="Primary navigation">
+      <Box component="nav" sx={{ width: { xs: 0, md: drawerWidth }, flex: { xs: "0 0 0px", md: `0 0 ${drawerWidth}px` }, minWidth: 0 }} aria-label="Primary navigation">
         <Drawer variant="temporary" open={mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box" } }}>{drawer}</Drawer>
         <Drawer variant="permanent" open sx={{ display: { xs: "none", md: "block" }, "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box", borderRight: "1px solid #e8eeeb" } }}>{drawer}</Drawer>
       </Box>
-      <Box component="main" sx={{ flexGrow: 1, width: { md: `calc(100% - ${drawerWidth}px)` }, px: { xs: 2, sm: 3, lg: 5 }, pt: "104px", pb: 6 }}>
+      <Box component="main" sx={{ flex: "1 1 auto", minWidth: 0, maxWidth: { xs: "100%", md: `calc(100% - ${drawerWidth}px)` }, boxSizing: "border-box", px: { xs: 1.5, sm: 3, lg: 5 }, pt: { xs: "92px", sm: "104px" }, pb: 6 }}>
         <Routes>
           <Route path="/" element={<OverviewPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
