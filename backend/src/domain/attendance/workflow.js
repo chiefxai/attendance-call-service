@@ -9,6 +9,23 @@ function classifyCallStatus(status) {
   return "unknown";
 }
 
+function normalizeCallbackTime(value, referenceDate = new Date()) {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+
+  const text = String(value).trim();
+  const absolute = new Date(text);
+  if (Number.isFinite(absolute.getTime()) && /\d{4}-\d{2}-\d{2}/.test(text)) return absolute;
+
+  const relative = text.match(/(?:in\s+)?(\d+(?:\.\d+)?)\s*(minutes?|mins?|m|hours?|hrs?|h)\b/i);
+  if (!relative) return null;
+  const amount = Number(relative[1]);
+  const unit = relative[2].toLowerCase();
+  const multiplier = unit.startsWith("h") ? 60 * 60_000 : 60_000;
+  const runAt = new Date(referenceDate.getTime() + amount * multiplier);
+  return Number.isFinite(runAt.getTime()) ? runAt : null;
+}
+
 function chooseAttendanceAction(stage, outcome = {}) {
   if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment" || outcome.employeeIntent === "unclear") {
     return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
@@ -197,8 +214,8 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
         if (!decision.runAt) {
           await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: "callback_time_unclear", callAttemptId });
         } else {
-          const runAt = new Date(decision.runAt);
-          if (!Number.isFinite(runAt.getTime())) {
+          const runAt = normalizeCallbackTime(decision.runAt);
+          if (!runAt) {
             await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: "callback_time_invalid", callAttemptId });
           } else {
             const nextNumber = await repository.nextAttemptNumber(sessionId, attempt.stage);
@@ -256,4 +273,4 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   };
 }
 
-module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction };
+module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime };
