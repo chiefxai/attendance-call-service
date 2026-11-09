@@ -8,6 +8,7 @@ const {
   PostgresRepository,
   PostgresJobQueue,
   createVertexClientProvider,
+  createMinioRecordingStore,
   loadConfig,
 } = require("./index");
 
@@ -24,7 +25,8 @@ async function main() {
     retry: config.worker.retry,
   });
   const getClientForOrg = createVertexClientProvider();
-  const router = createCallServiceRouter({ express, repository, queue, getClientForOrg });
+  const recordings = createMinioRecordingStore();
+  const router = createCallServiceRouter({ express, repository, queue, getClientForOrg, recordings });
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
