@@ -211,8 +211,9 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       sessionContext,
       transcript: transcript.text,
     });
-    if (!outcome.requestedCallbackAt && ["will_arrive_later", "still_on_duty"].includes(outcome.employeeIntent)) {
-      outcome.requestedCallbackAt = inferRequestedCallbackAt(transcript.text, attempt.endedAt ? new Date(attempt.endedAt) : new Date());
+    if (["will_arrive_later", "still_on_duty"].includes(outcome.employeeIntent)) {
+      const inferredCallbackAt = inferRequestedCallbackAt(transcript.text, attempt.endedAt ? new Date(attempt.endedAt) : new Date());
+      if (inferredCallbackAt) outcome.requestedCallbackAt = inferredCallbackAt;
     }
     await repository.saveCallOutcome(callAttemptId, outcome);
     console.info(`[attendance-worker] intent extracted callAttempt=${callAttemptId} stage=${attempt.stage} intent=${outcome.employeeIntent || "unknown"}`);
