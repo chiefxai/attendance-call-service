@@ -13,7 +13,7 @@ const AGENT_DEFAULTS = {
   runtimeConfig: {},
 };
 
-function createCallServiceRouter({ express, repository, queue, vobiz = createVobizClient(), verifyWebhook, getClientForOrg }) {
+function createCallServiceRouter({ express, repository, queue, vobiz = createVobizClient(), verifyWebhook, getClientForOrg, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
   assertRepository(repository);
   if (!queue?.enqueue) throw new Error("A durable job queue is required");
@@ -22,7 +22,6 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.use(express.json());
   router.use(express.urlencoded({ extended: false }));
   const validateWebhook = verifyWebhook || ((req) => verifyVobizWebhookSignature(req, process.env.VOBIZ_AUTH_TOKEN));
-  const recordings = arguments[0].recordings;
   const liveRuntime = createVobizLiveRuntime({ repository, vobiz, verifyWebhook: validateWebhook, getClientForOrg, recordings, queue });
   router.post("/answer", liveRuntime.answerHandler);
   router.handleVobizUpgrade = liveRuntime.handleUpgrade;
