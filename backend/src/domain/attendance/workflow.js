@@ -212,7 +212,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       transcript: transcript.text,
     });
     if (["will_arrive_later", "still_on_duty"].includes(outcome.employeeIntent)) {
-      const inferredCallbackAt = inferRequestedCallbackAt(transcript.text, attempt.endedAt ? new Date(attempt.endedAt) : new Date());
+      const inferredCallbackAt = inferRequestedCallbackAt(transcript.text, attempt.updatedAt ? new Date(attempt.updatedAt) : new Date());
       if (inferredCallbackAt) outcome.requestedCallbackAt = inferredCallbackAt;
     }
     await repository.saveCallOutcome(callAttemptId, outcome);
