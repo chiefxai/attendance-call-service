@@ -265,6 +265,16 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const status = String(req.body?.CallStatus || req.body?.status || "").toLowerCase().replace(/[\s_-]+/g, "");
       const terminal = Boolean(req.body?.EndTime || ["completed", "noanswer", "busy", "failed", "canceled", "cancelled"].includes(status));
       if (result?.sessionId && terminal) {
+        if (["completed", "answered"].includes(status)) {
+          const session = await repository.getAttendanceSession(result.sessionId);
+          const currentStageStatus = result.stage === "check_in" ? session?.checkInStatus : session?.checkOutStatus;
+          if (currentStageStatus === "calling") {
+            await repository.setStageStatus(result.sessionId, result.stage, "processing", {
+              reason: "call_ended_processing",
+              callAttemptId: result.id,
+            });
+          }
+        }
         await queue.enqueue("process_call_result", { callAttemptId: result.id }, { idempotencyKey: `call-result:${result.id}` });
         if (result.recordingUrl || result.recordingObjectKey) {
           await queue.enqueue("transcribe_call", { callAttemptId: result.id }, { idempotencyKey: `transcribe:${result.id}` });
