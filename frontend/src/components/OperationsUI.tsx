@@ -6,8 +6,8 @@ export function DemoDataNotice({ children = "Illustrative preview data — live 
 }
 
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
-  return <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "flex-end" }} spacing={2}>
-    <Box>{eyebrow && <Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em">{eyebrow}</Typography>}<Typography variant="h4" sx={{ mt: eyebrow ? .35 : 0, fontSize: { xs: "1.8rem", sm: "2.125rem" }, lineHeight: 1.2, overflowWrap: "anywhere" }}>{title}</Typography>{description && <Typography color="text.secondary" sx={{ mt: .75, maxWidth: 760 }}>{description}</Typography>}</Box>
+  return <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "flex-end" }} spacing={2} sx={{ minWidth: 0 }}>
+    <Box sx={{ minWidth: 0, flex: 1 }}>{eyebrow && <Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em">{eyebrow}</Typography>}<Typography variant="h4" sx={{ mt: eyebrow ? .35 : 0, fontSize: { xs: "1.8rem", sm: "2.125rem" }, lineHeight: 1.2, overflowWrap: "anywhere" }}>{title}</Typography>{description && <Typography color="text.secondary" sx={{ mt: .75, maxWidth: 760 }}>{description}</Typography>}</Box>
     {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>{actions}</Stack>}
   </Stack>;
 }
