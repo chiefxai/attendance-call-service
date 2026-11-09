@@ -17,7 +17,9 @@ and allow inbound TCP 80 and 443 in the GCP firewall. Do not expose ports 3000,
 Copy `.env.docker.example` to `.env`, replace the local passwords, set your GCP
 project and organization ID, and fill the Vobiz credentials. Make
 `DATABASE_URL` use the same database password as `POSTGRES_PASSWORD`. Keep the
-`.env` file private. Then, from the project root, run the deployment script
+`.env` file private. Set `VOBIZ_FROM_NUMBER` to your provisioned Vobiz caller ID;
+new assignments use it by default, with an optional per-assignment override.
+Then, from the project root, run the deployment script
 with the hostname from your DNS A record:
 
 ```sh
@@ -45,6 +47,12 @@ the Vertex AI API in the project. Set `GOOGLE_CLOUD_PROJECT` and
 `GOOGLE_CLOUD_LOCATION` in `.env`. Set `ATTENDANCE_BACKEND_URL` and its token
 before using completed-session delivery; if unset, delivery jobs retry and
 eventually enter the queue's dead-letter state.
+
+Creating an assignment queues both check-in and check-out in the same session.
+The check-out call waits until `scheduledEndAt`; a terminal result for check-in
+does not cancel it. The session is `completed` only after both stages are
+confirmed. If either stage exhausts its configured retries or needs review, the
+session becomes an exception after both stages have settled.
 
 Compose runs `backend-migrate` before starting the API and worker.
 
