@@ -7,6 +7,23 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+api.interceptors.request.use((config) => {
+  const key = window.sessionStorage.getItem("attendance_api_key");
+  if (key) config.headers.Authorization = `Bearer ${key}`;
+  return config;
+});
+
+export interface ServiceApiKey {
+  id: string;
+  organizationId: string;
+  label: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+
 export interface AttendanceStageStatus {
   status: string;
   flag: "not_answered" | null;
@@ -183,5 +200,26 @@ export async function updateAgent(agentId: string, update: Pick<Agent, "language
 
 export async function createAssignment(payload: AssignmentPayload) {
   const response = await api.post<{ sessionId: string; status: string; queued: string[] }>("/assignments", payload);
+  return response.data;
+}
+
+export async function createServiceApiKey(label: string, adminToken: string) {
+  const response = await api.post<ServiceApiKey & { apiKey: string }>("/api-keys", { label }, {
+    headers: { "X-API-Admin-Token": adminToken },
+  });
+  return response.data;
+}
+
+export async function fetchServiceApiKeys(adminToken: string) {
+  const response = await api.get<ServiceApiKey[]>("/api-keys", {
+    headers: { "X-API-Admin-Token": adminToken },
+  });
+  return response.data;
+}
+
+export async function revokeServiceApiKey(id: string, adminToken: string) {
+  const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`, {
+    headers: { "X-API-Admin-Token": adminToken },
+  });
   return response.data;
 }
