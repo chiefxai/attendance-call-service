@@ -193,6 +193,11 @@ export async function fetchAgents() {
   return response.data;
 }
 
+export async function createAgent(agent: Pick<Agent, "name" | "language" | "voice" | "systemPrompt">) {
+  const response = await api.post<Agent>("/agents", agent);
+  return response.data;
+}
+
 export async function updateAgent(agentId: string, update: Pick<Agent, "language" | "voice" | "systemPrompt">) {
   const response = await api.patch<Agent>(`/agents/${agentId}`, update);
   return response.data;
