@@ -11,6 +11,15 @@ cp .env.example .env.local
 npm run dev
 ```
 
+## Deploy with Docker Compose on the GCP VM
+
+The root `docker-compose.yml` builds the frontend into an Nginx image. Nginx
+serves the single-page app on the VM loopback port `4173`; Caddy serves it at
+`https://<hostname>/` and proxies `/api/*` and `/healthz` to the backend. No
+frontend API origin is needed because the browser uses same-origin requests.
+After pulling project changes on the VM, run `./scripts/deploy-vm.sh
+calls.elvoryx.in` from the repository root to rebuild and restart the stack.
+
 Vite proxies `/api/call-service` to `VITE_BACKEND_ORIGIN` (defaults to
 `http://localhost:3000`). The browser client sends same-origin cookies so the
 host application's authenticated organization context can reach the backend.
