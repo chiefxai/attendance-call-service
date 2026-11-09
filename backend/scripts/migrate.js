@@ -14,7 +14,7 @@ async function main() {
     const migrationDir = path.join(__dirname, "..", "migrations");
     const files = (await fs.readdir(migrationDir)).filter((file) => file.endsWith(".sql")).sort();
     for (const file of files) {
-      const version = file.replace(/\\.sql$/, "");
+      const version = file.replace(/\.sql$/, "");
       const prior = await pool.query("SELECT 1 FROM service_schema_migrations WHERE version=$1", [version]);
       if (prior.rowCount) {
         console.log(`[attendance-migrate] ${version} already applied`);
