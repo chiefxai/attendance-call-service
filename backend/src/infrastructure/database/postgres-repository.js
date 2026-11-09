@@ -367,7 +367,8 @@ class PostgresRepository {
     if (!row) return null;
     return { id: row.id, organizationId: row.organization_id, sessionId: row.session_id, stage: row.stage,
       attemptNumber: row.attempt_number, callTargetRole: row.call_target_role, providerCallId: row.provider_call_id,
-      status: row.status, scheduledAt: row.scheduled_at, consecutiveNoAnswerBefore: row.consecutive_no_answer_before || 0, recordingUrl: row.recording_url,
+      status: row.status, scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
+      consecutiveNoAnswerBefore: row.consecutive_no_answer_before || 0, recordingUrl: row.recording_url,
       recordingObjectKey: row.recording_object_key, recordingContentType: row.recording_content_type,
       outcome: json(row.outcome), durationSeconds: row.duration_seconds };
   }
@@ -513,13 +514,34 @@ class PostgresRepository {
   async markSessionException(sessionId) {
     await this.pool.query("UPDATE attendance_sessions SET session_status='exception',updated_at=NOW() WHERE id=$1", [sessionId]);
   }
-  async buildBackendAttendancePayload(sessionId) {
-    const [session, attempts, transcripts] = await Promise.all([
-      this.getAttendanceSession(sessionId),
+  async getSessionArtifacts(sessionId) {
+    const session = await this.getAttendanceSession(sessionId);
+    if (!session) return null;
+    const [attempts, transcripts, events] = await Promise.all([
       this.pool.query("SELECT * FROM attendance_call_attempts WHERE session_id=$1 ORDER BY created_at", [sessionId]),
-      this.pool.query("SELECT t.* FROM attendance_transcripts t WHERE t.session_id=$1 ORDER BY t.created_at", [sessionId]),
+      this.pool.query("SELECT * FROM attendance_transcripts WHERE session_id=$1 ORDER BY created_at", [sessionId]),
+      this.pool.query("SELECT event_type,event_data,created_at FROM attendance_audit_events WHERE session_id=$1 ORDER BY created_at", [sessionId]),
     ]);
-    return { session, callAttempts: attempts.rows.map((row) => this.mapAttempt(row)), transcripts: transcripts.rows };
+    return {
+      session,
+      callAttempts: attempts.rows.map((row) => this.mapAttempt(row)),
+      transcripts: transcripts.rows.map((row) => ({
+        id: row.id,
+        callAttemptId: row.call_attempt_id,
+        language: row.language,
+        text: row.transcript,
+        extraction: json(row.extraction),
+        createdAt: row.created_at,
+      })),
+      logs: events.rows.map((row) => ({
+        eventType: row.event_type,
+        data: json(row.event_data),
+        createdAt: row.created_at,
+      })),
+    };
+  }
+  async buildBackendAttendancePayload(sessionId) {
+    return this.getSessionArtifacts(sessionId);
   }
   async markBackendDelivered(sessionId, response) {
     await this.pool.query("UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,backend_delivered_at=NOW(),updated_at=NOW() WHERE id=$1", [sessionId, JSON.stringify(response || {})]);
