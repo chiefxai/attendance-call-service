@@ -169,8 +169,20 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         sessionId: session.id,
         assignmentId: session.assignmentId,
         sessionStatus: session.sessionStatus,
-        checkIn: { status: session.checkInStatus, flag: session.checkInStatus === "not_answered" ? "not_answered" : null, reportedAt: context.checkIn?.reportedAt || null },
-        checkOut: { status: session.checkOutStatus, flag: session.checkOutStatus === "not_answered" ? "not_answered" : null, reportedAt: context.checkOut?.reportedAt || null },
+        checkIn: {
+          status: session.checkInStatus,
+          flag: session.checkInStatus === "not_answered" ? "not_answered" : null,
+          reportedAt: context.checkIn?.reportedAt || null,
+          scheduledAt: session.scheduledStartAt,
+          nextCallAt: context.checkIn?.nextCallAt || null,
+        },
+        checkOut: {
+          status: session.checkOutStatus,
+          flag: session.checkOutStatus === "not_answered" ? "not_answered" : null,
+          reportedAt: context.checkOut?.reportedAt || null,
+          scheduledAt: session.scheduledEndAt,
+          nextCallAt: context.checkOut?.nextCallAt || null,
+        },
         backendDeliveryStatus: session.backendDeliveryStatus,
       });
     } catch (error) { fail(res, error); }
