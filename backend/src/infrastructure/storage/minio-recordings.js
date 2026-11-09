@@ -10,7 +10,7 @@ function createMinioRecordingStore({
   secretAccessKey = process.env.MINIO_SECRET_KEY,
   vobizAuthId = process.env.VOBIZ_AUTH_ID,
   vobizAuthToken = process.env.VOBIZ_AUTH_TOKEN,
-  allowedRecordingHosts = (process.env.VOBIZ_RECORDING_ALLOWED_HOSTS || "api.vobiz.ai").split(",").map((host) => host.trim().toLowerCase()).filter(Boolean),
+  allowedRecordingHosts = [...new Set(["api.vobiz.ai", "media.vobiz.ai", ...(process.env.VOBIZ_RECORDING_ALLOWED_HOSTS || "").split(",").map((host) => host.trim().toLowerCase()).filter(Boolean))],
   fetchImpl = globalThis.fetch,
   maxDownloadBytes = Number(process.env.MAX_RECORDING_DOWNLOAD_BYTES || 100 * 1024 * 1024),
 } = {}) {
