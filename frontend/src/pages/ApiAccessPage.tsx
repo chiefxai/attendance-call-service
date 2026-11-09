@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, Chip, CircularProgress, Grid, IconButton, Paper, Stack, TextField, Typography } from "@mui/material";
 import KeyRoundedIcon from "@mui/icons-material/KeyRounded";
 import ContentCopyRoundedIcon from "@mui/icons-material/ContentCopyRounded";
@@ -34,7 +34,6 @@ export function ApiAccessPage() {
   const [label, setLabel] = useState("Athulya platform integration");
   const [revealedKey, setRevealedKey] = useState("");
   const [appKey, setAppKey] = useState(() => window.sessionStorage.getItem("attendance_api_key") || "");
-  const queryClient = useQueryClient();
   const keys = useQuery({
     queryKey: ["service-api-keys", Boolean(adminToken)],
     queryFn: () => fetchServiceApiKeys(adminToken),
