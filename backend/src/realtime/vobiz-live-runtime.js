@@ -268,6 +268,9 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             }] }],
           },
           callbacks: {
+            onopen: () => {
+              console.info(`[vobiz-live] Vertex Live websocket opened call=${token.callId} model=${LIVE_MODEL} location=${process.env.GOOGLE_CLOUD_LOCATION || "us-central1"}`);
+            },
             onmessage: async (response) => {
               if (!active) return;
               if (response.setupComplete) {
@@ -300,10 +303,13 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
               }
             },
             onerror: (error) => {
-              console.error("[vobiz-live] Vertex Live session error", error?.message || "unknown error");
+              console.error(`[vobiz-live] Vertex Live session error call=${token.callId} message=${error?.message || error?.error?.message || "unknown error"}`);
               try { vobizWs.close(1011, "Voice agent error"); } catch {}
             },
-            onclose: () => { if (active) { try { vobizWs.close(1011, "Voice agent disconnected"); } catch {} } },
+            onclose: (event) => {
+              console.error(`[vobiz-live] Vertex Live websocket closed call=${token.callId} code=${event?.code ?? "unknown"} reason=${JSON.stringify(event?.reason || "")} wasClean=${event?.wasClean ?? "unknown"} setupComplete=${setupComplete}`);
+              if (active) { try { vobizWs.close(1011, "Voice agent disconnected"); } catch {} }
+            },
           },
         });
         sendGreeting();
