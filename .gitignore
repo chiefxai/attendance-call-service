@@ -1,0 +1,9 @@
+.env
+backend/.env
+frontend/.env.local
+*.pem
+*.key
+*-service-account*.json
+service-account*.json
+node_modules/
+dist/

@@ -1,0 +1,249 @@
+"use strict";
+
+const { backoffMilliseconds } = require("./postgres-queue");
+
+function classifyCallStatus(status) {
+  const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (["completed", "answered", "inprogress"].includes(value)) return "answered";
+  if (["noanswer", "busy", "failed", "unanswered", "timeout"].includes(value)) return "not_answered";
+  return "unknown";
+}
+
+function chooseAttendanceAction(stage, outcome = {}) {
+  if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment" || outcome.employeeIntent === "unclear") {
+    return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
+  }
+  if (stage === "check_in") {
+    if (outcome.employeeIntent === "arrival_confirmed" && outcome.employeeVerified === true && outcome.clientVerified === true && outcome.reachedPatient === true && outcome.reportedArrivalTime) {
+      return { action: "confirm_stage", reportedAt: outcome.reportedArrivalTime || null };
+    }
+    if (outcome.employeeIntent === "will_arrive_later" || outcome.requestedCallbackAt) {
+      return { action: "follow_up", runAt: outcome.requestedCallbackAt || null };
+    }
+    return { action: "review", reason: "check_in_not_confirmed" };
+  }
+  if (stage === "check_out") {
+    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeVerified === true && outcome.clientVerified === true && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
+      return { action: "confirm_stage", reportedAt: outcome.reportedDepartureTime || null };
+    }
+    if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {
+      return { action: "follow_up", runAt: outcome.requestedCallbackAt || null };
+    }
+    return { action: "review", reason: "check_out_not_confirmed" };
+  }
+  return { action: "review", reason: "invalid_stage" };
+}
+
+function createAttendanceHandlers({ repository, queue, vobiz, recordings, transcriber, postCallAgent, backend, activeSessionCache, retry = {}, capacity = {} }) {
+  const required = { repository, queue, vobiz, recordings, transcriber, postCallAgent, backend };
+  const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
+  if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
+
+  async function placeCall({ sessionId, stage, attemptNumber, capacityWaitCount = 0, consecutiveNoAnswer = 0 }) {
+    const session = await repository.getAttendanceSession(sessionId);
+    if (!session || session.sessionStatus !== "active") return;
+    const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
+    if (["confirmed", "missed", "not_answered", "review"].includes(stageStatus)) return;
+    const agent = await repository.getAgent(session.organizationId, session.agentId);
+    if (!agent?.active) {
+      await repository.setStageStatus(sessionId, stage, "review", { reason: "agent_missing_or_inactive" });
+      throw new Error("The assigned calling agent is missing or inactive");
+    }
+    const attempt = await repository.createCallAttempt({
+      organizationId: session.organizationId, sessionId, stage, attemptNumber,
+      callTargetRole: "employee", scheduledAt: new Date(), consecutiveNoAnswer,
+    });
+    if (!attempt.shouldPlace || attempt.providerCallId || attempt.status !== "scheduled") {
+      if (attempt.status === "placing" && !attempt.providerCallId) {
+        await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_reconciliation_required", callAttemptId: attempt.id });
+      }
+      return;
+    }
+    const reserved = await repository.reserveOutboundCallSlot({
+      callAttemptId: attempt.id, organizationId: session.organizationId,
+      maxConcurrentCalls: capacity.maxConcurrentCalls || 20,
+      ttlMinutes: capacity.slotTtlMinutes || 180,
+    });
+    if (!reserved) {
+      const nextWait = capacityWaitCount + 1;
+      await queue.enqueue("place_call", { sessionId, stage, attemptNumber, capacityWaitCount: nextWait }, {
+        idempotencyKey: `capacity:${sessionId}:${stage}:${attemptNumber}:${nextWait}`,
+        runAt: new Date(Date.now() + (capacity.capacityPollMs || 2_000)),
+      });
+      return;
+    }
+    if (!await repository.markCallPlacing(attempt.id)) return;
+    await repository.setStageStatus(sessionId, stage, "calling", { currentCallAttemptId: attempt.id, attemptNumber });
+    const person = session.employee || {};
+    try {
+      const call = await vobiz.createCall({
+        to: person.phoneNumber,
+        from: agent.fromNumber || session.fromNumber,
+        agentId: agent.id,
+        sessionId,
+        stage,
+        callAttemptId: attempt.id,
+      });
+      const providerCallId = call.call_uuid || call.request_uuid;
+      if (!providerCallId) throw new Error("Vobiz response did not include a call ID; reconcile before retrying");
+      await repository.attachProviderCallId(attempt.id, providerCallId, call);
+    } catch (error) {
+      // A timeout may mean Vobiz accepted the request but its response was
+      // lost. Do not blindly redial; mark the placement for reconciliation.
+      await repository.markCallPlacementFailed(attempt.id, error.message);
+      await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_unknown", callAttemptId: attempt.id });
+      throw error;
+    }
+  }
+
+  async function processCallResult({ callAttemptId }) {
+    const attempt = await repository.getCallAttempt(callAttemptId);
+    if (!attempt) return;
+    if (classifyCallStatus(attempt.status) === "not_answered") {
+      const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
+      const config = { initialMs: (retry.initialMinutes || 5) * 60_000, multiplier: retry.multiplier || 1.2, maxMs: (retry.maxMinutes || 30) * 60_000 };
+      if (noAnswerCount >= (retry.maxConsecutiveNoAnswer || 5)) {
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "not_answered", {
+          reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: noAnswerCount,
+        });
+        await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId }, { idempotencyKey: `evaluate:${attempt.sessionId}:not-answered:${attempt.stage}` });
+        return;
+      }
+      const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, config));
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "follow_up", { reason: "not_answered", nextCallAt: runAt.toISOString() });
+      await queue.enqueue("place_call", { sessionId: attempt.sessionId, stage: attempt.stage, attemptNumber: attempt.attemptNumber + 1, consecutiveNoAnswer: noAnswerCount }, {
+        idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:${attempt.attemptNumber + 1}`, runAt,
+      });
+      return;
+    }
+    if (classifyCallStatus(attempt.status) !== "answered") return;
+    if (!attempt.recordingUrl && !attempt.recordingObjectKey) {
+      await queue.enqueue("wait_for_recording", { callAttemptId, pollNumber: 1 }, {
+        idempotencyKey: `recording-wait:${callAttemptId}:1`,
+        runAt: new Date(Date.now() + (retry.recordingWaitMs || 15_000)),
+      });
+      return;
+    }
+    await queue.enqueue("transcribe_call", { callAttemptId }, { idempotencyKey: `transcribe:${callAttemptId}` });
+  }
+
+  async function waitForRecording({ callAttemptId, pollNumber }) {
+    const attempt = await repository.getCallAttempt(callAttemptId);
+    if (!attempt) return;
+    if (attempt.recordingUrl || attempt.recordingObjectKey) {
+      await queue.enqueue("transcribe_call", { callAttemptId }, { idempotencyKey: `transcribe:${callAttemptId}` });
+      return;
+    }
+    if (pollNumber >= (retry.recordingWaitMaxAttempts || 4)) {
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", { reason: "recording_unavailable", callAttemptId });
+      await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId }, { idempotencyKey: `evaluate:${attempt.sessionId}:recording-unavailable:${attempt.id}` });
+      return;
+    }
+    const nextPoll = pollNumber + 1;
+    await queue.enqueue("wait_for_recording", { callAttemptId, pollNumber: nextPoll }, {
+      idempotencyKey: `recording-wait:${callAttemptId}:${nextPoll}`,
+      runAt: new Date(Date.now() + (retry.recordingWaitMs || 15_000)),
+    });
+  }
+
+  async function transcribeCall({ callAttemptId }) {
+    const attempt = await repository.getCallAttempt(callAttemptId);
+    if (!attempt) return;
+    const session = await repository.getAttendanceSession(attempt.sessionId);
+    const object = attempt.recordingObjectKey
+      ? { key: attempt.recordingObjectKey, contentType: attempt.recordingContentType }
+      : await recordings.importProviderRecording(attempt.recordingUrl, { organizationId: session.organizationId, sessionId: session.id, callAttemptId });
+    if (object?.key && !attempt.recordingObjectKey) await repository.setRecordingObjectKey(callAttemptId, object.key, object.contentType);
+    const transcript = await transcriber.transcribe(object, { language: session.language, organizationId: session.organizationId });
+    await repository.saveTranscript({
+      organizationId: session.organizationId, sessionId: session.id, callAttemptId,
+      language: transcript.language || session.language, text: transcript.text,
+    });
+    await queue.enqueue("extract_intent", { callAttemptId }, { idempotencyKey: `extract:${callAttemptId}` });
+  }
+
+  async function extractIntent({ callAttemptId }) {
+    const attempt = await repository.getCallAttempt(callAttemptId);
+    if (!attempt) return;
+    const [session, sessionContext, transcript] = await Promise.all([
+      repository.getAttendanceSession(attempt.sessionId),
+      repository.getAgentSessionContext(attempt.sessionId, attempt.stage),
+      repository.getTranscriptForCall(callAttemptId),
+    ]);
+    const outcome = await postCallAgent.extractCallOutcome({
+      orgId: session.organizationId,
+      sessionContext,
+      transcript: transcript.text,
+    });
+    await repository.saveCallOutcome(callAttemptId, outcome);
+    await queue.enqueue("evaluate_attendance", { sessionId: session.id, callAttemptId }, {
+      idempotencyKey: `decision:${callAttemptId}`,
+    });
+  }
+
+  async function evaluateAttendance({ sessionId, callAttemptId }) {
+    const session = await repository.getAttendanceSession(sessionId);
+    if (!session || session.sessionStatus !== "active") return;
+    if (callAttemptId) {
+      const attempt = await repository.getCallAttempt(callAttemptId);
+      const decision = chooseAttendanceAction(attempt.stage, attempt.outcome || {});
+      if (decision.action === "confirm_stage") {
+        await repository.setStageStatus(sessionId, attempt.stage, "confirmed", { reportedAt: decision.reportedAt, callAttemptId });
+      } else if (decision.action === "follow_up") {
+        if (!decision.runAt) {
+          await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: "callback_time_unclear", callAttemptId });
+        } else {
+          const runAt = new Date(decision.runAt);
+          if (!Number.isFinite(runAt.getTime())) {
+            await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: "callback_time_invalid", callAttemptId });
+          } else {
+            const nextNumber = await repository.nextAttemptNumber(sessionId, attempt.stage);
+            await repository.setStageStatus(sessionId, attempt.stage, "follow_up", { reason: "employee_requested_callback", nextCallAt: runAt.toISOString(), callAttemptId });
+            await queue.enqueue("place_call", { sessionId, stage: attempt.stage, attemptNumber: nextNumber, consecutiveNoAnswer: 0 }, {
+              idempotencyKey: `call:${sessionId}:${attempt.stage}:${nextNumber}`, runAt,
+            });
+          }
+        }
+      } else {
+        await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: decision.reason, callAttemptId });
+      }
+    }
+
+    const current = await repository.getAttendanceSession(sessionId);
+    if (current.checkInStatus === "confirmed" && current.checkOutStatus === "confirmed") {
+      await repository.markSessionCompleted(sessionId);
+      await queue.enqueue("deliver_attendance", { sessionId }, { idempotencyKey: `deliver:${sessionId}` });
+    }
+  }
+
+  async function deliverAttendance({ sessionId }) {
+    const session = await repository.getAttendanceSession(sessionId);
+    if (!session || session.checkInStatus !== "confirmed" || session.checkOutStatus !== "confirmed") return;
+    const result = await backend.sendAttendance(await repository.buildBackendAttendancePayload(sessionId), {
+      idempotencyKey: `attendance-session:${sessionId}`,
+    });
+    await repository.markBackendDelivered(sessionId, result);
+    if (activeSessionCache?.delete) await activeSessionCache.delete(sessionId);
+  }
+
+  async function evaluateSession({ sessionId }) {
+    const session = await repository.getAttendanceSession(sessionId);
+    if (!session) return;
+    if (["missed", "not_answered", "review"].includes(session.checkInStatus) || ["missed", "not_answered", "review"].includes(session.checkOutStatus)) {
+      await repository.markSessionException(sessionId);
+    }
+  }
+
+  return {
+    place_call: placeCall,
+    process_call_result: processCallResult,
+    wait_for_recording: waitForRecording,
+    transcribe_call: transcribeCall,
+    extract_intent: extractIntent,
+    evaluate_attendance: evaluateAttendance,
+    evaluate_session: evaluateSession,
+    deliver_attendance: deliverAttendance,
+  };
+}
+
+module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction };
