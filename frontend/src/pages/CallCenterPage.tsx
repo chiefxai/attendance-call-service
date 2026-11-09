@@ -29,7 +29,7 @@ export function CallCenterPage() {
   const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
   const calls = useQuery({ queryKey: ["call-center"], queryFn: fetchCallCenterData, refetchInterval: 5_000 });
   const summary = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary, refetchInterval: 5_000 });
-  const selectedAgent = agents.data?.find((agent) => agent.id === agentId) || agents.data?.[0];
+  const selectedAgent = agents.data?.find((agent) => agent.id === agentId) || agents.data?.find((agent) => agent.active);
   const mutation = useMutation({
     mutationFn: (value: { agentId: string; update: Pick<Agent, "language" | "voice" | "systemPrompt"> }) => updateAgent(value.agentId, value.update),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
@@ -65,7 +65,7 @@ export function CallCenterPage() {
     event.preventDefault();
     const now = new Date();
     const checkout = new Date(testForm.checkoutAt);
-    if (!selectedAgent || !Number.isFinite(checkout.getTime()) || checkout <= now) return;
+    if (!selectedAgent?.active || !Number.isFinite(checkout.getTime()) || checkout <= now) return;
     const nonce = crypto.randomUUID();
     const payload: AssignmentPayload = {
       assignmentId: "TEST-" + nonce,
@@ -110,7 +110,7 @@ export function CallCenterPage() {
             <Grid size={{ xs: 12, sm: 6 }}><TextField size="small" fullWidth required label="Patient service address" value={testForm.patientAddress} onChange={(event) => updateTest("patientAddress")(event.target.value)} /></Grid>
             <Grid size={{ xs: 12, sm: 4 }}><TextField select size="small" fullWidth label="Call language" value={testForm.language} onChange={(event) => updateTest("language")(event.target.value)}>{languageOptions.map((option) => <MenuItem key={option.code} value={option.code}>{option.name}</MenuItem>)}</TextField></Grid>
             <Grid size={{ xs: 12, sm: 4 }}><TextField type="datetime-local" size="small" fullWidth required label="Check-out call time" value={testForm.checkoutAt} onChange={(event) => updateTest("checkoutAt")(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 4 }}><Button fullWidth type="submit" variant="contained" startIcon={testMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <PlayArrowRoundedIcon />} disabled={testMutation.isPending || !selectedAgent || !testForm.employeeName.trim() || !testForm.employeePhone.trim() || !testForm.patientName.trim() || !testForm.patientAddress.trim() || new Date(testForm.checkoutAt) <= new Date()} sx={{ height: 40 }}>{testMutation.isPending ? "Scheduling…" : "Start test call"}</Button></Grid>
+            <Grid size={{ xs: 12, sm: 4 }}><Button fullWidth type="submit" variant="contained" startIcon={testMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <PlayArrowRoundedIcon />} disabled={testMutation.isPending || !selectedAgent?.active || !testForm.employeeName.trim() || !testForm.employeePhone.trim() || !testForm.patientName.trim() || !testForm.patientAddress.trim() || new Date(testForm.checkoutAt) <= new Date()} sx={{ height: 40 }}>{testMutation.isPending ? "Scheduling…" : "Start test call"}</Button></Grid>
           </Grid>
         </Box>
       </Stack>
