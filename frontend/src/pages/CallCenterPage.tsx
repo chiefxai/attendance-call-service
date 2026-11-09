@@ -11,7 +11,7 @@ import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { AxiosError } from "axios";
-import { createAssignment, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AssignmentPayload } from "../api/client";
+import { createAgent, createAssignment, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AssignmentPayload } from "../api/client";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 
 const languageOptions = [{ code: "ta", name: "Tamil" }, { code: "en", name: "English" }, { code: "ml", name: "Malayalam" }, { code: "te", name: "Telugu" }];
@@ -33,6 +33,23 @@ export function CallCenterPage() {
     mutationFn: (value: { agentId: string; update: Pick<Agent, "language" | "voice" | "systemPrompt"> }) => updateAgent(value.agentId, value.update),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
   });
+  const createAgentMutation = useMutation({
+    mutationFn: (value: Pick<Agent, "name" | "language" | "voice" | "systemPrompt">) => createAgent(value),
+    onSuccess: async (created) => {
+      setAgentId(created.id);
+      await queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+  const submitNewAgent = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    createAgentMutation.mutate({
+      name: String(values.get("newAgentName") || "").trim(),
+      language: String(values.get("newAgentLanguage") || "ta"),
+      voice: String(values.get("newAgentVoice") || "Achird"),
+      systemPrompt: String(values.get("newAgentPrompt") || ""),
+    });
+  };
   const testMutation = useMutation({
     mutationFn: createAssignment,
     onSuccess: async (result) => {
@@ -111,7 +128,15 @@ export function CallCenterPage() {
       <Grid size={{ xs: 12, lg: 5 }}><SectionCard title="Voice agent configuration" subtitle="Changes save to the selected workspace agent." action={<TuneRoundedIcon color="action" />}>
         {agents.isLoading && <LinearProgress />}
         {agents.isError && <Alert severity="error">Could not load agents: {agents.error.message}</Alert>}
-        {agents.isSuccess && agents.data.length === 0 && <Alert severity="info">Create an agent through the backend before configuring its voice.</Alert>}
+        {agents.isSuccess && agents.data.length === 0 && <Box component="form" onSubmit={submitNewAgent}><Stack spacing={1.5}>
+          <Alert severity="info">Create the first calling agent here. Its instructions and voice are used for scheduled and test calls.</Alert>
+          {createAgentMutation.isError && <Alert severity="error">Could not create agent: {errorText(createAgentMutation.error)}</Alert>}
+          <TextField name="newAgentName" label="Agent name" size="small" required />
+          <FormControl size="small" fullWidth><InputLabel>Default language</InputLabel><Select name="newAgentLanguage" label="Default language" defaultValue="ta">{languageOptions.map((item) => <MenuItem key={item.code} value={item.code}>{item.name}</MenuItem>)}</Select></FormControl>
+          <FormControl size="small" fullWidth><InputLabel>Vertex voice</InputLabel><Select name="newAgentVoice" label="Vertex voice" defaultValue="Achird">{voiceOptions.map((voice) => <MenuItem key={voice} value={voice}>{voice}</MenuItem>)}</Select></FormControl>
+          <TextField name="newAgentPrompt" label="Agent instructions" multiline minRows={3} helperText="Optional guidance added to the attendance call prompt." />
+          <Button type="submit" variant="contained" disabled={createAgentMutation.isPending}>{createAgentMutation.isPending ? "Creating…" : "Create calling agent"}</Button>
+        </Stack></Box>}
         {agents.data && agents.data.length > 0 && <Box component="form" onSubmit={saveConfig}><Stack spacing={2}>
           {agents.data.length > 1 && <FormControl size="small" fullWidth><InputLabel>Agent</InputLabel><Select label="Agent" value={selectedAgent?.id || ""} onChange={(event) => setAgentId(event.target.value)}>{agents.data.map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.name}</MenuItem>)}</Select></FormControl>}
           <Typography variant="body2" fontWeight={700}>{selectedAgent?.name} · {selectedAgent?.active ? "Active" : "Inactive"}</Typography>
