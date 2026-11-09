@@ -85,7 +85,7 @@ export function SearchFilterBar({
       onClose={() => setAnchorEl(null)}
       anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
       transformOrigin={{ vertical: "top", horizontal: "right" }}
-      PaperProps={{ sx: { width: "min(360px, calc(100vw - 32px)", p: 2 } }}
+      PaperProps={{ sx: { width: "min(360px, calc(100vw - 32px))", p: 2 } }}
     >
       <Stack spacing={1.5}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
