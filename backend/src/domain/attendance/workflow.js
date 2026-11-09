@@ -47,7 +47,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
     return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
   }
   if (stage === "check_in") {
-    if (outcome.employeeIntent === "arrival_confirmed" && outcome.employeeVerified !== false && outcome.clientVerified !== false && outcome.reachedPatient === true && outcome.reportedArrivalTime) {
+    if (outcome.employeeIntent === "arrival_confirmed" && outcome.employeeNameConfirmed === true && outcome.patientNameConfirmed === true && outcome.addressConfirmed === true && outcome.employeeVerified !== false && outcome.clientVerified !== false && outcome.reachedPatient === true && outcome.reportedArrivalTime) {
       return { action: "confirm_stage", reportedAt: outcome.reportedArrivalTime || null };
     }
     if (outcome.employeeIntent === "will_arrive_later" || outcome.requestedCallbackAt) {
@@ -56,7 +56,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
     return { action: "review", reason: "check_in_not_confirmed" };
   }
   if (stage === "check_out") {
-    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeVerified !== false && outcome.clientVerified !== false && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
+    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeNameConfirmed === true && outcome.patientNameConfirmed === true && outcome.addressConfirmed === true && outcome.employeeVerified !== false && outcome.clientVerified !== false && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
       return { action: "confirm_stage", reportedAt: outcome.reportedDepartureTime || null };
     }
     if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {

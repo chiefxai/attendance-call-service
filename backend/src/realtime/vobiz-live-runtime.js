@@ -273,7 +273,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
           `Speak unmistakably and naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}.`,
           "Use the supplied session context and the previous call attempts so you remember the full assignment and what has already happened.",
-          "Verify the employee and assigned patient. Ask the employee to confirm the patient name and location; do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
+          "Verify the employee and assigned patient before confirming attendance. Ask the employee to state their own name, the patient name, and the patient home's address or a distinctive address detail, then compare those answers with the assignment context. Do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
           "For check-in, establish whether the employee reached the assigned patient and the actual arrival time. If they have not arrived, ask their expected arrival time and confirm a clear callback time.",
           "For check-out, establish whether the duty is complete and the actual departure time. If they are still working, ask the expected departure time and confirm when to call back.",
           "If any identity, client, time, or assignment detail is uncertain, ask a brief follow-up question. Never invent a time.",
