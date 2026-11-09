@@ -26,6 +26,22 @@ function normalizeCallbackTime(value, referenceDate = new Date()) {
   return Number.isFinite(runAt.getTime()) ? runAt : null;
 }
 
+function inferRequestedCallbackAt(transcript, referenceDate = new Date()) {
+  const text = String(transcript || "");
+  const numberWords = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    "ஒரு": 1, "ஒன்னு": 1, "ரெண்டு": 2, "இரண்டு": 2, "மூணு": 3, "மூன்று": 3, "நாலு": 4,
+    "நான்கு": 4, "அஞ்சு": 5, "ஐந்து": 5, "ஆறு": 6, "ஏழு": 7, "எட்டு": 8, "ஒன்பது": 9, "பத்து": 10,
+    "டூ": 2, "த்ரீ": 3, "ஃபைவ்": 5, "டென்": 10,
+  };
+  const number = "(\\d+(?:\\.\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|ஒரு|ஒன்னு|ரெண்டு|இரண்டு|மூணு|மூன்று|நாலு|நான்கு|அஞ்சு|ஐந்து|ஆறு|ஏழு|எட்டு|ஒன்பது|பத்து|டூ|த்ரீ|ஃபைவ்|டென்)";
+  const match = text.match(new RegExp(`${number}\\s*(?:minutes?|mins?|minute|மினிட\\w*|நிமிஷ\\w*|நிமிட\\w*)`, "iu"));
+  if (!match) return null;
+  const amount = numberWords[match[1].toLowerCase()] || Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return new Date(referenceDate.getTime() + amount * 60_000).toISOString();
+}
+
 function chooseAttendanceAction(stage, outcome = {}) {
   if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment" || outcome.employeeIntent === "unclear") {
     return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
@@ -195,6 +211,9 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       sessionContext,
       transcript: transcript.text,
     });
+    if (!outcome.requestedCallbackAt && ["will_arrive_later", "still_on_duty"].includes(outcome.employeeIntent)) {
+      outcome.requestedCallbackAt = inferRequestedCallbackAt(transcript.text, attempt.endedAt ? new Date(attempt.endedAt) : new Date());
+    }
     await repository.saveCallOutcome(callAttemptId, outcome);
     console.info(`[attendance-worker] intent extracted callAttempt=${callAttemptId} stage=${attempt.stage} intent=${outcome.employeeIntent || "unknown"}`);
     await queue.enqueue("evaluate_attendance", { sessionId: session.id, callAttemptId }, {
@@ -273,4 +292,4 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   };
 }
 
-module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime };
+module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime, inferRequestedCallbackAt };
