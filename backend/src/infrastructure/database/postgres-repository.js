@@ -203,8 +203,8 @@ class PostgresRepository {
            COUNT(*) FILTER (WHERE scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS scheduled_today,
            COUNT(*) FILTER (WHERE check_in_status='confirmed' AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_ins_confirmed,
            COUNT(*) FILTER (WHERE check_out_status='confirmed' AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_confirmed,
-           COUNT(*) FILTER (WHERE check_in_status IN ('scheduled','calling','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_ins_pending,
-           COUNT(*) FILTER (WHERE check_out_status IN ('scheduled','calling','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_pending,
+           COUNT(*) FILTER (WHERE check_in_status IN ('scheduled','calling','processing','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_ins_pending,
+           COUNT(*) FILTER (WHERE check_out_status IN ('scheduled','calling','processing','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_pending,
            COUNT(*) FILTER (WHERE check_in_status IN ('not_answered','missed','review') OR check_out_status IN ('not_answered','missed','review'))::int AS exceptions
          FROM attendance_sessions CROSS JOIN bounds WHERE organization_id=$1`, [organizationId, timezone],
       ),
