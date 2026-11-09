@@ -12,7 +12,7 @@ const SUMMARY_MODEL = process.env.VERTEX_SUMMARY_MODEL || "gemini-2.5-flash";
 function createVertexClientProvider({ getClientForOrg, project, location } = {}) {
   if (getClientForOrg) return getClientForOrg;
   const projectId = project || process.env.GOOGLE_CLOUD_PROJECT;
-  const region = location || process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
+  const region = location || process.env.VERTEX_SUMMARY_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
   if (!projectId) throw new Error("GOOGLE_CLOUD_PROJECT is required for Vertex AI");
 
   let client;

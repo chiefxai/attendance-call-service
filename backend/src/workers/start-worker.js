@@ -34,7 +34,10 @@ async function main() {
     location: process.env.VERTEX_TRANSCRIPTION_LOCATION || "global",
     recordings,
   });
-  const postCallAgent = createAttendancePostCallAgent({ getClientForOrg });
+  const postCallAgent = createAttendancePostCallAgent({
+    getClientForOrg,
+    location: process.env.VERTEX_SUMMARY_LOCATION || "global",
+  });
   const backend = createAttendanceBackendClient();
   const handlers = createAttendanceHandlers({
     repository,
