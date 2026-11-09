@@ -14,7 +14,7 @@ then run:
 ```sh
 docker compose up -d
 docker compose ps
-docker compose exec -T postgres psql -U attendance -d attendance_calls < backend/schema.sql
+docker compose exec -T postgres psql -U attendance -d attendance_calls < backend/migrations/001_attendance_schema.sql
 ```
 
 The Compose ports bind to `127.0.0.1` so PostgreSQL and MinIO are not exposed to

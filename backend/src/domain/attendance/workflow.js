@@ -1,6 +1,6 @@
 "use strict";
 
-const { backoffMilliseconds } = require("./postgres-queue");
+const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");

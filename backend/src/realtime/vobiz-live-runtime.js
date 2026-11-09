@@ -3,7 +3,7 @@
 const crypto = require("node:crypto");
 const { URL } = require("node:url");
 const { WebSocketServer } = require("ws");
-const { createVertexClientProvider, formatSessionContext } = require("./vertex-agent");
+const { createVertexClientProvider, formatSessionContext } = require("../agents/vertex-agent");
 
 const LIVE_MODEL = process.env.VERTEX_LIVE_AUDIO_MODEL || "gemini-live-2.5-flash-native-audio";
 const MEDIA_PATH = process.env.VOBIZ_MEDIA_PATH || "/api/call-service/media";

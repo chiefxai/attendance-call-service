@@ -6,18 +6,46 @@ It follows the source platform's separation between telephony, the Vertex AI
 client and call agents. Mount it inside the existing authenticated application;
 it expects the host to set `req.orgId` after authentication.
 
+## Code layout
+
+```text
+backend/
+├── index.js                         # stable package entry point
+├── migrations/                      # ordered PostgreSQL schema migrations
+├── src/
+│   ├── api/                          # Express routes and request validation
+│   ├── agents/                       # Vertex AI call and post-call agents
+│   ├── config/                       # environment-backed runtime settings
+│   ├── domain/attendance/            # attendance decisions and workflow
+│   ├── domain/repository-contract.js # persistence boundary
+│   ├── infrastructure/database/      # PostgreSQL pool, repository, queue
+│   ├── infrastructure/storage/       # MinIO recording adapter
+│   ├── infrastructure/telephony/     # Vobiz client and webhook signatures
+│   ├── realtime/                     # Vobiz media ↔ Vertex Live bridge
+│   ├── workers/                      # durable queue consumer
+│   └── index.js                      # public module exports
+└── package.json
+```
+
+Import supported components from the package root (`require("attendance-call-service-module")`).
+Implementation files under `src/` are internal and can move independently of
+that public entry point.
+
 ## Mount
 
 ```js
 const express = require("express");
-const { createPostgresPool } = require("./postgres-pool");
-const { PostgresRepository } = require("./postgres-repository");
-const { PostgresJobQueue } = require("./postgres-queue");
-const { createCallServiceRouter } = require("./index");
+const {
+  createPostgresPool,
+  PostgresRepository,
+  PostgresJobQueue,
+  createCallServiceRouter,
+  loadConfig,
+} = require("attendance-call-service-module");
 
 const pool = createPostgresPool();
 const repository = new PostgresRepository(pool);
-const config = require("./config").loadConfig();
+const config = loadConfig();
 const queue = new PostgresJobQueue(pool, config.worker);
 const callServiceRouter = createCallServiceRouter({
   express, repository, queue, getClientForOrg,
@@ -38,7 +66,7 @@ active agent before scheduling employee calls.
 
 ## Durable queue and assignment flow
 
-Apply `schema.sql` through your database migration process. `PostgresJobQueue`
+Apply `migrations/001_attendance_schema.sql` through your database migration process. `PostgresJobQueue`
 uses row locks with `SKIP LOCKED`, leases, idempotency keys, retries, and
 dead-letter state. Run API and worker processes separately. Due check-in and
 check-out calls are durable jobs; after a worker crash, a job can be claimed
@@ -82,13 +110,16 @@ and transcript content out of queue payloads; jobs carry only record IDs.
 Example worker wiring:
 
 ```js
-const { PostgresJobQueue } = require("./postgres-queue");
-const { PostgresRepository } = require("./postgres-repository");
-const { createAttendanceHandlers } = require("./attendance-workflow");
-const { startWorkers } = require("./worker");
-const { loadConfig } = require("./config");
-const { createMinioRecordingStore } = require("./minio-recordings");
-const { createAttendancePostCallAgent, createVertexTranscriber } = require("./vertex-agent");
+const {
+  PostgresJobQueue,
+  PostgresRepository,
+  createAttendanceHandlers,
+  startWorkers,
+  loadConfig,
+  createMinioRecordingStore,
+  createAttendancePostCallAgent,
+  createVertexTranscriber,
+} = require("attendance-call-service-module");
 
 const config = loadConfig();
 const repository = new PostgresRepository(pool);
@@ -121,11 +152,11 @@ a project client. `PUBLIC_BASE_URL` must be the public HTTPS origin, and
 for the post-call jobs.
 See `.env.example` for separate phone-call and queue-processing retry settings.
 The Vertex helper exposes text response generation, Gemini TTS, recording
-transcription, and structured outcome extraction. `minio-recordings.js` imports
+transcription, and structured outcome extraction. The MinIO recording adapter imports
 Vobiz recordings to a private S3-compatible bucket; configure the provider
 recording host allowlist in `VOBIZ_RECORDING_ALLOWED_HOSTS`.
 
-`vertex-agent.js` provides post-call outcome extraction and audio transcription.
+`src/agents/vertex-agent.js` provides post-call outcome extraction and audio transcription.
 The live caller uses Vertex Live audio-to-audio, following the source backend's
 Vobiz/Vertex integration pattern.
 
