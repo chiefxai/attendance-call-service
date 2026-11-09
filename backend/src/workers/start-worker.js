@@ -27,7 +27,11 @@ async function main() {
   const vobiz = createVobizClient();
   const getClientForOrg = createVertexClientProvider();
   const recordings = createMinioRecordingStore();
-  const transcriber = createVertexTranscriber({ getClientForOrg, recordings });
+  const transcriber = createVertexTranscriber({
+    project: process.env.GOOGLE_CLOUD_PROJECT,
+    location: process.env.VERTEX_TRANSCRIPTION_LOCATION || "global",
+    recordings,
+  });
   const postCallAgent = createAttendancePostCallAgent({ getClientForOrg });
   const backend = createAttendanceBackendClient();
   const handlers = createAttendanceHandlers({
