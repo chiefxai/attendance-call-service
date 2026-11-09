@@ -78,7 +78,7 @@ for line in Path(sys.argv[1]).read_text().splitlines():
     if line and not line.lstrip().startswith("#") and "=" in line:
         key, value = line.split("=", 1)
         values[key] = value
-required = ["POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY", "VOBIZ_STREAM_SECRET", "GOOGLE_CLOUD_PROJECT", "DEFAULT_ORGANIZATION_ID"]
+required = ["POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY", "VOBIZ_STREAM_SECRET", "GOOGLE_CLOUD_PROJECT", "DEFAULT_ORGANIZATION_ID", "API_KEY_ADMIN_TOKEN"]
 missing = [key for key in required if not values.get(key) or "replace-with" in values[key].lower() or "example-project" in values[key].lower()]
 if missing:
     print("Fill these .env values before deployment: " + ", ".join(missing), file=sys.stderr)
