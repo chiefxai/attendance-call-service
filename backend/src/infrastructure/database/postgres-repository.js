@@ -500,19 +500,32 @@ class PostgresRepository {
     const column = stage === "check_in" ? "check_in_status" : "check_out_status";
     const stageKey = stage === "check_in" ? "checkIn" : "checkOut";
     await this.pool.query(
-      `UPDATE attendance_sessions SET ${column}=$2,
-       active_context=jsonb_set(active_context, ARRAY[$3], COALESCE(active_context-> $3,'{}'::jsonb) || $4::jsonb, true), updated_at=NOW()
-       WHERE id=$1`, [sessionId, status, stageKey, JSON.stringify(contextPatch)],
+      `WITH updated AS (
+         UPDATE attendance_sessions SET ${column}=$2,
+          active_context=jsonb_set(active_context, ARRAY[$3], COALESCE(active_context-> $3,'{}'::jsonb) || $4::jsonb, true), updated_at=NOW()
+          WHERE id=$1 RETURNING organization_id
+       )
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.stage_status',$5::jsonb FROM updated`,
+      [sessionId, status, stageKey, JSON.stringify(contextPatch), JSON.stringify({ stage, status, ...contextPatch })],
     );
   }
   async setRecordingObjectKey(callAttemptId, key, contentType) {
     await this.pool.query("UPDATE attendance_call_attempts SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1", [callAttemptId, key, contentType || null]);
   }
   async markSessionCompleted(sessionId) {
-    await this.pool.query("UPDATE attendance_sessions SET session_status='completed',updated_at=NOW() WHERE id=$1", [sessionId]);
+    await this.pool.query(
+      `WITH updated AS (UPDATE attendance_sessions SET session_status='completed',updated_at=NOW() WHERE id=$1 RETURNING organization_id)
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.session_completed','{}'::jsonb FROM updated`, [sessionId],
+    );
   }
   async markSessionException(sessionId) {
-    await this.pool.query("UPDATE attendance_sessions SET session_status='exception',updated_at=NOW() WHERE id=$1", [sessionId]);
+    await this.pool.query(
+      `WITH updated AS (UPDATE attendance_sessions SET session_status='exception',updated_at=NOW() WHERE id=$1 RETURNING organization_id)
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.session_exception','{}'::jsonb FROM updated`, [sessionId],
+    );
   }
   async getSessionArtifacts(sessionId) {
     const session = await this.getAttendanceSession(sessionId);
@@ -550,7 +563,15 @@ class PostgresRepository {
     };
   }
   async markBackendDelivered(sessionId, response) {
-    await this.pool.query("UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,backend_delivered_at=NOW(),updated_at=NOW() WHERE id=$1", [sessionId, JSON.stringify(response || {})]);
+    await this.pool.query(
+      `WITH updated AS (
+         UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,
+          backend_delivered_at=NOW(),updated_at=NOW() WHERE id=$1 RETURNING organization_id
+       )
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.backend_delivered',$3::jsonb FROM updated`,
+      [sessionId, JSON.stringify(response || {}), JSON.stringify({ status: response?.status || null })],
+    );
   }
 }
 
