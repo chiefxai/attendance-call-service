@@ -52,7 +52,7 @@ export function AttendancePage() {
         resultLabel="records"
         onClearFilters={() => { setStatus("all"); setLanguage("all"); }}
         filters={<>
-          <FormControl size="small" fullWidth><InputLabel>Verification status</InputLabel><Select label="Verification status" value={status} onChange={(event) => setStatus(event.target.value)}><MenuItem value="all">All statuses</MenuItem>{["confirmed", "calling", "follow_up", "not_answered", "review", "scheduled"].map((value) => <MenuItem key={value} value={value} sx={{ textTransform: "capitalize" }}>{value.replaceAll("_", " ")}</MenuItem>)}</Select></FormControl>
+          <FormControl size="small" fullWidth><InputLabel>Verification status</InputLabel><Select label="Verification status" value={status} onChange={(event) => setStatus(event.target.value)}><MenuItem value="all">All statuses</MenuItem>{["confirmed", "calling", "processing", "follow_up", "not_answered", "review", "scheduled"].map((value) => <MenuItem key={value} value={value} sx={{ textTransform: "capitalize" }}>{value.replaceAll("_", " ")}</MenuItem>)}</Select></FormControl>
           <FormControl size="small" fullWidth><InputLabel>Language</InputLabel><Select label="Language" value={language} onChange={(event) => setLanguage(event.target.value)}><MenuItem value="all">All languages</MenuItem>{["ta", "en", "ml", "te"].map((value) => <MenuItem key={value} value={value}>{value.toUpperCase()}</MenuItem>)}</Select></FormControl>
         </>}
       />
