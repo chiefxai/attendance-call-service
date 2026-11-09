@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, Chip, CircularProgress, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
@@ -11,11 +11,23 @@ import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { AxiosError } from "axios";
-import { createAgent, createAssignment, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AssignmentPayload } from "../api/client";
+import { createAgent, createAssignment, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AgentLanguagePrompt, type AssignmentPayload } from "../api/client";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 
 const languageOptions = [{ code: "ta", name: "Tamil" }, { code: "en", name: "English" }, { code: "ml", name: "Malayalam" }, { code: "te", name: "Telugu" }];
 const voiceOptions = ["Aoede", "Achird", "Algenib", "Anandhi", "Kavya", "Swarna"];
+const defaultLanguagePrompts: Record<string, AgentLanguagePrompt> = {
+  ta: { dialect: "Conversational Tamil (neutral Tamil Nadu)", systemPrompt: "Speak in natural spoken Tamil using short, familiar phrases. Avoid overly formal written Tamil." },
+  en: { dialect: "Indian English", systemPrompt: "Speak in clear, natural Indian English with short sentences and familiar local phrasing." },
+  ml: { dialect: "Conversational Kerala Malayalam", systemPrompt: "Speak in natural spoken Malayalam using familiar Kerala phrasing. Avoid overly formal written language." },
+  te: { dialect: "Conversational Telugu (neutral Andhra / Telangana)", systemPrompt: "Speak in natural spoken Telugu using short, familiar phrases and a neutral regional style." },
+};
+function resolveLanguagePrompts(saved?: Record<string, AgentLanguagePrompt>) {
+  return Object.fromEntries(languageOptions.map(({ code }) => [code, {
+    ...defaultLanguagePrompts[code],
+    ...(saved?.[code] || {}),
+  }])) as Record<string, AgentLanguagePrompt>;
+}
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const localInputValue = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const errorText = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
@@ -25,17 +37,20 @@ export function CallCenterPage() {
   const [agentId, setAgentId] = useState("");
   const [testForm, setTestForm] = useState({ employeeName: "", employeePhone: "", patientName: "", patientAddress: "", language: "ta", checkoutAt: localInputValue(new Date(Date.now() + 60 * 60_000)) });
   const [testSessionId, setTestSessionId] = useState("");
+  const [promptLanguage, setPromptLanguage] = useState("ta");
+  const [languagePrompts, setLanguagePrompts] = useState<Record<string, AgentLanguagePrompt>>(() => resolveLanguagePrompts());
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
   const calls = useQuery({ queryKey: ["call-center"], queryFn: fetchCallCenterData, refetchInterval: 5_000 });
   const summary = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary, refetchInterval: 5_000 });
   const selectedAgent = agents.data?.find((agent) => agent.id === agentId) || agents.data?.find((agent) => agent.active);
+  useEffect(() => { setLanguagePrompts(resolveLanguagePrompts(selectedAgent?.languagePrompts)); }, [selectedAgent?.id, selectedAgent?.languagePrompts]);
   const mutation = useMutation({
-    mutationFn: (value: { agentId: string; update: Pick<Agent, "language" | "voice" | "systemPrompt"> }) => updateAgent(value.agentId, value.update),
+    mutationFn: (value: { agentId: string; update: Pick<Agent, "language" | "voice" | "systemPrompt" | "languagePrompts"> }) => updateAgent(value.agentId, value.update),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
   });
   const createAgentMutation = useMutation({
-    mutationFn: (value: Pick<Agent, "name" | "language" | "voice" | "systemPrompt">) => createAgent(value),
+    mutationFn: (value: Pick<Agent, "name" | "language" | "voice" | "systemPrompt" | "languagePrompts">) => createAgent(value),
     onSuccess: async (created) => {
       setAgentId(created.id);
       await queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -49,6 +64,7 @@ export function CallCenterPage() {
       language: String(values.get("newAgentLanguage") || "ta"),
       voice: String(values.get("newAgentVoice") || "Achird"),
       systemPrompt: String(values.get("newAgentPrompt") || ""),
+      languagePrompts: resolveLanguagePrompts(),
     });
   };
   const testMutation = useMutation({
@@ -83,7 +99,7 @@ export function CallCenterPage() {
     event.preventDefault();
     const values = new FormData(event.currentTarget);
     if (!selectedAgent) return;
-    mutation.mutate({ agentId: selectedAgent.id, update: { language: String(values.get("language")), voice: String(values.get("voice")), systemPrompt: String(values.get("systemPrompt")) } });
+    mutation.mutate({ agentId: selectedAgent.id, update: { language: String(values.get("language")), voice: String(values.get("voice")), systemPrompt: String(values.get("systemPrompt")), languagePrompts } });
   };
   const activeCalls = calls.data?.activeCalls || [];
   const retryQueue = calls.data?.retryQueue || [];
@@ -143,7 +159,11 @@ export function CallCenterPage() {
           <Typography variant="body2" fontWeight={700}>{selectedAgent?.name} · {selectedAgent?.active ? "Active" : "Inactive"}</Typography>
           <FormControl size="small" fullWidth><InputLabel>Preferred language</InputLabel><Select name="language" label="Preferred language" defaultValue={selectedAgent?.language || "ta"} key={`${selectedAgent?.id}-language`}>{languageOptions.map((item) => <MenuItem key={item.code} value={item.code}>{item.name}</MenuItem>)}</Select></FormControl>
           <FormControl size="small" fullWidth><InputLabel>Vertex voice</InputLabel><Select name="voice" label="Vertex voice" defaultValue={selectedAgent?.voice || "Achird"} key={`${selectedAgent?.id}-voice`}>{voiceOptions.map((voice) => <MenuItem key={voice} value={voice}>{voice}</MenuItem>)}</Select></FormControl>
-          <TextField name="systemPrompt" label="Agent instructions" multiline minRows={4} defaultValue={selectedAgent?.systemPrompt || ""} key={`${selectedAgent?.id}-prompt`} helperText="Instructions are sent to the live voice agent." />
+          <TextField name="systemPrompt" label="General agent instructions" multiline minRows={3} defaultValue={selectedAgent?.systemPrompt || ""} key={selectedAgent?.id + "-prompt"} helperText="Shared guidance. Language-specific settings below take precedence for speaking style." />
+          <Typography variant="subtitle2" fontWeight={750}>Language-specific voice settings</Typography>
+          <FormControl size="small" fullWidth><InputLabel>Language to configure</InputLabel><Select label="Language to configure" value={promptLanguage} onChange={(event) => setPromptLanguage(event.target.value)}>{languageOptions.map((item) => <MenuItem key={item.code} value={item.code}>{item.name}</MenuItem>)}</Select></FormControl>
+          <TextField label="Dialect or accent" required value={languagePrompts[promptLanguage]?.dialect || ""} onChange={(event) => setLanguagePrompts((current) => ({ ...current, [promptLanguage]: { ...current[promptLanguage], dialect: event.target.value } }))} helperText="For example: Madurai Tamil, Kerala Malayalam, or Indian English." />
+          <TextField label={(languageOptions.find((item) => item.code === promptLanguage)?.name || "Language") + " agent prompt"} multiline minRows={4} value={languagePrompts[promptLanguage]?.systemPrompt || ""} onChange={(event) => setLanguagePrompts((current) => ({ ...current, [promptLanguage]: { ...current[promptLanguage], systemPrompt: event.target.value } }))} helperText="Used when an assignment calls this agent in the selected language." />
           {mutation.isError && <Alert severity="error">Settings were not saved: {errorMessage}</Alert>}{mutation.isSuccess && <Alert severity="success">Agent settings saved.</Alert>}
           <Button type="submit" variant="contained" startIcon={mutation.isPending ? <CircularProgress size={16} color="inherit" /> : <SaveRoundedIcon />} disabled={mutation.isPending || !selectedAgent?.active}>Save agent settings</Button>
         </Stack></Box>}
