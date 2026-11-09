@@ -161,6 +161,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       organizationId: session.organizationId, sessionId: session.id, callAttemptId,
       language: transcript.language || session.language, text: transcript.text,
     });
+    console.info(`[attendance-worker] transcript saved callAttempt=${callAttemptId} characters=${transcript.text.length} language=${transcript.language || session.language}`);
     await queue.enqueue("extract_intent", { callAttemptId }, { idempotencyKey: `extract:${callAttemptId}` });
   }
 
@@ -178,6 +179,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       transcript: transcript.text,
     });
     await repository.saveCallOutcome(callAttemptId, outcome);
+    console.info(`[attendance-worker] intent extracted callAttempt=${callAttemptId} stage=${attempt.stage} intent=${outcome.employeeIntent || "unknown"}`);
     await queue.enqueue("evaluate_attendance", { sessionId: session.id, callAttemptId }, {
       idempotencyKey: `decision:${callAttemptId}`,
     });
