@@ -24,19 +24,19 @@ const example = [
   "  }'",
 ].join("\n");
 const sessionArtifactsExample = [
-  "curl -X GET https://calls.elvoryx.in/api/call-service/assignments/<SESSION_ID>/artifacts \\\\",
-  "  -H \\"Authorization: Bearer <YOUR_API_KEY>\\"",
-].join("\\n");
+  "curl -X GET https://calls.elvoryx.in/api/call-service/assignments/<SESSION_ID>/artifacts \\",
+  "  -H \"Authorization: Bearer <YOUR_API_KEY>\"",
+].join("\n");
 const recordingExample = [
-  "curl -L https://calls.elvoryx.in/api/call-service/assignments/<SESSION_ID>/recordings/<ATTEMPT_ID> \\\\",
-  "  -H \\"Authorization: Bearer <YOUR_API_KEY>\\" \\\\",
+  "curl -L https://calls.elvoryx.in/api/call-service/assignments/<SESSION_ID>/recordings/<ATTEMPT_ID> \\",
+  "  -H \"Authorization: Bearer <YOUR_API_KEY>\" \\",
   "  --output call-recording.wav",
-].join("\\n");
+].join("\n");
 const callbackEnvironment = [
   "ATTENDANCE_BACKEND_URL=https://platform.example.com/api/attendance/call-completed",
   "ATTENDANCE_BACKEND_TOKEN=replace-with-platform-bearer-token",
   "ATTENDANCE_BACKEND_TIMEOUT_MS=15000",
-].join("\\n");
+].join("\n");
 const date = (value: string) => new Date(value).toLocaleString();
 
 function errorText(error: unknown) {
