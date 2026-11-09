@@ -5,53 +5,49 @@
 
 See [backend/README.md](backend/README.md) for backend integration and setup.
 
-## Local infrastructure and GCP VM setup
+## Docker setup on a GCP Linux VM
 
-Docker Compose runs PostgreSQL and private MinIO storage with persistent volumes.
-Copy `.env.docker.example` to `.env`, replace the three local passwords/secrets,
-then run:
+Docker Compose runs PostgreSQL, private MinIO storage, the API, a one-shot
+database migration, and the queue worker. Copy `.env.docker.example` to `.env`,
+replace the local passwords, set your GCP project and organization ID, and fill
+the Vobiz credentials and public HTTPS callback host. Make `DATABASE_URL` use
+the same database password as `POSTGRES_PASSWORD`. Then run:
+
+Generate local secrets with `openssl rand -hex 32`. Use the same generated
+PostgreSQL password in `POSTGRES_PASSWORD` and the password part of
+`DATABASE_URL`.
 
 ```sh
-docker compose up -d
+docker compose up --build -d
 docker compose ps
-docker compose exec -T postgres psql -U attendance -d attendance_calls < backend/migrations/001_attendance_schema.sql
+docker compose logs -f backend-migrate backend-api backend-worker
 ```
 
-The Compose ports bind to `127.0.0.1` so PostgreSQL and MinIO are not exposed to
-the public internet. The `minio-init` service creates a private recording bucket
-and a separate bucket-scoped application user. Set these in `backend/.env`:
+PostgreSQL and MinIO ports bind to `127.0.0.1`; the API also listens on the
+VM's loopback interface. Put an authenticated HTTPS reverse proxy in front of
+the API and configure it to forward HTTP and WebSocket upgrades to
+`127.0.0.1:3000`. Point Vobiz's answer and status webhooks at the public HTTPS
+routes. The reverse proxy must protect operations API routes; Vobiz answer and
+status callbacks are validated by Vobiz signatures. The `minio-init` service
+creates a private recordings bucket and a bucket-scoped application user.
+Only expose HTTPS in the GCP firewall; do not open ports 3000, 5432, 9000, or
+9001 to the internet.
 
-```env
-DATABASE_URL=postgres://attendance:YOUR_POSTGRES_PASSWORD@127.0.0.1:5432/attendance_calls
-MINIO_ENDPOINT=http://127.0.0.1:9000
-MINIO_REGION=us-east-1
-MINIO_BUCKET=attendance-recordings
-MINIO_ACCESS_KEY=YOUR_MINIO_ACCESS_KEY
-MINIO_SECRET_KEY=YOUR_MINIO_SECRET_KEY
-```
+The API and worker use Docker host networking on the Linux VM so Vertex AI can
+obtain Application Default Credentials from the attached VM service account
+without a JSON key. Attach a service account with Vertex AI access and enable
+the Vertex AI API in the project. Set `GOOGLE_CLOUD_PROJECT` and
+`GOOGLE_CLOUD_LOCATION` in `.env`. Set `ATTENDANCE_BACKEND_URL` and its token
+before using completed-session delivery; if unset, delivery jobs retry and
+eventually enter the queue's dead-letter state.
 
-For a GCP VM, attach a dedicated VM service account with Vertex AI access and
-enable the Vertex AI API in the project. The backend uses Application Default
-Credentials, so set `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` in
-`backend/.env`; do not create or copy a service-account JSON key onto the VM.
-Set Vobiz account credentials and the assigned outbound caller ID in the host
-application's configuration. Set `PUBLIC_BASE_URL`, `VOBIZ_ANSWER_URL`, and
-`VOBIZ_HANGUP_URL` to the VM's public HTTPS host and routes, and allow inbound
-HTTPS to the reverse proxy in the GCP firewall.
-
-The backend here is an embeddable Express module, not a complete standalone
-server: the host platform must mount the router, provide authenticated
-`req.orgId`, supply its organization-scoped Vertex client and backend delivery
-adapter, and start the worker with Vobiz/recording/post-call adapters. The
-frontend also expects the host API at `/api/call-service`. Finish those host
-integrations before expecting Compose to start the application itself. On a VM,
-running that host Node process directly on the VM lets Vertex ADC use the
-attached service account without mounting credential files into containers.
+Compose runs `backend-migrate` before starting the API and worker.
 
 Useful operations:
 
 ```sh
-docker compose logs -f postgres minio minio-init
+docker compose logs -f backend-api backend-worker
+docker compose restart backend-api backend-worker
 docker compose down                 # preserves named database/object volumes
-docker compose down -v              # permanently deletes local database and recordings
+docker compose down -v              # permanently deletes database and recordings
 ```

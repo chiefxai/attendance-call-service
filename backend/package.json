@@ -10,6 +10,11 @@
   "exports": {
     ".": "./index.js"
   },
+  "scripts": {
+    "start": "node src/server.js",
+    "worker": "node src/workers/start-worker.js",
+    "migrate": "node scripts/migrate.js"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1127.0",
     "@google/genai": "^2.15.0",

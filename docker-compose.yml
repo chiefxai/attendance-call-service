@@ -1,5 +1,53 @@
 name: athulya-attendance
 
+x-backend-environment: &backend-environment
+  NODE_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+  DEFAULT_ORGANIZATION_ID: ${DEFAULT_ORGANIZATION_ID:?Set DEFAULT_ORGANIZATION_ID in .env}
+  GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in .env}
+  GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+  APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
+  VOBIZ_AUTH_ID: ${VOBIZ_AUTH_ID:-}
+  VOBIZ_AUTH_TOKEN: ${VOBIZ_AUTH_TOKEN:-}
+  VOBIZ_API_BASE_URL: ${VOBIZ_API_BASE_URL:-https://api.vobiz.ai/api/v1}
+  VOBIZ_ANSWER_URL: ${VOBIZ_ANSWER_URL:-}
+  VOBIZ_HANGUP_URL: ${VOBIZ_HANGUP_URL:-}
+  VOBIZ_RECORDING_ALLOWED_HOSTS: ${VOBIZ_RECORDING_ALLOWED_HOSTS:-api.vobiz.ai}
+  VOBIZ_STREAM_SECRET: ${VOBIZ_STREAM_SECRET:?Set VOBIZ_STREAM_SECRET in .env}
+  VOBIZ_MEDIA_PATH: ${VOBIZ_MEDIA_PATH:-/api/call-service/media}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://127.0.0.1:9000}
+  MINIO_REGION: ${MINIO_REGION:-us-east-1}
+  MINIO_BUCKET: ${MINIO_BUCKET:-attendance-recordings}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
+  MINIO_SERVER_SIDE_ENCRYPTION: ${MINIO_SERVER_SIDE_ENCRYPTION:-}
+  MAX_RECORDING_DOWNLOAD_BYTES: ${MAX_RECORDING_DOWNLOAD_BYTES:-104857600}
+  VERTEX_CALL_MODEL: ${VERTEX_CALL_MODEL:-gemini-2.5-flash}
+  VERTEX_SUMMARY_MODEL: ${VERTEX_SUMMARY_MODEL:-gemini-2.5-flash}
+  VERTEX_TRANSCRIPTION_MODEL: ${VERTEX_TRANSCRIPTION_MODEL:-gemini-2.5-flash}
+  VERTEX_TTS_MODEL: ${VERTEX_TTS_MODEL:-gemini-2.5-flash-preview-tts}
+  VERTEX_LIVE_AUDIO_MODEL: ${VERTEX_LIVE_AUDIO_MODEL:-gemini-live-2.5-flash-native-audio}
+  CALL_MAX_CONSECUTIVE_NO_ANSWER: ${CALL_MAX_CONSECUTIVE_NO_ANSWER:-5}
+  CALL_RETRY_INITIAL_MINUTES: ${CALL_RETRY_INITIAL_MINUTES:-5}
+  CALL_RETRY_MULTIPLIER: ${CALL_RETRY_MULTIPLIER:-1.2}
+  CALL_RETRY_MAX_MINUTES: ${CALL_RETRY_MAX_MINUTES:-30}
+  RECORDING_READY_POLL_MS: ${RECORDING_READY_POLL_MS:-15000}
+  RECORDING_READY_MAX_POLLS: ${RECORDING_READY_MAX_POLLS:-4}
+  MAX_CONCURRENT_CALLS: ${MAX_CONCURRENT_CALLS:-20}
+  CALL_CAPACITY_POLL_MS: ${CALL_CAPACITY_POLL_MS:-2000}
+  CALL_SLOT_TTL_MINUTES: ${CALL_SLOT_TTL_MINUTES:-180}
+  QUEUE_WORKER_CONCURRENCY: ${QUEUE_WORKER_CONCURRENCY:-4}
+  QUEUE_POLL_MS: ${QUEUE_POLL_MS:-500}
+  QUEUE_LEASE_MS: ${QUEUE_LEASE_MS:-60000}
+  QUEUE_MAX_ATTEMPTS: ${QUEUE_MAX_ATTEMPTS:-8}
+  QUEUE_RETRY_INITIAL_MS: ${QUEUE_RETRY_INITIAL_MS:-1000}
+  QUEUE_RETRY_MULTIPLIER: ${QUEUE_RETRY_MULTIPLIER:-2}
+  QUEUE_RETRY_MAX_MS: ${QUEUE_RETRY_MAX_MS:-60000}
+  ATTENDANCE_BACKEND_URL: ${ATTENDANCE_BACKEND_URL:-}
+  ATTENDANCE_BACKEND_TOKEN: ${ATTENDANCE_BACKEND_TOKEN:-}
+  ATTENDANCE_BACKEND_TIMEOUT_MS: ${ATTENDANCE_BACKEND_TIMEOUT_MS:-15000}
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -58,6 +106,59 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-attendance-recordings}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
+
+  backend-migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    network_mode: host
+    restart: "no"
+    environment: *backend-environment
+    command: ["node", "scripts/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      <<: *backend-environment
+      PORT: ${API_PORT:-3000}
+      API_BIND_HOST: 127.0.0.1
+    command: ["node", "src/server.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      backend-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    network_mode: host
+    restart: unless-stopped
+    environment: *backend-environment
+    command: ["node", "src/workers/start-worker.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      backend-migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

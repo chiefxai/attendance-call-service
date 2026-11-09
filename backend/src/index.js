@@ -15,6 +15,7 @@ module.exports = {
   ...require("./infrastructure/database/postgres-repository"),
   ...require("./infrastructure/database/postgres-queue"),
   ...require("./infrastructure/storage/minio-recordings"),
+  ...require("./infrastructure/integrations/attendance-backend-client"),
   ...require("./infrastructure/telephony/vobiz-client"),
   ...require("./infrastructure/telephony/vobiz-signature"),
   ...require("./agents/vertex-agent"),

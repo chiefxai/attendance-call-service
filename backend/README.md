@@ -11,7 +11,9 @@ it expects the host to set `req.orgId` after authentication.
 ```text
 backend/
 ├── index.js                         # stable package entry point
+├── Dockerfile                       # production Node image
 ├── migrations/                      # ordered PostgreSQL schema migrations
+├── scripts/migrate.js               # idempotent schema migration command
 ├── src/
 │   ├── api/                          # Express routes and request validation
 │   ├── agents/                       # Vertex AI call and post-call agents
@@ -19,10 +21,12 @@ backend/
 │   ├── domain/attendance/            # attendance decisions and workflow
 │   ├── domain/repository-contract.js # persistence boundary
 │   ├── infrastructure/database/      # PostgreSQL pool, repository, queue
+│   ├── infrastructure/integrations/  # external attendance delivery client
 │   ├── infrastructure/storage/       # MinIO recording adapter
 │   ├── infrastructure/telephony/     # Vobiz client and webhook signatures
 │   ├── realtime/                     # Vobiz media ↔ Vertex Live bridge
-│   ├── workers/                      # durable queue consumer
+│   ├── workers/                      # queue consumer and worker bootstrap
+│   ├── server.js                      # standalone Express API bootstrap
 │   └── index.js                      # public module exports
 └── package.json
 ```
@@ -64,9 +68,26 @@ Keep the module's routes behind your platform's authentication and workspace
 permission middleware. The assignment endpoint validates the organization and
 active agent before scheduling employee calls.
 
+## Docker runtime
+
+The root `docker-compose.yml` starts PostgreSQL, MinIO, the migration runner,
+the standalone API, and a separate queue worker. The API/worker containers use
+host networking for GCE VM Application Default Credentials; the API binds to
+`127.0.0.1`, so publish it through an authenticated HTTPS reverse proxy that
+supports WebSocket upgrades. Keep `/answer` and `/webhooks/call-status` reachable
+by Vobiz; the routes validate Vobiz signatures. `DEFAULT_ORGANIZATION_ID`
+selects the tenant for standalone API requests. Existing host applications can
+continue mounting the Express router and setting `req.orgId` through their own
+authentication middleware.
+
+The API and worker use `createAttendanceBackendClient()` for final attendance
+delivery. Configure `ATTENDANCE_BACKEND_URL` and `ATTENDANCE_BACKEND_TOKEN`; the
+client sends an idempotency key with each request. The Docker worker can start
+without that URL, but delivery jobs will retry until it is configured.
+
 ## Durable queue and assignment flow
 
-Apply `migrations/001_attendance_schema.sql` through your database migration process. `PostgresJobQueue`
+The Compose migration service applies `migrations/001_attendance_schema.sql` before the API or worker starts. For host deployments, apply that migration through your existing migration process. `PostgresJobQueue`
 uses row locks with `SKIP LOCKED`, leases, idempotency keys, retries, and
 dead-letter state. Run API and worker processes separately. Due check-in and
 check-out calls are durable jobs; after a worker crash, a job can be claimed
