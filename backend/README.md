@@ -113,7 +113,12 @@ caller ID, and scheduled shift times. It schedules employee calls at check-in
 and check-out. The patient phone may be stored for future use, but is not
 dialed. Vobiz status events enqueue `process_call_result`; answered calls flow
 through `transcribe_call`, `extract_intent`, and `evaluate_attendance`. Once
-both stages are confirmed, the service queues backend delivery. It clears only
+both stages are confirmed, the service queues a POST to `ATTENDANCE_BACKEND_URL`
+with the session, call attempts, and transcripts. The request uses
+`ATTENDANCE_BACKEND_TOKEN` as a Bearer token when configured and includes an
+`Idempotency-Key` so the receiving platform can safely handle retries. Failed
+requests stay in the durable queue and retry. The receiver can use the service
+API key to fetch logs and recordings from the artifacts routes. It clears only
 the active cache entry after successful delivery; PostgreSQL history remains
 subject to the retention policy.
 
@@ -198,6 +203,8 @@ and [`postCallAgents`](https://github.com/chiefxai/crm-backend-test/tree/main/sr
 - `POST /assignments` to create a scheduled employee check-in/check-out session
 - `GET /assignments` to list organization-scoped attendance sessions
 - `GET /assignments/:id/status` to read attendance status and not-answered flags
+- `GET /assignments/:id/artifacts` to retrieve session details, call attempts, transcripts, and audit logs
+- `GET /assignments/:id/recordings/:attemptId` to stream an authorized recording from private MinIO
 - `GET /dashboard/summary` for daily attendance, call, concurrency, and queue metrics
 - `GET /staff` and `GET /patients` for directory views derived from assignments
 - `GET /supervision-queue` for sessions with unanswered or review statuses
