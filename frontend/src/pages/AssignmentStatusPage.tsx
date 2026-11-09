@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
 function statusColor(status: string): "success" | "error" | "warning" | "default" {
   if (status === "confirmed" || status === "completed") return "success";
   if (status === "not_answered" || status === "review" || status === "exception") return "error";
-  if (status === "calling" || status === "follow_up") return "warning";
+  if (status === "calling" || status === "processing" || status === "follow_up") return "warning";
   return "default";
 }
 
@@ -37,6 +37,10 @@ export function AssignmentStatusPage() {
           {[{ label: "Check-in", value: query.data.checkIn }, { label: "Check-out", value: query.data.checkOut }].map((stage) => <Grid key={stage.label} size={{ xs: 12, md: 6 }}><Card><CardContent sx={{ p: 3 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="h6">{stage.label}</Typography><Chip color={statusColor(stage.value.status)} label={stage.value.flag ? "Not answered" : stage.value.status.replaceAll("_", " ")} sx={{ textTransform: "capitalize", fontWeight: 650 }} /></Stack>
             <Box sx={{ minHeight: 100, display: "grid", placeItems: "center", py: 2 }}>{stage.value.status === "confirmed" ? <CheckCircleRoundedIcon color="success" sx={{ fontSize: 42 }} /> : stage.value.flag ? <ErrorOutlineRoundedIcon color="error" sx={{ fontSize: 42 }} /> : <ScheduleRoundedIcon color="disabled" sx={{ fontSize: 42 }} />}</Box>
+            {stage.value.status === "processing" && <Alert severity="info" sx={{ mb: 2 }}>Call ended. Recording and attendance details are being processed.</Alert>}
+            {stage.value.status === "calling" && <Alert severity="warning" sx={{ mb: 2 }}>The outbound call is in progress.</Alert>}
+            {stage.value.status === "scheduled" && stage.value.scheduledAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Call scheduled for {new Date(stage.value.scheduledAt).toLocaleString()}</Typography>}
+            {stage.value.status === "follow_up" && stage.value.nextCallAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Next call scheduled for {new Date(stage.value.nextCallAt).toLocaleString()}</Typography>}
             <Typography variant="body2" color="text.secondary">Reported time</Typography><Typography fontWeight={650}>{stage.value.reportedAt ? new Date(stage.value.reportedAt).toLocaleString() : "Not confirmed"}</Typography>
           </CardContent></Card></Grid>)}
         </Grid>
