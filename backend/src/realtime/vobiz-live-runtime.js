@@ -21,15 +21,6 @@ function xmlEscape(value) {
   return String(value).replace(/[<>&"']/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[char]);
 }
 
-// Gemini Live audio/pcm is signed 16-bit little-endian. Vobiz's
-// audio/x-l16 stream uses network (big-endian) byte order.
-function swapPcm16ByteOrder(data) {
-  const pcm = Buffer.from(data);
-  const alignedLength = pcm.length - (pcm.length % 2);
-  if (alignedLength !== pcm.length) return pcm.subarray(0, alignedLength).swap16();
-  return pcm.swap16();
-}
-
 function createToken({ callId, sessionId, callAttemptId, stage }, secret, ttlSeconds = 600) {
   if (!secret) throw new Error("VOBIZ_STREAM_SECRET or VOBIZ_AUTH_TOKEN must be configured");
   const payload = Buffer.from(JSON.stringify({ callId, sessionId, callAttemptId, stage, exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString("base64url");
@@ -107,7 +98,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       streamUrl.protocol = wsProtocol;
       streamUrl.searchParams.set("token", token);
       res.set("Content-Type", "text/xml; charset=utf-8");
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
     } catch (error) {
       return res.status(error.status || 503).send("Unable to initialize the voice session");
     }
@@ -168,6 +159,11 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     let generatedAudioParts = 0;
     let playbackTurn = 0;
     let checkpointFrameOffset = 0;
+    let latestCheckpoint = null;
+    let pendingHangupCheckpoint = null;
+    let hangupRequested = false;
+    let hangupScheduled = false;
+    const playedCheckpoints = new Set();
     const pendingAudio = [];
     const seenToolCalls = new Set();
     startTimer = setTimeout(() => { if (!streamId) vobizWs.close(1008, "Missing Vobiz start event"); }, 10_000);
@@ -193,22 +189,44 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       const alignedLength = data.length - (data.length % 2);
       for (let offset = 0; offset < alignedLength; offset += OUTPUT_FRAME_BYTES) {
         const frame = data.subarray(offset, Math.min(offset + OUTPUT_FRAME_BYTES, alignedLength));
-        const vobizPcm = swapPcm16ByteOrder(frame);
-        safeSend({ event: "playAudio", media: { contentType: "audio/x-l16", sampleRate: OUTPUT_RATE, payload: vobizPcm.toString("base64") } });
+        safeSend({ event: "playAudio", media: { contentType: "audio/x-l16", sampleRate: OUTPUT_RATE, payload: frame.toString("base64") } });
         outboundFrames += 1;
-        if (outboundFrames === 1) console.info(`[vobiz-live] first audio frame sent call=${token.callId} bytes=${vobizPcm.length} sampleRate=${OUTPUT_RATE}`);
+        if (outboundFrames === 1) console.info(`[vobiz-live] first audio frame sent call=${token.callId} bytes=${frame.length} sampleRate=${OUTPUT_RATE}`);
       }
     }
-    async function endCallAfterGoodbye(call) {
-      if (seenToolCalls.has(call.id)) return;
-      seenToolCalls.add(call.id);
-      if (call.name !== "end_call") return;
+    function requestHangupAfterPlayback(checkpoint) {
+      if (!hangupRequested || !checkpoint || hangupScheduled) return;
+      pendingHangupCheckpoint = checkpoint;
+      if (!playedCheckpoints.has(checkpoint)) return;
+      hangupScheduled = true;
+      console.info(`[vobiz-live] goodbye playback confirmed; hanging up call=${token.callId} checkpoint=${checkpoint}`);
       setTimeout(() => {
-        vobiz.hangupCall(token.callId).catch((error) => console.error("[vobiz-live] hangup failed", error.message));
-      }, 2500);
+        vobiz.hangupCall(token.callId).catch((error) => console.error(`[vobiz-live] hangup failed call=${token.callId}`, error.message));
+      }, 250);
+    }
+    async function endCallAfterGoodbye(call) {
+      if (call.name !== "end_call" || seenToolCalls.has(call.id)) return;
+      seenToolCalls.add(call.id);
+      console.info(`[vobiz-live] end_call requested call=${token.callId} generatedAudioParts=${generatedAudioParts} latestCheckpoint=${latestCheckpoint || "none"}`);
+      if (generatedAudioParts === 0) {
+        console.warn(`[vobiz-live] ignored end_call before any speech call=${token.callId}`);
+        try {
+          await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: false, reason: "Speak to the employee before ending the call." } } }] });
+          liveSession?.sendClientContent({
+            turns: [{ role: "user", parts: [{ text: "You have not spoken yet. Greet the employee in the required language and begin the attendance check now." }] }],
+            turnComplete: true,
+          });
+        } catch (error) { console.error(`[vobiz-live] rejected early end_call call=${token.callId}`, error.message); }
+        return;
+      }
+      hangupRequested = true;
       try {
         await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: true, ending: true } } }] });
-      } catch (error) { console.error("[vobiz-live] end-call tool response failed", error.message); }
+      } catch (error) { console.error(`[vobiz-live] end-call tool response failed call=${token.callId}`, error.message); }
+      // end_call can arrive beside the final goodbye audio. Do not reuse the
+      // previous turn's checkpoint while this turn still has uncheckpointed
+      // frames, or its already-played acknowledgement can cut off the goodbye.
+      if (latestCheckpoint && outboundFrames === checkpointFrameOffset) requestHangupAfterPlayback(latestCheckpoint);
     }
     function startLiveSession() {
       if (liveSession) return;
@@ -259,8 +277,6 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
                 for (const audio of pendingAudio.splice(0)) liveSession.sendRealtimeInput({ media: { data: audio, mimeType: "audio/pcm;rate=16000" } });
               }
               if (response.serverContent?.interrupted) safeSend({ event: "clearAudio" });
-              const calls = response.toolCall?.functionCalls || [];
-              for (const call of calls) await endCallAfterGoodbye(call);
               for (const part of response.serverContent?.modelTurn?.parts || []) {
                 if (part.inlineData?.mimeType?.startsWith("audio/")) {
                   const audio = Buffer.from(part.inlineData.data, "base64");
@@ -268,14 +284,19 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
                   if (generatedAudioParts === 1) console.info(`[vobiz-live] first Gemini audio part call=${token.callId} mime=${part.inlineData.mimeType} bytes=${audio.length}`);
                   sendPcmAudio(audio);
                 }
+              }
+              const calls = response.toolCall?.functionCalls || [];
+              for (const call of calls) await endCallAfterGoodbye(call);
+              for (const part of response.serverContent?.modelTurn?.parts || []) {
                 if (part.functionCall) await endCallAfterGoodbye(part.functionCall);
               }
               if (response.serverContent?.turnComplete && outboundFrames > checkpointFrameOffset) {
                 playbackTurn += 1;
                 checkpointFrameOffset = outboundFrames;
-                const checkpoint = `gemini-turn-${playbackTurn}`;
-                safeSend({ event: "checkpoint", name: checkpoint });
-                console.info(`[vobiz-live] playback checkpoint sent call=${token.callId} name=${checkpoint}`);
+                latestCheckpoint = `gemini-turn-${playbackTurn}`;
+                safeSend({ event: "checkpoint", name: latestCheckpoint });
+                console.info(`[vobiz-live] playback checkpoint sent call=${token.callId} name=${latestCheckpoint}`);
+                if (hangupRequested) requestHangupAfterPlayback(latestCheckpoint);
               }
             },
             onerror: (error) => {
@@ -308,17 +329,19 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         console.info(`[vobiz-live] Vobiz stream started call=${token.callId} stream=${streamId} encoding=${mediaFormat.encoding} sampleRate=${mediaFormat.sampleRate}`);
         startLiveSession();
       } else if (message.event === "playedStream") {
-        console.info(`[vobiz-live] playback confirmed call=${token.callId} name=${message.name || message.playedStream?.name || "unknown"}`);
+        const checkpoint = message.name || message.playedStream?.name;
+        if (checkpoint) playedCheckpoints.add(checkpoint);
+        console.info(`[vobiz-live] playback confirmed call=${token.callId} name=${checkpoint || "unknown"}`);
+        if (checkpoint && checkpoint === pendingHangupCheckpoint) requestHangupAfterPlayback(checkpoint);
       } else if (message.event === "clearedAudio") {
         console.info(`[vobiz-live] playback cleared call=${token.callId}`);
       } else if (message.event === "media") {
         const payload = message.media?.payload;
         if (!payload) return;
         inboundFrames += 1;
-        const littleEndianPayload = swapPcm16ByteOrder(Buffer.from(payload, "base64")).toString("base64");
-        if (inboundFrames === 1) console.info(`[vobiz-live] first caller audio frame call=${token.callId} bytes=${Buffer.byteLength(littleEndianPayload, "base64")}`);
-        if (liveSession && setupComplete) liveSession.sendRealtimeInput({ media: { data: littleEndianPayload, mimeType: "audio/pcm;rate=16000" } });
-        else if (pendingAudio.length < 150) pendingAudio.push(littleEndianPayload);
+        if (inboundFrames === 1) console.info(`[vobiz-live] first caller audio frame call=${token.callId} bytes=${Buffer.byteLength(payload, "base64")}`);
+        if (liveSession && setupComplete) liveSession.sendRealtimeInput({ media: { data: payload, mimeType: "audio/pcm;rate=16000" } });
+        else if (pendingAudio.length < 150) pendingAudio.push(payload);
       }
     });
 
