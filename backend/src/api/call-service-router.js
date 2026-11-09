@@ -220,6 +220,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       });
       if (!attempt || attempt.genericCall) return res.status(404).json({ error: "Attendance call attempt not found" });
       await queue.enqueue("transcribe_call", { callAttemptId: attempt.id }, { idempotencyKey: `transcribe:${attempt.id}` });
+      console.info(`[vobiz-recording] completion accepted call=${providerCallId} attempt=${attempt.id} stage=${attempt.stage}`);
       res.status(200).json({ received: true });
     } catch (error) { fail(res, error); }
   });
