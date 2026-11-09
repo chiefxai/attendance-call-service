@@ -273,11 +273,13 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             },
             onmessage: async (response) => {
               if (!active) return;
+              try {
               if (response.setupComplete) {
                 setupComplete = true;
                 console.info(`[vobiz-live] Gemini Live setup complete call=${token.callId} model=${LIVE_MODEL}`);
-                sendGreeting();
-                for (const audio of pendingAudio.splice(0)) liveSession.sendRealtimeInput({ media: { data: audio, mimeType: "audio/pcm;rate=16000" } });
+                // Live.connect() can deliver this callback before its promise
+                // resolves and assigns liveSession. Defer session I/O until
+                // the await below has completed.
               }
               if (response.serverContent?.interrupted) safeSend({ event: "clearAudio" });
               for (const part of response.serverContent?.modelTurn?.parts || []) {
@@ -300,6 +302,10 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
                 safeSend({ event: "checkpoint", name: latestCheckpoint });
                 console.info(`[vobiz-live] playback checkpoint sent call=${token.callId} name=${latestCheckpoint}`);
                 if (hangupRequested) requestHangupAfterPlayback(latestCheckpoint);
+              }
+              } catch (error) {
+                console.error(`[vobiz-live] Gemini message handling failed call=${token.callId}`, error?.stack || error?.message || error);
+                try { vobizWs.close(1011, "Voice message processing failed"); } catch {}
               }
             },
             onerror: (error) => {
