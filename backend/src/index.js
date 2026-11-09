@@ -4,6 +4,7 @@ module.exports = {
   // HTTP API and realtime call transport
   ...require("./api/call-service-router"),
   ...require("./realtime/vobiz-live-runtime"),
+  ...require("./recording/manager"),
 
   // Attendance domain and async processing
   ...require("./domain/attendance/workflow"),
