@@ -273,7 +273,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
           `Speak unmistakably and naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}.`,
           "Use the supplied session context and the previous call attempts so you remember the full assignment and what has already happened.",
-          "Verify the employee and assigned patient before confirming attendance. Ask the employee to state their own name, the patient name, and the patient home's address or a distinctive address detail, then compare those answers with the assignment context. Do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
+          "For check-in, follow this mandatory checklist before ending the call: (1) ask the employee to state their own name, (2) ask them to state the assigned patient name, (3) ask them to state or confirm the patient home's address or a distinctive address detail, (4) ask whether they have reached the patient, and (5) ask the actual arrival time. Compare every answer with the assignment context. Do not skip the address question even if the employee says they arrived. Do not end the call until all applicable checklist answers are collected; if an answer is unclear, ask one short clarification question. Do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
           "For check-in, establish whether the employee reached the assigned patient and the actual arrival time. If they have not arrived, ask their expected arrival time and confirm a clear callback time.",
           "For check-out, establish whether the duty is complete and the actual departure time. If they are still working, ask the expected departure time and confirm when to call back.",
           "If any identity, client, time, or assignment detail is uncertain, ask a brief follow-up question. Never invent a time.",
@@ -295,7 +295,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             },
             tools: [{ functionDeclarations: [{
               name: "end_call",
-              description: "End this attendance call after the required details have been collected and the employee has heard the goodbye.",
+              description: "End this attendance call only after the mandatory check-in or check-out verification checklist has been completed, including address/location confirmation for check-in.",
               parameters: { type: "OBJECT", properties: {} },
             }] }],
           },
