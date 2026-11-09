@@ -194,6 +194,36 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     } catch (error) { fail(res, error); }
   });
 
+  // Vobiz posts the completed RecordStop event once the recording file is ready.
+  router.post("/recordings/callback", async (req, res) => {
+    try {
+      if (!await validateWebhook(req)) return res.status(401).json({ error: "Invalid Vobiz webhook signature" });
+      const eventName = String(req.body?.Event || "").toLowerCase();
+      if (eventName && eventName !== "recordstop") return res.status(200).json({ received: true, ignored: true });
+      const providerCallId = req.body?.CallUUID || req.body?.call_uuid || req.body?.RequestUUID;
+      const recordingUrl = req.body?.RecordFile || req.body?.RecordUrl || req.body?.RecordingUrl;
+      if (!providerCallId || !recordingUrl) return res.status(400).json({ error: "Call ID and completed recording URL are required" });
+      const statusEvent = {
+        CallUUID: providerCallId,
+        CallStatus: "completed",
+        EndTime: new Date().toISOString(),
+        RecordingUrl: recordingUrl,
+        RecordingDuration: req.body?.RecordingDuration || null,
+        RecordingDurationMs: req.body?.RecordingDurationMs || null,
+        RecordingID: req.body?.RecordingID || null,
+        Event: "RecordStop",
+      };
+      const attempt = await repository.updateCallByProviderId({
+        provider: "vobiz", providerCallId: String(providerCallId), status: "completed",
+        durationSeconds: req.body?.RecordingDuration || null,
+        endedAt: statusEvent.EndTime, rawEvent: statusEvent,
+      });
+      if (!attempt || attempt.genericCall) return res.status(404).json({ error: "Attendance call attempt not found" });
+      await queue.enqueue("transcribe_call", { callAttemptId: attempt.id }, { idempotencyKey: `transcribe:${attempt.id}` });
+      res.status(200).json({ received: true });
+    } catch (error) { fail(res, error); }
+  });
+
   // Vobiz posts call lifecycle fields here. Treat call IDs as provider data and
   // resolve them through the repository before updating tenant-owned records.
   router.post("/webhooks/call-status", async (req, res) => {
