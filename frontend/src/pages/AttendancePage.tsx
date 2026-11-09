@@ -39,7 +39,7 @@ export function AttendancePage() {
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Total scheduled" value={summary.data?.scheduledToday.toLocaleString() ?? "—"} detail="Today's assignments" icon={<GroupRoundedIcon />} /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Verified check-ins" value={summary.data?.checkInsConfirmed.toLocaleString() ?? "—"} detail="Confirmed arrival times" icon={<AssessmentRoundedIcon />} tint="#e5f5ee" accent="#178264" /></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Pending verification" value={summary.data?.checkInsPending.toLocaleString() ?? "—"} detail="Scheduled, calling, or follow-up" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Pending verification" value={summary.data?.checkInsPending.toLocaleString() ?? "—"} detail="Scheduled, calling, processing, or follow-up" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Needs attention" value={summary.data?.exceptions.toLocaleString() ?? "—"} detail="No-answer or review flags" icon={<CrisisAlertRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
     </Grid>
     <Card>
