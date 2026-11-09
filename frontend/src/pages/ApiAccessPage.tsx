@@ -32,6 +32,13 @@ const recordingExample = [
   "  -H \"Authorization: Bearer <YOUR_API_KEY>\" \\",
   "  --output call-recording.wav",
 ].join("\n");
+const completionPayloadExample = [
+  "{",
+  '  "session": { "id": "<SESSION_ID>", "assignmentId": "SHIFT-2026-001", "sessionStatus": "completed", "checkInStatus": "confirmed", "checkOutStatus": "confirmed" },',
+  '  "callAttempts": [{ "id": "<ATTEMPT_ID>", "stage": "check_in", "status": "completed", "durationSeconds": 42 }],',
+  '  "transcripts": [{ "callAttemptId": "<ATTEMPT_ID>", "language": "ta", "text": "...", "extraction": { "employeeIntent": "arrived" } }]',
+  "}",
+].join("\n");
 const callbackEnvironment = [
   "ATTENDANCE_BACKEND_URL=https://platform.example.com/api/attendance/call-completed",
   "ATTENDANCE_BACKEND_TOKEN=replace-with-platform-bearer-token",
@@ -177,6 +184,9 @@ export function ApiAccessPage() {
           <Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{callbackEnvironment}</Box>
         </Paper>
         <Typography variant="body2">The request uses <Box component="code">Content-Type: application/json</Box>, <Box component="code">Authorization: Bearer &lt;ATTENDANCE_BACKEND_TOKEN&gt;</Box>, and an <Box component="code">Idempotency-Key</Box> of <Box component="code">attendance-session:&lt;SESSION_ID&gt;</Box>. The token header is omitted if no token is configured; set it in production.</Typography>
+        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}>
+          <Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{completionPayloadExample}</Box>
+        </Paper>
         <Typography variant="body2">If the receiver returns a non-2xx response or times out, the durable worker retries the POST. Check delivery using <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/status</Box> and its <Box component="code">backendDeliveryStatus</Box> field.</Typography>
         <Typography variant="caption" color="text.secondary">The receiver should persist the idempotency key and return a 2xx response for duplicate requests without applying attendance twice. Recordings are retrieved separately using the session artifacts and recording endpoints above.</Typography>
       </Stack>
