@@ -1,5 +1,7 @@
 "use strict";
 
+const crypto = require("node:crypto");
+
 const { createVobizClient } = require("../infrastructure/telephony/vobiz-client");
 const { assertRepository } = require("../domain/repository-contract");
 const { verifyVobizWebhookSignature } = require("../infrastructure/telephony/vobiz-signature");
@@ -22,6 +24,30 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.use(express.json());
   router.use(express.urlencoded({ extended: false }));
   const validateWebhook = verifyWebhook || ((req) => verifyVobizWebhookSignature(req, process.env.VOBIZ_AUTH_TOKEN));
+  const validateAdminToken = (req) => {
+    const expected = Buffer.from(process.env.API_KEY_ADMIN_TOKEN || "");
+    const supplied = Buffer.from(String(req.get("x-api-admin-token") || ""));
+    return expected.length > 0 && expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
+  };
+  router.use(async (req, res, next) => {
+    if (req.method === "POST" && ["/answer", "/webhooks/call-status"].includes(req.path)) return next();
+    if (req.path === "/api-keys" || req.path.startsWith("/api-keys/")) {
+      if (!process.env.API_KEY_ADMIN_TOKEN) return res.status(503).json({ error: "API_KEY_ADMIN_TOKEN is not configured" });
+      if (!validateAdminToken(req)) return res.status(401).json({ error: "Valid X-API-Admin-Token is required" });
+      req.orgId = process.env.DEFAULT_ORGANIZATION_ID;
+      if (!req.orgId) return res.status(503).json({ error: "DEFAULT_ORGANIZATION_ID is not configured" });
+      return next();
+    }
+    const match = /^Bearer\\s+(.+)$/i.exec(String(req.get("authorization") || ""));
+    if (!match) return res.status(401).json({ error: "A valid API key in Authorization: Bearer <key> is required" });
+    const hash = crypto.createHash("sha256").update(match[1]).digest("hex");
+    try {
+      const organizationId = await repository.resolveApiKey(hash);
+      if (!organizationId) return res.status(401).json({ error: "API key is invalid or revoked" });
+      req.orgId = organizationId;
+      return next();
+    } catch (error) { return next(error); }
+  });
   const liveRuntime = createVobizLiveRuntime({ repository, vobiz, verifyWebhook: validateWebhook, getClientForOrg, recordings, queue });
   router.post("/answer", liveRuntime.answerHandler);
   router.handleVobizUpgrade = liveRuntime.handleUpgrade;
@@ -36,6 +62,32 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     return req.orgId;
   };
   const fail = (res, error) => res.status(error.status || 500).json({ error: error.message || "Request failed" });
+
+  router.post("/api-keys", async (req, res) => {
+    try {
+      const label = String(req.body?.label || "").trim();
+      if (!label || label.length > 80) return res.status(400).json({ error: "label must contain 1 to 80 characters" });
+      const secret = `athulya_live_${crypto.randomBytes(32).toString("base64url")}`;
+      const key = await repository.createApiKey(req.orgId, {
+        label,
+        prefix: secret.slice(0, 17),
+        hash: crypto.createHash("sha256").update(secret).digest("hex"),
+      });
+      res.status(201).json({ ...key, apiKey: secret });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/api-keys", async (req, res) => {
+    try { res.json(await repository.listApiKeys(req.orgId)); } catch (error) { fail(res, error); }
+  });
+
+  router.delete("/api-keys/:id", async (req, res) => {
+    try {
+      const revoked = await repository.revokeApiKey(req.orgId, req.params.id);
+      if (!revoked) return res.status(404).json({ error: "Active API key not found" });
+      res.json({ success: true });
+    } catch (error) { fail(res, error); }
+  });
 
   router.get("/dashboard/summary", async (req, res) => {
     try { res.json(await repository.getOperationsSummary(org(req))); } catch (error) { fail(res, error); }
