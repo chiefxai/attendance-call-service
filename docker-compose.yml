@@ -67,7 +67,7 @@ services:
       retries: 20
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: cgr.dev/chainguard/minio:latest
     command: ["server", "/data", "--console-address", ":9001"]
     restart: unless-stopped
     environment:
@@ -78,22 +78,18 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
 
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: cgr.dev/chainguard/minio-client:latest-dev
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started
     restart: "no"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - >-
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        until mc ready local; do sleep 2; done;
         mc mb --ignore-existing "local/$${MINIO_BUCKET}";
         mc anonymous set none "local/$${MINIO_BUCKET}";
         printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::%s/*"]},{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]}]}' "$${MINIO_BUCKET}" "$${MINIO_BUCKET}" > /tmp/attendance-policy.json;
@@ -160,6 +156,22 @@ services:
       backend-migrate:
         condition: service_completed_successfully
 
+  caddy:
+    image: caddy:2-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in .env or run scripts/deploy-vm.sh}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend-api:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   minio_data:
+  caddy_data:
+  caddy_config:
