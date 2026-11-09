@@ -70,7 +70,7 @@ export function ApiAccessPage() {
 
   return <Stack spacing={2.5}>
     <PageHeader eyebrow="PLATFORM INTEGRATION" title="API keys & docs" description="Create a scoped service key, connect this browser, and send duty assignments directly from your platform." />
-    <Alert severity="info">The integration API schedules both check-in and check-out calls. Keys are shown once, stored as hashes on the service, and can be revoked here. Keep the admin secret and API keys server-side in your platform.</Alert>
+    <Alert severity="info">The integration API schedules both check-in and check-out calls. Set API_KEY_ADMIN_TOKEN in the VM .env (generate one with openssl rand -hex 32) and restart the backend. Keys are shown once, stored as hashes on the service, and can be revoked here. Keep the admin secret and API keys server-side in your platform.</Alert>
 
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, lg: 5 }}>
