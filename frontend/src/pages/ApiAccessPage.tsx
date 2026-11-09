@@ -23,6 +23,20 @@ const example = [
   '    "patient": { "id": "PATIENT-2001", "name": "Patient name", "address": "Client service address" }',
   "  }'",
 ].join("\n");
+const sessionArtifactsExample = [
+  "curl -X GET https://calls.elvoryx.in/api/call-service/assignments/<SESSION_ID>/artifacts \\\\",
+  "  -H \\"Authorization: Bearer <YOUR_API_KEY>\\"",
+].join("\\n");
+const recordingExample = [
+  "curl -L https://calls.elvoryx.in/api/call-service/assignments/<SESSION_ID>/recordings/<ATTEMPT_ID> \\\\",
+  "  -H \\"Authorization: Bearer <YOUR_API_KEY>\\" \\\\",
+  "  --output call-recording.wav",
+].join("\\n");
+const callbackEnvironment = [
+  "ATTENDANCE_BACKEND_URL=https://platform.example.com/api/attendance/call-completed",
+  "ATTENDANCE_BACKEND_TOKEN=replace-with-platform-bearer-token",
+  "ATTENDANCE_BACKEND_TIMEOUT_MS=15000",
+].join("\\n");
 const date = (value: string) => new Date(value).toLocaleString();
 
 function errorText(error: unknown) {
@@ -124,6 +138,47 @@ export function ApiAccessPage() {
         </Paper>
         <Typography variant="body2">Accepted response: <Box component="code">202</Box> with <Box component="code">sessionId</Box>, status, and queued check-in/check-out stages. Staff and patient records are created from the assignment details.</Typography>
         <Typography variant="caption" color="text.secondary">Use the active agent UUID from the Agents endpoint. Times must include a timezone. Replace example IDs and phone numbers with your platform data. Store API keys in your backend secret manager and never put them in mobile or browser code.</Typography>
+      </Stack>
+    </SectionCard>
+
+    <Grid container spacing={2}>
+      <Grid size={{ xs: 12, lg: 6 }}>
+        <SectionCard title="Retrieve a session transcript and logs" subtitle="Use the session ID returned when creating an assignment. The response includes both attendance stages, call attempts, transcripts, extracted outcomes, and audit events.">
+          <Stack spacing={1.5}>
+            <Typography variant="body2">Endpoint: <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/artifacts</Box></Typography>
+            <Typography variant="body2">Authentication: <Box component="code">Authorization: Bearer &lt;API_KEY&gt;</Box>. The service API key must belong to the session organization.</Typography>
+            <Paper variant="outlined" sx={{ position: "relative", p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}>
+              <IconButton size="small" aria-label="Copy session artifacts example" onClick={() => copy(sessionArtifactsExample)} sx={{ position: "absolute", right: 8, top: 8, zIndex: 1 }}><ContentCopyRoundedIcon fontSize="small" /></IconButton>
+              <Box component="pre" sx={{ m: 0, pr: 5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{sessionArtifactsExample}</Box>
+            </Paper>
+            <Typography variant="caption" color="text.secondary">The response contains <Box component="code">session</Box>, <Box component="code">callAttempts</Box>, <Box component="code">transcripts</Box>, and <Box component="code">logs</Box>. Recording URLs are returned only for recordings already stored in private MinIO.</Typography>
+          </Stack>
+        </SectionCard>
+      </Grid>
+      <Grid size={{ xs: 12, lg: 6 }}>
+        <SectionCard title="Download a call recording" subtitle="Recordings are streamed from private storage through the authenticated service API.">
+          <Stack spacing={1.5}>
+            <Typography variant="body2">Endpoint: <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/recordings/&#123;ATTEMPT_ID&#125;</Box></Typography>
+            <Typography variant="body2">Authentication: <Box component="code">Authorization: Bearer &lt;API_KEY&gt;</Box>. The attempt must belong to the requested session.</Typography>
+            <Paper variant="outlined" sx={{ position: "relative", p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}>
+              <IconButton size="small" aria-label="Copy recording download example" onClick={() => copy(recordingExample)} sx={{ position: "absolute", right: 8, top: 8, zIndex: 1 }}><ContentCopyRoundedIcon fontSize="small" /></IconButton>
+              <Box component="pre" sx={{ m: 0, pr: 5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{recordingExample}</Box>
+            </Paper>
+            <Typography variant="caption" color="text.secondary">Use the recording URL from the artifacts response. A 404 means the recording is not available yet or the attempt does not belong to that session.</Typography>
+          </Stack>
+        </SectionCard>
+      </Grid>
+    </Grid>
+
+    <SectionCard title="Send completed attendance to your platform" subtitle="Configure your platform's receiving POST endpoint in the service VM environment.">
+      <Stack spacing={1.5}>
+        <Typography variant="body2">On completion, the service sends a POST when both check-in and check-out are confirmed. The request contains the session, call attempts, and transcripts.</Typography>
+        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}>
+          <Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{callbackEnvironment}</Box>
+        </Paper>
+        <Typography variant="body2">The request uses <Box component="code">Content-Type: application/json</Box>, <Box component="code">Authorization: Bearer &lt;ATTENDANCE_BACKEND_TOKEN&gt;</Box>, and an <Box component="code">Idempotency-Key</Box> of <Box component="code">attendance-session:&lt;SESSION_ID&gt;</Box>. The token header is omitted if no token is configured; set it in production.</Typography>
+        <Typography variant="body2">If the receiver returns a non-2xx response or times out, the durable worker retries the POST. Check delivery using <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/status</Box> and its <Box component="code">backendDeliveryStatus</Box> field.</Typography>
+        <Typography variant="caption" color="text.secondary">The receiver should persist the idempotency key and return a 2xx response for duplicate requests without applying attendance twice. Recordings are retrieved separately using the session artifacts and recording endpoints above.</Typography>
       </Stack>
     </SectionCard>
   </Stack>;
