@@ -14,35 +14,28 @@ import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import VerifiedUserRoundedIcon from "@mui/icons-material/VerifiedUserRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
+import VpnKeyRoundedIcon from "@mui/icons-material/VpnKeyRounded";
+import { ApiAccessPage } from "./pages/ApiAccessPage";
 import AssignmentLateRoundedIcon from "@mui/icons-material/AssignmentLateRounded";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import { AttendancePage } from "./pages/AttendancePage";
 import { CallCenterPage } from "./pages/CallCenterPage";
 import { DutySchedulesPage } from "./pages/DutySchedulesPage";
-import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { AssignmentStatusPage } from "./pages/AssignmentStatusPage";
 import { NewAssignmentPage } from "./pages/NewAssignmentPage";
 import { OverviewPage } from "./pages/OverviewPage";
-import { VerificationEnginePage } from "./pages/VerificationEnginePage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
-import { SupervisionQueuePage } from "./pages/SupervisionQueuePage";
-import { ApprovedLedgerPage } from "./pages/ApprovedLedgerPage";
 
 const drawerWidth = 252;
 const navigation = [
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
-  { label: "Attendance", path: "/attendance", icon: <FactCheckRoundedIcon /> },
-  { label: "Duty schedules", path: "/schedules", icon: <CalendarMonthRoundedIcon /> },
-  { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
-  { label: "Exceptions & alerts", path: "/exceptions", icon: <WarningAmberRoundedIcon /> },
-  { label: "Supervision queue", path: "/supervision", icon: <AssignmentLateRoundedIcon /> },
-  { label: "Approved ledger", path: "/ledger", icon: <FactCheckOutlinedIcon /> },
   { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
-  { label: "Verification engine", path: "/verification", icon: <VerifiedUserRoundedIcon /> },
-  { label: "New assignment", path: "/assignments/new", icon: <AssignmentIndRoundedIcon /> },
-  { label: "Agents", path: "/agents", icon: <GroupsRoundedIcon /> },
+  { label: "Duty schedules", path: "/schedules", icon: <CalendarMonthRoundedIcon /> },
+  { label: "Attendance", path: "/attendance", icon: <FactCheckRoundedIcon /> },
+  { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
+  { label: "API keys & docs", path: "/api-access", icon: <VpnKeyRoundedIcon /> },
 ];
 
 function App() {
@@ -102,14 +95,10 @@ function App() {
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/schedules" element={<DutySchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
-          <Route path="/exceptions" element={<ExceptionsPage />} />
-          <Route path="/supervision" element={<SupervisionQueuePage />} />
-          <Route path="/ledger" element={<ApprovedLedgerPage />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
-          <Route path="/verification" element={<VerificationEnginePage />} />
           <Route path="/assignments/new" element={<NewAssignmentPage />} />
-          <Route path="/agents" element={<OverviewPage showAgents />} />
+          <Route path="/api-access" element={<ApiAccessPage />} />
           <Route path="/sessions/:sessionId" element={<AssignmentStatusPage />} />
           <Route path="*" element={<OverviewPage />} />
         </Routes>
