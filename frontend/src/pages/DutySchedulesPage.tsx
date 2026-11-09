@@ -8,7 +8,7 @@ import CallMadeRoundedIcon from "@mui/icons-material/CallMadeRounded";
 import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import { fetchAttendance, fetchOperationsSummary } from "../api/client";
-import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
+import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 
 const dateTime = (value: string) => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
@@ -38,7 +38,25 @@ export function DutySchedulesPage() {
       {nextCalls.length ? <Grid container spacing={1.5}>{nextCalls.map((row) => <Grid key={row.sessionId} size={{ xs: 12, sm: 6, lg: 3 }}><Card variant="outlined" sx={{ p: 1.75, boxShadow: "none", borderColor: "#e6ebf2", cursor: "pointer" }} onClick={() => navigate(`/sessions/${row.sessionId}`)}><Stack direction="row" justifyContent="space-between"><Typography fontWeight={750}>{dateTime(row.scheduledStartAt)}</Typography><StatusChip status={row.checkIn.status} /></Stack><Typography variant="body2" sx={{ mt: 1.3, fontWeight: 650 }}>{row.employee.name}</Typography><Typography variant="caption" color="text.secondary">{row.patient.name} · {row.assignmentId}</Typography></Card></Grid>)}</Grid> : <Alert severity="info">No scheduled assignments are available yet.</Alert>}
     </Card>
     <Card>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ p: 2, borderBottom: "1px solid #e8edf3" }}><TextField size="small" label="Filter staff, patient, or assignment" value={search} onChange={(event) => setSearch(event.target.value)} sx={{ flex: 1 }} /><FormControl size="small" sx={{ minWidth: 160 }}><InputLabel>Shift</InputLabel><Select value={shift} label="Shift" onChange={(event) => setShift(event.target.value)}><MenuItem value="all">All shifts</MenuItem><MenuItem value="day">Day shift</MenuItem><MenuItem value="night">Night shift</MenuItem></Select></FormControl><Chip label={`${filtered.length} assignments`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} /></Stack>
+      <SearchFilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchLabel="Search staff, patient, or assignment"
+        activeFilters={Number(shift !== "all")}
+        resultCount={filtered.length}
+        resultLabel="assignments"
+        onClearFilters={() => setShift("all")}
+        filters={
+          <FormControl size="small" fullWidth>
+            <InputLabel>Shift</InputLabel>
+            <Select value={shift} label="Shift" onChange={(event) => setShift(event.target.value)}>
+              <MenuItem value="all">All shifts</MenuItem>
+              <MenuItem value="day">Day shift</MenuItem>
+              <MenuItem value="night">Night shift</MenuItem>
+            </Select>
+          </FormControl>
+        }
+      />
       {sessions.isLoading && <LinearProgress />}
       <TableContainer><Table size="small" aria-label="Duty schedule assignments"><TableHead><TableRow>{["Assignment / staff", "Patient", "Scheduled duty", "Check-in", "Check-out", "Language", "Session", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={row.sessionId} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{row.employee.name} · {row.employee.id || "ID unavailable"}</Typography></TableCell><TableCell>{row.patient.name}</TableCell><TableCell>{dateTime(row.scheduledStartAt)}<Typography variant="caption" color="text.secondary" display="block">to {dateTime(row.scheduledEndAt)}</Typography></TableCell><TableCell><StatusChip status={row.checkIn.status} /></TableCell><TableCell><StatusChip status={row.checkOut.status} /></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.sessionStatus} /></TableCell><TableCell><Button size="small" onClick={() => navigate(`/sessions/${row.sessionId}`)}>Details</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
       {sessions.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 4 }}>No assignments match these filters.</Typography>}
