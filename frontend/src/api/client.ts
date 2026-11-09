@@ -204,7 +204,7 @@ export async function createAgent(agent: Pick<Agent, "name" | "language" | "voic
   return response.data;
 }
 
-export async function updateAgent(agentId: string, update: Pick<Agent, "language" | "voice" | "systemPrompt" | "languagePrompts">) {
+export async function updateAgent(agentId: string, update: Pick<Agent, "name" | "language" | "voice" | "systemPrompt" | "languagePrompts">) {
   const response = await api.patch<Agent>(`/agents/${agentId}`, update);
   return response.data;
 }
