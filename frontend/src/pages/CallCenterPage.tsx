@@ -28,6 +28,10 @@ function resolveLanguagePrompts(saved?: Record<string, AgentLanguagePrompt>) {
     ...(saved?.[code] || {}),
   }])) as Record<string, AgentLanguagePrompt>;
 }
+function makeLanguagePrompt(language: string, dialect: string) {
+  const name = languageOptions.find((item) => item.code === language)?.name || "English";
+  return `Speak naturally in ${name} using the ${dialect || defaultLanguagePrompts[language]?.dialect || name} dialect. Use short, friendly, phone-ready phrases and familiar local wording. Ask one clear question at a time. Do not use slang that could sound disrespectful or unclear.`;
+}
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const localInputValue = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const errorText = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
@@ -37,16 +41,30 @@ export function CallCenterPage() {
   const [agentId, setAgentId] = useState("");
   const [testForm, setTestForm] = useState({ employeeName: "", employeePhone: "", patientName: "", patientAddress: "", language: "ta", checkoutAt: localInputValue(new Date(Date.now() + 60 * 60_000)) });
   const [testSessionId, setTestSessionId] = useState("");
-  const [promptLanguage, setPromptLanguage] = useState("ta");
-  const [languagePrompts, setLanguagePrompts] = useState<Record<string, AgentLanguagePrompt>>(() => resolveLanguagePrompts());
+  const [agentName, setAgentName] = useState("");
+  const [agentLanguage, setAgentLanguage] = useState("ta");
+  const [agentVoice, setAgentVoice] = useState("Achird");
+  const [agentDialect, setAgentDialect] = useState(defaultLanguagePrompts.ta.dialect);
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
   const calls = useQuery({ queryKey: ["call-center"], queryFn: fetchCallCenterData, refetchInterval: 5_000 });
   const summary = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary, refetchInterval: 5_000 });
   const selectedAgent = agents.data?.find((agent) => agent.id === agentId) || agents.data?.find((agent) => agent.active);
-  useEffect(() => { setLanguagePrompts(resolveLanguagePrompts(selectedAgent?.languagePrompts)); }, [selectedAgent?.id, selectedAgent?.languagePrompts]);
+  useEffect(() => {
+    setAgentName(selectedAgent?.name || "");
+    setAgentLanguage(selectedAgent?.language || "ta");
+    setAgentVoice(selectedAgent?.voice || "Achird");
+    const prompts = resolveLanguagePrompts(selectedAgent?.languagePrompts);
+    setAgentDialect(prompts[selectedAgent?.language || "ta"]?.dialect || defaultLanguagePrompts.ta.dialect);
+  }, [selectedAgent?.id, selectedAgent?.language, selectedAgent?.name, selectedAgent?.voice, selectedAgent?.languagePrompts]);
+  const changeAgentLanguage = (language: string) => {
+    setAgentLanguage(language);
+    const prompts = resolveLanguagePrompts(selectedAgent?.languagePrompts);
+    setAgentDialect(prompts[language]?.dialect || defaultLanguagePrompts[language].dialect);
+  };
+  const promptPreview = makeLanguagePrompt(agentLanguage, agentDialect);
   const mutation = useMutation({
-    mutationFn: (value: { agentId: string; update: Pick<Agent, "language" | "voice" | "systemPrompt" | "languagePrompts"> }) => updateAgent(value.agentId, value.update),
+    mutationFn: (value: { agentId: string; update: Pick<Agent, "name" | "language" | "voice" | "systemPrompt" | "languagePrompts"> }) => updateAgent(value.agentId, value.update),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
   });
   const createAgentMutation = useMutation({
@@ -56,16 +74,26 @@ export function CallCenterPage() {
       await queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
-  const submitNewAgent = (event: FormEvent<HTMLFormElement>) => {
+  const saveAgent = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    createAgentMutation.mutate({
-      name: String(values.get("newAgentName") || "").trim(),
-      language: String(values.get("newAgentLanguage") || "ta"),
-      voice: String(values.get("newAgentVoice") || "Achird"),
-      systemPrompt: String(values.get("newAgentPrompt") || ""),
-      languagePrompts: resolveLanguagePrompts(),
-    });
+    const languagePrompts = {
+      ...resolveLanguagePrompts(selectedAgent?.languagePrompts),
+      [agentLanguage]: { dialect: agentDialect.trim(), systemPrompt: promptPreview },
+    };
+    if (selectedAgent) {
+      mutation.mutate({
+        agentId: selectedAgent.id,
+        update: { name: agentName.trim(), language: agentLanguage, voice: agentVoice, systemPrompt: selectedAgent.systemPrompt || "", languagePrompts },
+      });
+    } else {
+      createAgentMutation.mutate({
+        name: agentName.trim(),
+        language: agentLanguage,
+        voice: agentVoice,
+        systemPrompt: "",
+        languagePrompts,
+      });
+    }
   };
   const testMutation = useMutation({
     mutationFn: createAssignment,
@@ -95,12 +123,7 @@ export function CallCenterPage() {
     testMutation.mutate(payload);
   };
   const errorMessage = mutation.error instanceof AxiosError ? mutation.error.response?.data?.error || mutation.error.message : mutation.error?.message;
-  const saveConfig = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    if (!selectedAgent) return;
-    mutation.mutate({ agentId: selectedAgent.id, update: { language: String(values.get("language")), voice: String(values.get("voice")), systemPrompt: String(values.get("systemPrompt")), languagePrompts } });
-  };
+
   const activeCalls = calls.data?.activeCalls || [];
   const retryQueue = calls.data?.retryQueue || [];
 
@@ -145,27 +168,20 @@ export function CallCenterPage() {
       <Grid size={{ xs: 12, lg: 5 }}><SectionCard title="Voice agent configuration" subtitle="Changes save to the selected workspace agent." action={<TuneRoundedIcon color="action" />}>
         {agents.isLoading && <LinearProgress />}
         {agents.isError && <Alert severity="error">Could not load agents: {agents.error.message}</Alert>}
-        {agents.isSuccess && agents.data.length === 0 && <Box component="form" onSubmit={submitNewAgent}><Stack spacing={1.5}>
-          <Alert severity="info">Create the first calling agent here. Its instructions and voice are used for scheduled and test calls.</Alert>
+        {agents.isSuccess && <Box component="form" onSubmit={saveAgent}><Stack spacing={1.5}>
+          {selectedAgent && agents.data.length > 1 && <FormControl size="small" fullWidth><InputLabel>Agent</InputLabel><Select label="Agent" value={selectedAgent.id} onChange={(event) => setAgentId(event.target.value)}>{agents.data.map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.name}</MenuItem>)}</Select></FormControl>}
+          {!selectedAgent && <Alert severity="info">Create the first calling agent. Its language, voice, and dialect settings will be used for scheduled and test calls.</Alert>}
           {createAgentMutation.isError && <Alert severity="error">Could not create agent: {errorText(createAgentMutation.error)}</Alert>}
-          <TextField name="newAgentName" label="Agent name" size="small" required />
-          <FormControl size="small" fullWidth><InputLabel>Default language</InputLabel><Select name="newAgentLanguage" label="Default language" defaultValue="ta">{languageOptions.map((item) => <MenuItem key={item.code} value={item.code}>{item.name}</MenuItem>)}</Select></FormControl>
-          <FormControl size="small" fullWidth><InputLabel>Vertex voice</InputLabel><Select name="newAgentVoice" label="Vertex voice" defaultValue="Achird">{voiceOptions.map((voice) => <MenuItem key={voice} value={voice}>{voice}</MenuItem>)}</Select></FormControl>
-          <TextField name="newAgentPrompt" label="Agent instructions" multiline minRows={3} helperText="Optional guidance added to the attendance call prompt." />
-          <Button type="submit" variant="contained" disabled={createAgentMutation.isPending}>{createAgentMutation.isPending ? "Creating…" : "Create calling agent"}</Button>
-        </Stack></Box>}
-        {agents.data && agents.data.length > 0 && <Box component="form" onSubmit={saveConfig}><Stack spacing={2}>
-          {agents.data.length > 1 && <FormControl size="small" fullWidth><InputLabel>Agent</InputLabel><Select label="Agent" value={selectedAgent?.id || ""} onChange={(event) => setAgentId(event.target.value)}>{agents.data.map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.name}</MenuItem>)}</Select></FormControl>}
-          <Typography variant="body2" fontWeight={700}>{selectedAgent?.name} · {selectedAgent?.active ? "Active" : "Inactive"}</Typography>
-          <FormControl size="small" fullWidth><InputLabel>Preferred language</InputLabel><Select name="language" label="Preferred language" defaultValue={selectedAgent?.language || "ta"} key={`${selectedAgent?.id}-language`}>{languageOptions.map((item) => <MenuItem key={item.code} value={item.code}>{item.name}</MenuItem>)}</Select></FormControl>
-          <FormControl size="small" fullWidth><InputLabel>Vertex voice</InputLabel><Select name="voice" label="Vertex voice" defaultValue={selectedAgent?.voice || "Achird"} key={`${selectedAgent?.id}-voice`}>{voiceOptions.map((voice) => <MenuItem key={voice} value={voice}>{voice}</MenuItem>)}</Select></FormControl>
-          <TextField name="systemPrompt" label="General agent instructions" multiline minRows={3} defaultValue={selectedAgent?.systemPrompt || ""} key={selectedAgent?.id + "-prompt"} helperText="Shared guidance. Language-specific settings below take precedence for speaking style." />
-          <Typography variant="subtitle2" fontWeight={750}>Language-specific voice settings</Typography>
-          <FormControl size="small" fullWidth><InputLabel>Language to configure</InputLabel><Select label="Language to configure" value={promptLanguage} onChange={(event) => setPromptLanguage(event.target.value)}>{languageOptions.map((item) => <MenuItem key={item.code} value={item.code}>{item.name}</MenuItem>)}</Select></FormControl>
-          <TextField label="Dialect or accent" required value={languagePrompts[promptLanguage]?.dialect || ""} onChange={(event) => setLanguagePrompts((current) => ({ ...current, [promptLanguage]: { ...current[promptLanguage], dialect: event.target.value } }))} helperText="For example: Madurai Tamil, Kerala Malayalam, or Indian English." />
-          <TextField label={(languageOptions.find((item) => item.code === promptLanguage)?.name || "Language") + " agent prompt"} multiline minRows={4} value={languagePrompts[promptLanguage]?.systemPrompt || ""} onChange={(event) => setLanguagePrompts((current) => ({ ...current, [promptLanguage]: { ...current[promptLanguage], systemPrompt: event.target.value } }))} helperText="Used when an assignment calls this agent in the selected language." />
-          {mutation.isError && <Alert severity="error">Settings were not saved: {errorMessage}</Alert>}{mutation.isSuccess && <Alert severity="success">Agent settings saved.</Alert>}
-          <Button type="submit" variant="contained" startIcon={mutation.isPending ? <CircularProgress size={16} color="inherit" /> : <SaveRoundedIcon />} disabled={mutation.isPending || !selectedAgent?.active}>Save agent settings</Button>
+          <TextField label="Agent name" size="small" required value={agentName} onChange={(event) => setAgentName(event.target.value)} />
+          <FormControl size="small" fullWidth><InputLabel>Language</InputLabel><Select label="Language" value={agentLanguage} onChange={(event) => changeAgentLanguage(event.target.value)}>{languageOptions.map((item) => <MenuItem key={item.code} value={item.code}>{item.name}</MenuItem>)}</Select></FormControl>
+          <FormControl size="small" fullWidth><InputLabel>Voice</InputLabel><Select label="Voice" value={agentVoice} onChange={(event) => setAgentVoice(event.target.value)}>{voiceOptions.map((voice) => <MenuItem key={voice} value={voice}>{voice}</MenuItem>)}</Select></FormControl>
+          <TextField label="Slang / dialect" size="small" required value={agentDialect} onChange={(event) => setAgentDialect(event.target.value)} helperText="For example: Madurai Tamil, casual Kerala Malayalam, or local Telugu." />
+          <TextField label="Generated voice prompt" multiline minRows={3} value={promptPreview} InputProps={{ readOnly: true }} helperText="Updates automatically when you change the language or slang/dialect." />
+          {mutation.isError && <Alert severity="error">Settings were not saved: {errorMessage}</Alert>}
+          {mutation.isSuccess && <Alert severity="success">Agent settings saved.</Alert>}
+          <Button type="submit" variant="contained" startIcon={(mutation.isPending || createAgentMutation.isPending) ? <CircularProgress size={16} color="inherit" /> : <SaveRoundedIcon />} disabled={mutation.isPending || createAgentMutation.isPending || !agentName.trim() || !agentDialect.trim() || Boolean(selectedAgent && !selectedAgent.active)}>
+            {mutation.isPending || createAgentMutation.isPending ? "Saving…" : selectedAgent ? "Save agent settings" : "Create calling agent"}
+          </Button>
         </Stack></Box>}
       </SectionCard></Grid>
     </Grid>
