@@ -179,7 +179,7 @@ export function CallCenterPage() {
           <TextField label="Generated voice prompt" multiline minRows={3} value={promptPreview} InputProps={{ readOnly: true }} helperText="Updates automatically when you change the language or slang/dialect." />
           {mutation.isError && <Alert severity="error">Settings were not saved: {errorMessage}</Alert>}
           {mutation.isSuccess && <Alert severity="success">Agent settings saved.</Alert>}
-          <Button type="submit" variant="contained" startIcon={(mutation.isPending || createAgentMutation.isPending) ? <CircularProgress size={16} color="inherit" /> : <SaveRoundedIcon />} disabled={mutation.isPending || createAgentMutation.isPending || !agentName.trim() || !agentDialect.trim() || Boolean(selectedAgent && !selectedAgent.active)}>
+          <Button type="submit" variant="contained" startIcon={(mutation.isPending || createAgentMutation.isPending) ? <CircularProgress size={16} color="inherit" /> : <SaveRoundedIcon />} disabled={mutation.isPending || createAgentMutation.isPending || !agentName.trim() || !agentDialect.trim()}>
             {mutation.isPending || createAgentMutation.isPending ? "Saving…" : selectedAgent ? "Save agent settings" : "Create calling agent"}
           </Button>
         </Stack></Box>}
