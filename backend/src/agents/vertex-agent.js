@@ -114,8 +114,13 @@ function createVertexCallAgent({ getClientForOrg, project, location } = {}) {
 
 function createVertexTranscriber({ getClientForOrg, project, location, recordings } = {}) {
   if (!recordings?.getObjectBuffer) throw new Error("A recording store with getObjectBuffer() is required");
-  const clientForOrg = createVertexClientProvider({ getClientForOrg, project, location });
-  const model = process.env.VERTEX_TRANSCRIPTION_MODEL || "gemini-2.5-flash";
+  // Keep transcription's global endpoint separate from the realtime caller's region.
+  const clientForOrg = createVertexClientProvider({
+    getClientForOrg,
+    project,
+    location: location || process.env.VERTEX_TRANSCRIPTION_LOCATION || "global",
+  });
+  const model = process.env.VERTEX_TRANSCRIPTION_MODEL || "gemini-3.1-flash-lite";
 
   async function transcribe(recording, { organizationId, language } = {}) {
     if (!organizationId || !recording?.key) throw new Error("organizationId and recording object key are required");
