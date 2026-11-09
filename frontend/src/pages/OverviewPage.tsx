@@ -13,6 +13,7 @@ import { fetchAgents, fetchAttendance, fetchOperationsSummary, type OperationsSu
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 
 const timeLabel = (value: string) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const metricValue = (value: number | undefined) => value?.toLocaleString() ?? "—";
 
 export function OverviewPage({ showAgents = false }: { showAgents?: boolean }) {
   const navigate = useNavigate();
