@@ -8,6 +8,55 @@ class PostgresRepository {
     this.pool = pool;
   }
 
+  async createApiKey(orgId, { label, prefix, hash }) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO service_api_keys (organization_id,label,key_prefix,key_hash)
+       VALUES ($1,$2,$3,$4) RETURNING id,organization_id,label,key_prefix,created_at,last_used_at,revoked_at`,
+      [orgId, label, prefix, hash],
+    );
+    return this.mapApiKey(rows[0]);
+  }
+
+  async listApiKeys(orgId) {
+    const { rows } = await this.pool.query(
+      `SELECT id,organization_id,label,key_prefix,created_at,last_used_at,revoked_at
+       FROM service_api_keys WHERE organization_id=$1 ORDER BY created_at DESC`,
+      [orgId],
+    );
+    return rows.map((row) => this.mapApiKey(row));
+  }
+
+  async resolveApiKey(hash) {
+    const { rows } = await this.pool.query(
+      `UPDATE service_api_keys SET last_used_at=NOW()
+       WHERE key_hash=$1 AND revoked_at IS NULL
+       RETURNING organization_id`,
+      [hash],
+    );
+    return rows[0]?.organization_id || null;
+  }
+
+  async revokeApiKey(orgId, id) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE service_api_keys SET revoked_at=NOW()
+       WHERE organization_id=$1 AND id=$2 AND revoked_at IS NULL`,
+      [orgId, id],
+    );
+    return rowCount > 0;
+  }
+
+  mapApiKey(row) {
+    return {
+      id: row.id,
+      organizationId: row.organization_id,
+      label: row.label,
+      prefix: row.key_prefix,
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at,
+      revokedAt: row.revoked_at,
+    };
+  }
+
   async listAgents(orgId) {
     const r = await this.pool.query("SELECT * FROM call_agents WHERE organization_id=$1 ORDER BY name", [orgId]);
     return r.rows.map((row) => ({ ...row, ...json(row.config), systemPrompt: row.system_prompt, language: row.language }));
