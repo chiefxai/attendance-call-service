@@ -22,7 +22,7 @@ export function StatusChip({ status }: { status: string }) {
   const normalized = status.toLowerCase().replaceAll("_", " ");
   const color = ["verified", "confirmed", "completed", "active", "synced", "delivered"].includes(normalized) ? "success"
     : ["not answered", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
-      : ["late", "retrying", "pending", "queued", "in progress", "high"].includes(normalized) ? "warning" : "default";
+      : ["late", "retrying", "pending", "queued", "in progress", "processing", "high"].includes(normalized) ? "warning" : "default";
   return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={normalized} sx={{ textTransform: "capitalize", fontWeight: 650 }} />;
 }
 
