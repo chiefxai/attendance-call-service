@@ -4,10 +4,27 @@ const crypto = require("node:crypto");
 const { URL } = require("node:url");
 const { WebSocketServer } = require("ws");
 const { createVertexClientProvider, formatSessionContext } = require("../agents/vertex-agent");
+const { createCallRecorder } = require("../recording/manager");
 
 const LIVE_MODEL = process.env.VERTEX_LIVE_AUDIO_MODEL || "gemini-live-2.5-flash-native-audio";
 const MEDIA_PATH = process.env.VOBIZ_MEDIA_PATH || "/api/call-service/media";
 const OUTPUT_RATE = 24_000;
+
+function downsample24kTo16k(pcm24) {
+  const inputSamples = Math.floor(pcm24.length / 2);
+  const outputSamples = Math.floor(inputSamples * 2 / 3);
+  const output = Buffer.allocUnsafe(outputSamples * 2);
+  for (let i = 0; i < outputSamples; i++) {
+    const position = i * 1.5;
+    const leftIndex = Math.floor(position);
+    const rightIndex = Math.min(inputSamples - 1, leftIndex + 1);
+    const fraction = position - leftIndex;
+    const left = pcm24.readInt16LE(leftIndex * 2);
+    const right = pcm24.readInt16LE(rightIndex * 2);
+    output.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(left + (right - left) * fraction))), i * 2);
+  }
+  return output;
+}
 const OUTPUT_FRAME_BYTES = OUTPUT_RATE * 2 * 40 / 1000; // 40 ms, mono, 16-bit PCM
 
 function timingSafeEqualText(a, b) {
@@ -41,8 +58,8 @@ function verifyToken(token, secret) {
   } catch { return null; }
 }
 
-function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebhook, mediaPath = MEDIA_PATH } = {}) {
-  if (!repository || !vobiz) throw new Error("repository and Vobiz client are required for live voice runtime");
+function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebhook, recordings, queue, mediaPath = MEDIA_PATH } = {}) {
+  if (!repository || !vobiz || !recordings?.storeCallRecordingBuffer || !queue?.enqueue) throw new Error("repository, Vobiz, recording storage and durable queue are required for live voice runtime");
   const clientForOrg = createVertexClientProvider({ getClientForOrg });
   const activeCalls = new Set();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
@@ -97,9 +114,8 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       const streamUrl = new URL(mediaPath, publicBase);
       streamUrl.protocol = wsProtocol;
       streamUrl.searchParams.set("token", token);
-      const recordingCallbackUrl = new URL("/api/call-service/recordings/callback", publicBase).toString();
       res.set("Content-Type", "text/xml; charset=utf-8");
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Record callbackUrl="${xmlEscape(recordingCallbackUrl)}" callbackMethod="POST" recordSession="true" redirect="false" fileFormat="wav" playBeep="true" maxLength="3600"/><Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
     } catch (error) {
       return res.status(error.status || 503).send("Unable to initialize the voice session");
     }
@@ -151,6 +167,8 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     const { token, session, attempt } = context;
     let streamId = null;
     let liveSession = null;
+    let recorder = null;
+    let recorderFinalizePromise = null;
     let setupComplete = false;
     let greetingSent = false;
     let active = true;
@@ -289,6 +307,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
                   const audio = Buffer.from(part.inlineData.data, "base64");
                   generatedAudioParts += 1;
                   if (generatedAudioParts === 1) console.info(`[vobiz-live] first Gemini audio part call=${token.callId} mime=${part.inlineData.mimeType} bytes=${audio.length}`);
+                  if (recorder) recorder.write(downsample24kTo16k(audio), { track: "agent" });
                   sendPcmAudio(audio);
                 }
               }
@@ -341,7 +360,28 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         streamId = message.start.streamId;
         clearTimeout(startTimer);
         console.info(`[vobiz-live] Vobiz stream started call=${token.callId} stream=${streamId} encoding=${mediaFormat.encoding} sampleRate=${mediaFormat.sampleRate}`);
-        startLiveSession();
+        recorder = createCallRecorder({
+          provider: "vobiz",
+          callId: attempt.id,
+          orgId: session.organizationId,
+          mode: process.env.RECORDING_MODE || "platform",
+          tempDir: process.env.RECORDING_TEMP_DIR || "/tmp/attendance-recordings",
+          uploadPlatformRecording: async (wavBuffer) => {
+            const object = await recordings.storeCallRecordingBuffer(wavBuffer, {
+              organizationId: session.organizationId,
+              sessionId: session.id,
+              callAttemptId: attempt.id,
+            });
+            await repository.setRecordingObjectKey(attempt.id, object.key, object.contentType);
+            console.info(`[vobiz-recording] platform recording stored attempt=${attempt.id} bytes=${object.sizeBytes} key=${object.key}`);
+            await queue.enqueue("transcribe_call", { callAttemptId: attempt.id }, { idempotencyKey: `transcribe:${attempt.id}` });
+            return object.key;
+          },
+        });
+        recorder.start().then(startLiveSession).catch((error) => {
+          console.error(`[vobiz-recording] recorder start failed attempt=${attempt.id}`, error?.message || error);
+          try { vobizWs.close(1011, "Recording initialization failed"); } catch {}
+        });
       } else if (message.event === "playedStream") {
         const checkpoint = message.name || message.playedStream?.name;
         if (checkpoint) playedCheckpoints.add(checkpoint);
@@ -353,7 +393,9 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         const payload = message.media?.payload;
         if (!payload) return;
         inboundFrames += 1;
-        if (inboundFrames === 1) console.info(`[vobiz-live] first caller audio frame call=${token.callId} bytes=${Buffer.byteLength(payload, "base64")}`);
+        const callerPcm = Buffer.from(payload, "base64");
+        recorder?.write(callerPcm, { track: "caller" });
+        if (inboundFrames === 1) console.info(`[vobiz-live] first caller audio frame call=${token.callId} bytes=${callerPcm.length}`);
         if (liveSession && setupComplete) liveSession.sendRealtimeInput({ media: { data: payload, mimeType: "audio/pcm;rate=16000" } });
         else if (pendingAudio.length < 150) pendingAudio.push(payload);
       }
@@ -364,6 +406,9 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       clearTimeout(startTimer);
       activeCalls.delete(token.callId);
       console.info(`[vobiz-live] stream closed call=${token.callId} code=${code} reason=${reason?.toString() || ""} inboundFrames=${inboundFrames} outboundFrames=${outboundFrames} generatedAudioParts=${generatedAudioParts}`);
+      recorderFinalizePromise ||= Promise.resolve(recorder?.finalize()).catch((error) => {
+        console.error(`[vobiz-recording] finalize failed attempt=${attempt.id}`, error?.message || error);
+      });
       repository.endCallStream(attempt.id).catch(() => {});
       try { liveSession?.close(); } catch {}
     });
@@ -371,6 +416,9 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       active = false;
       clearTimeout(startTimer);
       activeCalls.delete(token.callId);
+      recorderFinalizePromise ||= Promise.resolve(recorder?.finalize()).catch((error) => {
+        console.error(`[vobiz-recording] finalize failed attempt=${attempt.id}`, error?.message || error);
+      });
       repository.endCallStream(attempt.id).catch(() => {});
       try { liveSession?.close(); } catch {}
     });
