@@ -28,6 +28,8 @@ export interface AttendanceStageStatus {
   status: string;
   flag: "not_answered" | null;
   reportedAt: string | null;
+  scheduledAt?: string | null;
+  nextCallAt?: string | null;
 }
 
 export interface AssignmentStatus {
