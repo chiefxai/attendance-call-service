@@ -41,7 +41,9 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
 
   async function placeCall({ sessionId, stage, attemptNumber, capacityWaitCount = 0, consecutiveNoAnswer = 0 }) {
     const session = await repository.getAttendanceSession(sessionId);
-    if (!session || session.sessionStatus !== "active") return;
+    // A terminal result for one stage must not suppress the other scheduled
+    // stage. The session becomes an exception only after both stages settle.
+    if (!session || session.sessionStatus === "completed") return;
     const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
     if (["confirmed", "missed", "not_answered", "review"].includes(stageStatus)) return;
     const agent = await repository.getAgent(session.organizationId, session.agentId);
@@ -183,7 +185,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
 
   async function evaluateAttendance({ sessionId, callAttemptId }) {
     const session = await repository.getAttendanceSession(sessionId);
-    if (!session || session.sessionStatus !== "active") return;
+    if (!session || session.sessionStatus === "completed") return;
     if (callAttemptId) {
       const attempt = await repository.getCallAttempt(callAttemptId);
       const decision = chooseAttendanceAction(attempt.stage, attempt.outcome || {});
@@ -213,6 +215,10 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     if (current.checkInStatus === "confirmed" && current.checkOutStatus === "confirmed") {
       await repository.markSessionCompleted(sessionId);
       await queue.enqueue("deliver_attendance", { sessionId }, { idempotencyKey: `deliver:${sessionId}` });
+    } else {
+      const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
+      const bothStagesSettled = terminal.has(current.checkInStatus) && terminal.has(current.checkOutStatus);
+      if (bothStagesSettled) await repository.markSessionException(sessionId);
     }
   }
 
@@ -229,7 +235,9 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   async function evaluateSession({ sessionId }) {
     const session = await repository.getAttendanceSession(sessionId);
     if (!session) return;
-    if (["missed", "not_answered", "review"].includes(session.checkInStatus) || ["missed", "not_answered", "review"].includes(session.checkOutStatus)) {
+    const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
+    const bothStagesSettled = terminal.has(session.checkInStatus) && terminal.has(session.checkOutStatus);
+    if (bothStagesSettled && (session.checkInStatus !== "confirmed" || session.checkOutStatus !== "confirmed")) {
       await repository.markSessionException(sessionId);
     }
   }
