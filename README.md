@@ -8,7 +8,7 @@ See [backend/README.md](backend/README.md) for backend integration and setup.
 ## Deploy on a GCP Linux VM
 
 Docker Compose runs PostgreSQL, private MinIO storage, the API, a one-shot
-database migration, the queue worker, and Caddy. Caddy obtains and renews TLS
+database migration, the queue worker, the React frontend, and Caddy. Caddy obtains and renews TLS
 certificates automatically. Before deployment, reserve a static external IP for
 the VM, create a DNS A record for your calling hostname pointing to that IP,
 and allow inbound TCP 80 and 443 in the GCP firewall. Do not expose ports 3000,
@@ -28,7 +28,8 @@ chmod +x scripts/deploy-vm.sh
 ./scripts/deploy-vm.sh calls.example.com
 ```
 
-The script writes `PUBLIC_DOMAIN`, `PUBLIC_BASE_URL`, `VOBIZ_ANSWER_URL`, and
+The React operations UI is served at `https://<hostname>/`; `/api/*` and
+`/healthz` are routed to the backend API. The script writes `PUBLIC_DOMAIN`, `PUBLIC_BASE_URL`, `VOBIZ_ANSWER_URL`, and
 `VOBIZ_HANGUP_URL` into `.env`, validates Compose configuration, builds and
 starts the services, and checks `https://<hostname>/healthz`. It does not
 create DNS records or GCP firewall rules; those must be in place first. Point
