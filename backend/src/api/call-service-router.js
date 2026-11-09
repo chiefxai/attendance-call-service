@@ -78,10 +78,11 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     try {
       const organizationId = org(req);
       const body = req.body || {};
-      const required = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt"];
+      const required = ["assignmentId", "agentId", "language", "scheduledStartAt", "scheduledEndAt"];
       const missing = required.filter((key) => !body[key]);
-      if (missing.length || !body.employee?.id || !body.employee?.name || !body.employee?.phoneNumber || !body.patient?.id || !body.patient?.name || !body.patient?.address) {
-        return res.status(400).json({ error: "Assignment requires assignmentId, agentId, fromNumber, language, scheduledStartAt, scheduledEndAt, employee identity and phone, and patient identity and address" });
+      const fromNumber = body.fromNumber || process.env.VOBIZ_FROM_NUMBER;
+      if (missing.length || !fromNumber || !body.employee?.id || !body.employee?.name || !body.employee?.phoneNumber || !body.patient?.id || !body.patient?.name || !body.patient?.address) {
+        return res.status(400).json({ error: "Assignment requires assignmentId, agentId, language, scheduledStartAt, scheduledEndAt, employee identity and phone, patient identity and address, and either fromNumber or VOBIZ_FROM_NUMBER in the service environment" });
       }
       const startAt = new Date(body.scheduledStartAt);
       const endAt = new Date(body.scheduledEndAt);
@@ -92,7 +93,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       if (!agent?.active) return res.status(400).json({ error: "An active agent in this organization is required" });
       const session = await repository.createAttendanceSession({
         organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
-        agentId: body.agentId, fromNumber: body.fromNumber, language: body.language,
+        agentId: body.agentId, fromNumber, language: body.language,
         employee: body.employee, patient: body.patient, scheduledStartAt: startAt,
         scheduledEndAt: endAt, metadata: body.metadata || {},
       });
