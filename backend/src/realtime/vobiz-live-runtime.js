@@ -203,8 +203,8 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       greetingSent = true;
       const language = displayLanguage(session.language);
       const greeting = token.stage === "check_in"
-        ? "Greet the employee and explain that you are checking their home care shift arrival. Verify their identity and assigned patient, ask if they reached the patient, and capture the actual arrival time or expected arrival time."
-        : "Greet the employee and explain that you are checking completion of their home care shift. Verify their identity and assigned patient, ask if the duty is complete, and capture the actual departure time or expected departure time.";
+        ? "Greet the employee, say this is an attendance verification call, and ask exactly one first question: 'Please tell me your full name.' Do not summarize the checklist or end the call. Wait for the answer before asking the next question."
+        : "Greet the employee, say this is an attendance verification call, and ask exactly one first question: 'Please tell me your full name.' Do not summarize the checklist or end the call. Wait for the answer before asking the next question.";
       liveSession.sendClientContent({
         turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Begin the call now in ${language}. ${greeting} Keep responses short and natural for a phone conversation.` }] }],
         turnComplete: true,
@@ -273,11 +273,11 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
           `Speak unmistakably and naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}.`,
           "Use the supplied session context and the previous call attempts so you remember the full assignment and what has already happened.",
-          "For check-in, follow this mandatory checklist before ending the call: (1) ask the employee to state their own name, (2) ask them to state the assigned patient name, (3) ask them to state or confirm the patient home's address or a distinctive address detail, (4) ask whether they have reached the patient, and (5) ask the actual arrival time. Compare every answer with the assignment context. Do not skip the address question even if the employee says they arrived. Do not end the call until all applicable checklist answers are collected; if an answer is unclear, ask one short clarification question. Do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
+          "For check-in, use a strict one-question-at-a-time script and do not skip any step: (1) ask the employee to state their own full name, wait for the answer; (2) ask them to state the assigned patient full name, wait; (3) ask them to state or confirm the patient home's address or one distinctive address detail, wait; (4) ask whether they have reached the patient, wait; (5) ask the actual arrival time, wait. Ask these questions even if the employee volunteers information out of order. Never answer a question on the employee's behalf and never reveal the expected name or address before they answer. Compare every answer with the assignment context. Do not end the call until all five answers are collected and clear; if an answer is unclear, ask one short clarification question. Do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
           "For check-in, establish whether the employee reached the assigned patient and the actual arrival time. If they have not arrived, ask their expected arrival time and confirm a clear callback time.",
           "For check-out, establish whether the duty is complete and the actual departure time. If they are still working, ask the expected departure time and confirm when to call back.",
           "If any identity, client, time, or assignment detail is uncertain, ask a brief follow-up question. Never invent a time.",
-          "After collecting the required information, thank the employee, say goodbye, then call end_call.",
+          "Ask only one verification question per turn, wait for the employee's answer, and continue the checklist. After collecting all required information, summarize the verification result, ask if anything needs correction, then thank the employee, say goodbye, and call end_call.",
           "General agent instructions:", agent.systemPrompt || "Confirm attendance accurately and politely.",
           `Instructions for ${language}${dialect ? ` (${dialect})` : ""}:`, languageInstructions || `Use natural spoken ${language} and familiar local wording; remain clear and respectful.`,
           "Full session context:", formatSessionContext(agentContext),
