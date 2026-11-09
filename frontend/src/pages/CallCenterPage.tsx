@@ -49,7 +49,7 @@ export function CallCenterPage() {
   const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
   const calls = useQuery({ queryKey: ["call-center"], queryFn: fetchCallCenterData, refetchInterval: 5_000 });
   const summary = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary, refetchInterval: 5_000 });
-  const selectedAgent = agents.data?.find((agent) => agent.id === agentId) || agents.data?.find((agent) => agent.active);
+  const selectedAgent = agents.data?.find((agent) => agent.id === agentId) || agents.data?.find((agent) => agent.active) || agents.data?.[0];
   useEffect(() => {
     setAgentName(selectedAgent?.name || "");
     setAgentLanguage(selectedAgent?.language || "ta");
