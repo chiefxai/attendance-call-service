@@ -38,13 +38,8 @@ async function main() {
       res.status(503).json({ status: "unavailable" });
     }
   });
-  app.use("/api/call-service", (req, _res, next) => {
-    // Provider callbacks authenticate with Vobiz signatures inside the router.
-    const providerCallback = req.method === "POST"
-      && (req.path === "/answer" || req.path === "/webhooks/call-status");
-    if (!providerCallback) req.orgId = organizationId;
-    next();
-  }, router);
+  // Service routes require a scoped Bearer API key; Vobiz callbacks verify provider signatures in the router.
+  app.use("/api/call-service", router);
 
   const server = http.createServer(app);
   server.on("upgrade", (request, socket, head) => {
