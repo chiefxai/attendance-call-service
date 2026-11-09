@@ -38,7 +38,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       if (!req.orgId) return res.status(503).json({ error: "DEFAULT_ORGANIZATION_ID is not configured" });
       return next();
     }
-    const match = /^Bearer\\s+(.+)$/i.exec(String(req.get("authorization") || ""));
+    const match = /^Bearer\s+(.+)$/i.exec(String(req.get("authorization") || ""));
     if (!match) return res.status(401).json({ error: "A valid API key in Authorization: Bearer <key> is required" });
     const hash = crypto.createHash("sha256").update(match[1]).digest("hex");
     try {
