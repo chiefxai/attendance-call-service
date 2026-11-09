@@ -21,6 +21,15 @@ function xmlEscape(value) {
   return String(value).replace(/[<>&"']/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[char]);
 }
 
+// Gemini Live audio/pcm is signed 16-bit little-endian. Vobiz's
+// audio/x-l16 stream uses network (big-endian) byte order.
+function swapPcm16ByteOrder(data) {
+  const pcm = Buffer.from(data);
+  const alignedLength = pcm.length - (pcm.length % 2);
+  if (alignedLength !== pcm.length) return pcm.subarray(0, alignedLength).swap16();
+  return pcm.swap16();
+}
+
 function createToken({ callId, sessionId, callAttemptId, stage }, secret, ttlSeconds = 600) {
   if (!secret) throw new Error("VOBIZ_STREAM_SECRET or VOBIZ_AUTH_TOKEN must be configured");
   const payload = Buffer.from(JSON.stringify({ callId, sessionId, callAttemptId, stage, exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString("base64url");
@@ -59,6 +68,14 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     if (value.startsWith("te")) return "Telugu";
     if (value.startsWith("en")) return "English";
     return String(language || "English");
+  }
+
+  function speechLanguageCode(language) {
+    const value = String(language || "en").trim().toLowerCase();
+    if (value.startsWith("ta")) return "ta-IN";
+    if (value.startsWith("ml")) return "ml-IN";
+    if (value.startsWith("te")) return "te-IN";
+    return "en-IN";
   }
 
   async function answerHandler(req, res) {
@@ -146,6 +163,11 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     let greetingSent = false;
     let active = true;
     let startTimer;
+    let inboundFrames = 0;
+    let outboundFrames = 0;
+    let generatedAudioParts = 0;
+    let playbackTurn = 0;
+    let checkpointFrameOffset = 0;
     const pendingAudio = [];
     const seenToolCalls = new Set();
     startTimer = setTimeout(() => { if (!streamId) vobizWs.close(1008, "Missing Vobiz start event"); }, 10_000);
@@ -164,13 +186,17 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Begin the call now in ${language}. ${greeting} Keep responses short and natural for a phone conversation.` }] }],
         turnComplete: true,
       });
+      console.info(`[vobiz-live] greeting requested call=${token.callId} stage=${token.stage} language=${language}`);
     }
     function sendPcmAudio(data) {
       if (!active || !streamId || vobizWs.readyState !== 1) return;
       const alignedLength = data.length - (data.length % 2);
       for (let offset = 0; offset < alignedLength; offset += OUTPUT_FRAME_BYTES) {
         const frame = data.subarray(offset, Math.min(offset + OUTPUT_FRAME_BYTES, alignedLength));
-        safeSend({ event: "playAudio", media: { contentType: "audio/x-l16", sampleRate: OUTPUT_RATE, payload: frame.toString("base64") } });
+        const vobizPcm = swapPcm16ByteOrder(frame);
+        safeSend({ event: "playAudio", media: { contentType: "audio/x-l16", sampleRate: OUTPUT_RATE, payload: vobizPcm.toString("base64") } });
+        outboundFrames += 1;
+        if (outboundFrames === 1) console.info(`[vobiz-live] first audio frame sent call=${token.callId} bytes=${vobizPcm.length} sampleRate=${OUTPUT_RATE}`);
       }
     }
     async function endCallAfterGoodbye(call) {
@@ -196,7 +222,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         const language = displayLanguage(session.language);
         const systemPrompt = [
           "You are an AI attendance caller for home care shifts. You are calling the employee only; never call or ask the patient to speak.",
-          `Speak naturally in ${language}.`,
+          `Speak unmistakably and naturally in ${language}.`,
           "Use the supplied session context and the previous call attempts so you remember the full assignment and what has already happened.",
           "Verify the employee and assigned patient. Ask the employee to confirm the patient name and location; do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
           "For check-in, establish whether the employee reached the assigned patient and the actual arrival time. If they have not arrived, ask their expected arrival time and confirm a clear callback time.",
@@ -213,7 +239,10 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             systemInstruction: { parts: [{ text: systemPrompt }] },
             inputAudioTranscription: {},
             outputAudioTranscription: {},
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice || "Achird" } } },
+            speechConfig: {
+              languageCode: speechLanguageCode(session.language),
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice || "Achird" } },
+            },
             tools: [{ functionDeclarations: [{
               name: "end_call",
               description: "End this attendance call after the required details have been collected and the employee has heard the goodbye.",
@@ -225,6 +254,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
               if (!active) return;
               if (response.setupComplete) {
                 setupComplete = true;
+                console.info(`[vobiz-live] Gemini Live setup complete call=${token.callId} model=${LIVE_MODEL}`);
                 sendGreeting();
                 for (const audio of pendingAudio.splice(0)) liveSession.sendRealtimeInput({ media: { data: audio, mimeType: "audio/pcm;rate=16000" } });
               }
@@ -232,8 +262,20 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
               const calls = response.toolCall?.functionCalls || [];
               for (const call of calls) await endCallAfterGoodbye(call);
               for (const part of response.serverContent?.modelTurn?.parts || []) {
-                if (part.inlineData?.mimeType?.startsWith("audio/")) sendPcmAudio(Buffer.from(part.inlineData.data, "base64"));
+                if (part.inlineData?.mimeType?.startsWith("audio/")) {
+                  const audio = Buffer.from(part.inlineData.data, "base64");
+                  generatedAudioParts += 1;
+                  if (generatedAudioParts === 1) console.info(`[vobiz-live] first Gemini audio part call=${token.callId} mime=${part.inlineData.mimeType} bytes=${audio.length}`);
+                  sendPcmAudio(audio);
+                }
                 if (part.functionCall) await endCallAfterGoodbye(part.functionCall);
+              }
+              if (response.serverContent?.turnComplete && outboundFrames > checkpointFrameOffset) {
+                playbackTurn += 1;
+                checkpointFrameOffset = outboundFrames;
+                const checkpoint = `gemini-turn-${playbackTurn}`;
+                safeSend({ event: "checkpoint", name: checkpoint });
+                console.info(`[vobiz-live] playback checkpoint sent call=${token.callId} name=${checkpoint}`);
               }
             },
             onerror: (error) => {
@@ -246,7 +288,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         sendGreeting();
         for (const audio of pendingAudio.splice(0)) liveSession.sendRealtimeInput({ media: { data: audio, mimeType: "audio/pcm;rate=16000" } });
       })().catch((error) => {
-        console.error("[vobiz-live] session setup failed", error.message);
+        console.error(`[vobiz-live] session setup failed call=${token.callId}`, error?.stack || error?.message || error);
         try { vobizWs.close(1011, "Voice session initialization failed"); } catch {}
       });
     }
@@ -263,19 +305,28 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         }
         streamId = message.start.streamId;
         clearTimeout(startTimer);
+        console.info(`[vobiz-live] Vobiz stream started call=${token.callId} stream=${streamId} encoding=${mediaFormat.encoding} sampleRate=${mediaFormat.sampleRate}`);
         startLiveSession();
+      } else if (message.event === "playedStream") {
+        console.info(`[vobiz-live] playback confirmed call=${token.callId} name=${message.name || message.playedStream?.name || "unknown"}`);
+      } else if (message.event === "clearedAudio") {
+        console.info(`[vobiz-live] playback cleared call=${token.callId}`);
       } else if (message.event === "media") {
         const payload = message.media?.payload;
         if (!payload) return;
-        if (liveSession && setupComplete) liveSession.sendRealtimeInput({ media: { data: payload, mimeType: "audio/pcm;rate=16000" } });
-        else if (pendingAudio.length < 150) pendingAudio.push(payload);
+        inboundFrames += 1;
+        const littleEndianPayload = swapPcm16ByteOrder(Buffer.from(payload, "base64")).toString("base64");
+        if (inboundFrames === 1) console.info(`[vobiz-live] first caller audio frame call=${token.callId} bytes=${Buffer.byteLength(littleEndianPayload, "base64")}`);
+        if (liveSession && setupComplete) liveSession.sendRealtimeInput({ media: { data: littleEndianPayload, mimeType: "audio/pcm;rate=16000" } });
+        else if (pendingAudio.length < 150) pendingAudio.push(littleEndianPayload);
       }
     });
 
-    vobizWs.on("close", () => {
+    vobizWs.on("close", (code, reason) => {
       active = false;
       clearTimeout(startTimer);
       activeCalls.delete(token.callId);
+      console.info(`[vobiz-live] stream closed call=${token.callId} code=${code} reason=${reason?.toString() || ""} inboundFrames=${inboundFrames} outboundFrames=${outboundFrames} generatedAudioParts=${generatedAudioParts}`);
       repository.endCallStream(attempt.id).catch(() => {});
       try { liveSession?.close(); } catch {}
     });
