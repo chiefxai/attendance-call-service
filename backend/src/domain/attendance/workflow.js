@@ -56,7 +56,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
     return { action: "review", reason: "check_in_not_confirmed" };
   }
   if (stage === "check_out") {
-    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeNameConfirmed === true && outcome.patientNameConfirmed === true && outcome.addressConfirmed === true && outcome.employeeVerified !== false && outcome.clientVerified !== false && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
+    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeNameConfirmed === true && outcome.employeeVerified !== false && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
       return { action: "confirm_stage", reportedAt: outcome.reportedDepartureTime || null };
     }
     if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {
