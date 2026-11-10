@@ -10,8 +10,10 @@ import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
-import VpnKeyRoundedIcon from "@mui/icons-material/VpnKeyRounded";
+import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
+import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { AttendancePage } from "./pages/AttendancePage";
 import { CallCenterPage } from "./pages/CallCenterPage";
 import { DutySchedulesPage } from "./pages/DutySchedulesPage";
@@ -29,7 +31,8 @@ const navigation = [
   { label: "Duty schedules", path: "/schedules", icon: <CalendarMonthRoundedIcon /> },
   { label: "Attendance", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
-  { label: "API keys & docs", path: "/api-access", icon: <VpnKeyRoundedIcon /> },
+  { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon /> },
+  { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
 ];
 
 function App() {
@@ -55,11 +58,6 @@ function App() {
         ))}
       </List>
       <Box sx={{ flexGrow: 1 }} />
-      <Box sx={{ bgcolor: "#f5f8f6", border: "1px solid #e7eeea", borderRadius: 3, p: 2 }}>
-        <Chip size="small" label="VOICE GATEWAY" sx={{ height: 22, fontSize: 9, letterSpacing: ".08em", fontWeight: 800, bgcolor: "#e9efff", color: "primary.dark" }} />
-        <Typography variant="body2" fontWeight={650} sx={{ mt: 1.25 }}>Outbound attendance</Typography>
-        <Typography variant="caption" color="text.secondary">Vobiz · Vertex AI · PostgreSQL</Typography>
-      </Box>
       <Divider sx={{ my: 2 }} />
       <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 1 }}>
         <Avatar sx={{ width: 34, height: 34, bgcolor: "#dcebe5", color: "primary.dark", fontSize: 13, fontWeight: 700 }}>OP</Avatar>
@@ -92,7 +90,8 @@ function App() {
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
           <Route path="/assignments/new" element={<NewAssignmentPage />} />
-          <Route path="/api-access" element={<ApiAccessPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/api-access" element={<ApiAccessPage section="docs" />} />
           <Route path="/sessions/:sessionId" element={<AssignmentStatusPage />} />
           <Route path="*" element={<OverviewPage />} />
         </Routes>
