@@ -123,6 +123,17 @@ export interface AttendanceRecord {
   updatedAt: string;
 }
 
+export interface CallingSettings {
+  defaultFromNumber: string;
+  retry: {
+    maxConsecutiveNoAnswer: number;
+    initialMinutes: number;
+    multiplier: number;
+    maxMinutes: number;
+  };
+  source: { defaultFromNumber: "settings" | "environment"; retry: "settings" | "environment" };
+}
+
 export interface OperationsSummary {
   scheduledToday: number;
   checkInsConfirmed: number;
@@ -208,6 +219,21 @@ export async function fetchSessionArtifacts(sessionId: string) {
 
 export async function fetchCallRecording(sessionId: string, attemptId: string) {
   const response = await api.get<Blob>(`/assignments/${sessionId}/recordings/${attemptId}`, { responseType: "blob" });
+  return response.data;
+}
+
+export async function fetchCallingSettings() {
+  const response = await api.get<CallingSettings>("/settings/calling");
+  return response.data;
+}
+
+export async function saveCallingSettings(settings: Omit<CallingSettings, "source">) {
+  const response = await api.put<CallingSettings>("/settings/calling", settings);
+  return response.data;
+}
+
+export async function resetCallingSettings() {
+  const response = await api.post<CallingSettings>("/settings/calling/reset");
   return response.data;
 }
 
