@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
@@ -10,6 +11,7 @@ import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
+import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AttendancePage } from "./pages/AttendancePage";
@@ -21,6 +23,8 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
 import { PageHeaderTargetContext } from "./components/OperationsUI";
+import { LoginPage } from "./pages/LoginPage";
+import { fetchCurrentUser, signOut, type WebUser } from "./api/client";
 
 const drawerWidth = 252;
 const navigation = [
@@ -35,7 +39,16 @@ const navigation = [
 ];
 
 function App() {
+  const queryClient = useQueryClient();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [user, setUser] = useState<WebUser | null>(null);
+  useEffect(() => {
+    fetchCurrentUser().then((result) => setUser(result.user)).catch(() => setUser(null)).finally(() => setAuthChecked(true));
+  }, []);
+  const logout = async () => {
+    try { await signOut(); } finally { setUser(null); queryClient.clear(); }
+  };
   const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
   const drawer = (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%", px: 2, py: 2.5, overflowY: "auto" }}>
@@ -56,11 +69,15 @@ function App() {
       <Box sx={{ flexGrow: 1 }} />
       <Divider sx={{ my: 2 }} />
       <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 1 }}>
-        <Avatar sx={{ width: 34, height: 34, bgcolor: "#dcebe5", color: "primary.dark", fontSize: 13, fontWeight: 700 }}>OP</Avatar>
-        <Box><Typography variant="body2" fontWeight={650}>Operations team</Typography><Typography variant="caption" color="text.secondary">Workspace admin</Typography></Box>
+        <Avatar sx={{ width: 34, height: 34, bgcolor: "#dcebe5", color: "primary.dark", fontSize: 13, fontWeight: 700 }}>{(user?.displayName || user?.email || "U").slice(0, 2).toUpperCase()}</Avatar>
+        <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="body2" fontWeight={650} noWrap>{user?.displayName || "Operations user"}</Typography><Typography variant="caption" color="text.secondary" noWrap>{user?.email}</Typography></Box>
+        <IconButton aria-label="Sign out" title="Sign out" onClick={() => void logout()} size="small"><LogoutRoundedIcon fontSize="small" /></IconButton>
       </Stack>
     </Box>
   );
+
+  if (!authChecked) return <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center" }}><Typography color="text.secondary">Checking sign-in…</Typography></Box>;
+  if (!user) return <LoginPage onSignedIn={setUser} />;
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", width: "100%", overflowX: "hidden" }}>
