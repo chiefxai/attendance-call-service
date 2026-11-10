@@ -323,6 +323,7 @@ export function EnquiriesPage() {
 }
 
 function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls: IncomingCall[]; loading: boolean; error: boolean; onResolve: (call: IncomingCall) => void }) {
+  const [detailCall, setDetailCall] = useState<IncomingCall | null>(null);
   const formatTime = (value?: string | null) => value ? new Date(value).toLocaleString() : "Not captured";
   const locationLabel = (match: IncomingCall["staffSuggestions"][number]["locationMatch"]) => ({
     same_district: "Same district", same_region: "Same state", other_region: "Other area",
@@ -372,14 +373,75 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
               {call.enquiryStatus === "shortage" && <Typography variant="caption" color="text.secondary">Staff shortage · human review and manual assignment required</Typography>}
               {call.enquiryStatus === "suggestion" && <Typography variant="caption" color="text.secondary">Human to call and confirm before assignment</Typography>}
               {call.enquiryStatus === "resolved" && <Typography variant="caption" color="text.secondary">{call.resolvedStaff?.phoneNumber || ""}</Typography>}
+              <Button variant="text" size="small" onClick={() => setDetailCall(call)}>Details</Button>
               {!["processing", "resolved"].includes(call.enquiryStatus) && <Button variant="outlined" size="small" onClick={() => onResolve(call)}>{call.enquiryStatus === "suggestion" ? "Confirm & assign" : call.enquiryStatus === "shortage" ? "Review shortage & assign" : "Review & assign"}</Button>}
-              {call.transcript && <Box sx={{ mt: .5, maxWidth: 260 }}><Typography variant="caption" color="text.secondary" sx={{ display: "block", whiteSpace: "pre-wrap" }}>{call.transcript}</Typography></Box>}
-              {call.hasRecording && <audio controls preload="none" src={incomingCallRecordingUrl(call.id)} style={{ width: 220, maxWidth: "100%" }} />}
             </Stack>
           </TableCell>
         </TableRow>)}</TableBody>
       </Table>
     </TableContainer>}
     {!loading && !error && calls.length === 0 && <Card><CardContent><Typography variant="body2" color="text.secondary">No incoming patient calls yet.</Typography></CardContent></Card>}
+
+    <Dialog open={Boolean(detailCall)} onClose={() => setDetailCall(null)} fullWidth maxWidth="md" scroll="paper">
+      {detailCall && <>
+        <DialogTitle sx={{ pb: 1 }}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between">
+            <Box>
+              <Typography variant="h6" fontWeight={700}>{detailCall.patient?.name || "Incoming caller"}</Typography>
+              <Typography variant="body2" color="text.secondary">{detailCall.fromNumber} · {formatTime(detailCall.startedAt)}</Typography>
+            </Box>
+            <Chip size="small" color={statusColor(detailCall.enquiryStatus)} label={statusLabel(detailCall.enquiryStatus)} />
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2.5}>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Patient details</Typography>
+              <Typography variant="body2" sx={{ mt: .5 }}>Patient: {detailCall.patient?.name || "Unregistered caller"}{detailCall.patient?.id ? ` · ${detailCall.patient.id}` : ""}</Typography>
+              <Typography variant="body2">Phone: {detailCall.patient?.phoneNumber || detailCall.fromNumber}</Typography>
+              {detailCall.patient?.address && <Typography variant="body2">Address: {detailCall.patient.address}</Typography>}
+              {detailCall.patient?.careCategory && <Typography variant="body2">Care category: {detailCall.patient.careCategory}</Typography>}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Enquiry needs</Typography>
+              <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}>{detailCall.enquiryAnalysis?.needsSummary || "No need summary captured yet."}</Typography>
+              {detailCall.enquiryAnalysis?.activityName && <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Activity: {detailCall.enquiryAnalysis.activityName}{detailCall.enquiryAnalysis.durationMinutes ? ` · ${detailCall.enquiryAnalysis.durationMinutes} minutes` : ""}</Typography>}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Requested timing</Typography>
+              <Typography variant="body2">Start: {formatTime(detailCall.enquiryAnalysis?.requestedStartAt)}</Typography>
+              {detailCall.enquiryAnalysis?.requestedEndAt && <Typography variant="body2">End: {formatTime(detailCall.enquiryAnalysis.requestedEndAt)}</Typography>}
+              {detailCall.enquiryAnalysis?.durationMinutes && <Typography variant="body2">Duration: {detailCall.enquiryAnalysis.durationMinutes} minutes</Typography>}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Call status</Typography>
+              <Typography variant="body2">Call: {detailCall.status} · Enquiry: {statusLabel(detailCall.enquiryStatus)}</Typography>
+              <Typography variant="body2">Language: {detailCall.language} · Duration: {detailCall.durationSeconds != null ? `${detailCall.durationSeconds} seconds` : "Not available"}</Typography>
+              {detailCall.answeredAt && <Typography variant="body2">Answered: {formatTime(detailCall.answeredAt)}</Typography>}
+              {detailCall.endedAt && <Typography variant="body2">Ended: {formatTime(detailCall.endedAt)}</Typography>}
+              {detailCall.enquiryStatus === "need_review" && <Alert severity="info" sx={{ mt: 1 }}>{detailCall.enquiryAnalysis?.missingDetails?.length ? `Missing details: ${detailCall.enquiryAnalysis.missingDetails.join(", ")}` : "Human review required."}</Alert>}
+              {detailCall.enquiryStatus === "shortage" && <Alert severity="warning" sx={{ mt: 1 }}>Staff shortage. Human review and manual staff assignment are required.</Alert>}
+              {detailCall.resolvedStaff && <Alert severity="success" sx={{ mt: 1 }}>Assigned staff: {detailCall.resolvedStaff.name}{detailCall.resolvedStaff.phoneNumber ? ` · ${detailCall.resolvedStaff.phoneNumber}` : ""}</Alert>}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Suggested staff</Typography>
+              {detailCall.staffSuggestions.length ? <Stack spacing={.75} sx={{ mt: .75 }}>{detailCall.staffSuggestions.slice(0, 10).map((staff) => <Stack key={staff.id} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
+                <Typography variant="body2" sx={{ flex: 1 }}>{staff.name} · {locationLabel(staff.locationMatch)}{staff.address ? ` · ${staff.address}` : ""}</Typography>
+                {staff.phoneNumber && <Button component="a" href={`tel:${staff.phoneNumber}`} size="small">Call {staff.phoneNumber}</Button>}
+              </Stack>)}</Stack> : <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>No staff suggestions available.</Typography>}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Recording</Typography>
+              {detailCall.hasRecording ? <audio controls preload="none" src={incomingCallRecordingUrl(detailCall.id)} style={{ width: "100%", marginTop: 8 }} /> : <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Recording not available yet.</Typography>}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Transcript</Typography>
+              <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{detailCall.transcript || (detailCall.enquiryStatus === "processing" ? "Transcription is still processing…" : "Transcript not available.")}</Typography>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setDetailCall(null)}>Close</Button></DialogActions>
+      </>}
+    </Dialog>
   </Stack>;
 }

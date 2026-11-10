@@ -9,7 +9,7 @@ import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
-import { createStaff, fetchStaff, updateStaff, type CreateStaffPayload, type StaffRecord } from "../api/client";
+import { createStaff, fetchAttendance, fetchStaff, updateStaff, type AttendanceRecord, type CreateStaffPayload, type StaffRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
@@ -37,6 +37,11 @@ export function StaffRecordsPage() {
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), refetchInterval: 30_000 });
+  const upcomingTasks = useQuery({
+    queryKey: ["staff-upcoming-tasks", selected?.id],
+    queryFn: () => fetchAttendance({ limit: 500 }),
+    enabled: Boolean(selected),
+  });
   const createMutation = useMutation({
     mutationFn: ({ payload, id, update }: { payload: CreateStaffPayload; id: string; update: boolean }) => update ? updateStaff(id, payload) : createStaff(payload),
     onSuccess: async () => {
@@ -53,6 +58,11 @@ export function StaffRecordsPage() {
     && (status === "all" || row.dutyStatus === status));
   const languages = [...new Set(records.map((row) => row.language.toLowerCase()))];
   const active = records.filter((row) => row.dutyStatus === "on duty").length;
+  const upcomingForSelected = (upcomingTasks.data || [])
+    .filter((task: AttendanceRecord) => task.employee.id === selected?.id
+      && new Date(task.scheduledEndAt).getTime() >= Date.now()
+      && !["completed", "cancelled"].includes(task.sessionStatus.toLowerCase()))
+    .sort((a, b) => new Date(a.scheduledStartAt).getTime() - new Date(b.scheduledStartAt).getTime());
   const contacts = records.filter((row) => row.phoneMasked).length;
   const saveStaff = () => {
     const phoneNumber = normalizeIndianMobile(newStaff.phoneNumber);
@@ -123,6 +133,31 @@ export function StaffRecordsPage() {
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={saveStaff} disabled={createMutation.isPending || !newStaff.id.trim() || !newStaff.name.trim() || !newStaff.phoneNumber.trim() || !newStaff.address.trim()}>{editing ? "Update staff" : "Save staff"}</Button></DialogActions>
     </Dialog>
-    <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="sm">{selected && <><DialogTitle>Staff assignment · {selected.id}</DialogTitle><DialogContent><Stack spacing={1.5} sx={{ pt: 1 }}><Typography variant="h6">{selected.name}</Typography><Typography variant="body2" color="text.secondary">Registered employee phone: {selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography><Typography variant="body2" color="text.secondary">Staff address: {selected.address || "Not provided"}</Typography><Typography variant="subtitle2" sx={{ mt: 1 }}>Assigned patient</Typography><Typography variant="body2">{selected.patientName}{selected.patientId ? ` · ${selected.patientId}` : ""}</Typography><Typography variant="subtitle2" sx={{ mt: 1 }}>Scheduled duty interval · your local time</Typography><Typography variant="body2">{formatDutyInterval(selected.scheduledStartAt, selected.scheduledEndAt)}</Typography><Typography variant="body2">Calling language: {selected.language.toUpperCase()}</Typography><Typography variant="body2" color="text.secondary">Assignment: {selected.assignmentId}</Typography><Typography variant="body2" color="text.secondary">Duty status: {selected.dutyStatus}</Typography><Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert></Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>
+    <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="md" scroll="paper">{selected && <><DialogTitle>Staff profile · {selected.name}</DialogTitle><DialogContent dividers><Stack spacing={2.5} sx={{ pt: 1 }}>
+      <Grid container spacing={1.5}>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Staff ID</Typography><Typography>{selected.id}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Mobile number</Typography><Typography>{selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography></Grid>
+        <Grid size={12}><Typography variant="overline" color="text.secondary">Address</Typography><Typography>{selected.address || "Not provided"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Calling language</Typography><Typography>{selected.language.toUpperCase()}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Current duty status</Typography><Typography sx={{ textTransform: "capitalize" }}>{selected.dutyStatus}</Typography></Grid>
+        <Grid size={12}><Typography variant="overline" color="text.secondary">Current/last assigned patient</Typography><Typography>{selected.patientName}{selected.patientId ? ` · ${selected.patientId}` : ""}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Current/last duty interval · local time</Typography><Typography>{formatDutyInterval(selected.scheduledStartAt, selected.scheduledEndAt)}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Assignment ID</Typography><Typography>{selected.assignmentId}</Typography></Grid>
+      </Grid>
+      <Stack spacing={1}>
+        <Typography variant="h6" fontWeight={700}>Upcoming tasks</Typography>
+        {upcomingTasks.isLoading && <LinearProgress />}
+        {upcomingTasks.isError && <Alert severity="error">Could not load this staff member’s upcoming tasks.</Alert>}
+        {upcomingTasks.isSuccess && upcomingForSelected.length === 0 && <Alert severity="info">No upcoming assigned tasks for this staff member.</Alert>}
+        {upcomingForSelected.length > 0 && <TableContainer component={Card} variant="outlined"><Table size="small" aria-label="Upcoming staff tasks"><TableHead><TableRow><TableCell>Patient</TableCell><TableCell>Duty interval · local time</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForSelected.map((task) => <TableRow key={task.sessionId}>
+          <TableCell><Typography variant="body2" fontWeight={650}>{task.patient.name || "Patient"}</Typography><Typography variant="caption" color="text.secondary">{task.assignmentId}</Typography></TableCell>
+          <TableCell>{formatDutyInterval(task.scheduledStartAt, task.scheduledEndAt)}</TableCell>
+          <TableCell sx={{ textTransform: "capitalize" }}>{task.checkIn.status.replaceAll("_", " ")}</TableCell>
+          <TableCell sx={{ textTransform: "capitalize" }}>{task.checkOut.status.replaceAll("_", " ")}</TableCell>
+          <TableCell sx={{ textTransform: "capitalize" }}>{task.sessionStatus.replaceAll("_", " ")}</TableCell>
+        </TableRow>)}</TableBody></Table></TableContainer>}
+      </Stack>
+      <Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert>
+    </Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>
   </Stack>;
 }

@@ -8,7 +8,7 @@ import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRound
 import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
-import { createPatient, fetchPatients, updatePatient, type CreatePatientPayload, type PatientRecord } from "../api/client";
+import { createPatient, fetchAttendance, fetchPatients, updatePatient, type AttendanceRecord, type CreatePatientPayload, type PatientRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
@@ -22,11 +22,17 @@ export function PatientRecordsPage() {
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
+  const [viewPatient, setViewPatient] = useState<PatientRecord | null>(null);
   const [editing, setEditing] = useState<PatientRecord | null>(null);
   const [newPatient, setNewPatient] = useState<CreatePatientPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), refetchInterval: 30_000 });
+  const upcomingTasks = useQuery({
+    queryKey: ["patient-upcoming-tasks", viewPatient?.id],
+    queryFn: () => fetchAttendance({ limit: 500 }),
+    enabled: Boolean(viewPatient),
+  });
   const createMutation = useMutation({
     mutationFn: ({ payload, id, update }: { payload: CreatePatientPayload; id: string; update: boolean }) => update ? updatePatient(id, payload) : createPatient(payload),
     onSuccess: async () => {
@@ -42,6 +48,11 @@ export function PatientRecordsPage() {
     && (hub === "all" || row.hub === hub) && (category === "all" || row.careCategory === category)
     && (language === "all" || row.language.toLowerCase().includes(language)) && (status === "all" || row.status === status));
   const active = records.filter((row) => row.status === "active").length;
+  const upcomingForPatient = (upcomingTasks.data || [])
+    .filter((task: AttendanceRecord) => task.patient.id === viewPatient?.id
+      && new Date(task.scheduledEndAt).getTime() >= Date.now()
+      && !["completed", "cancelled"].includes(task.sessionStatus.toLowerCase()))
+    .sort((a, b) => new Date(a.scheduledStartAt).getTime() - new Date(b.scheduledStartAt).getTime());
   const savePatient = () => {
     const phoneInput = newPatient.phoneNumber?.trim() || "";
     const phoneNumber = phoneInput ? normalizeIndianMobile(phoneInput) : "";
@@ -97,7 +108,7 @@ export function PatientRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Patient assignment directory" sx={{ minWidth: 1100 }}><TableHead><TableRow>{["Patient & ID", "Mobile number", "Patient address", "Hub", "Care category", "Assigned employee", "Language", "Location check", "Session status", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || "Not provided"}</TableCell><TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.hub}</TableCell><TableCell>{row.careCategory}</TableCell><TableCell><Typography variant="body2">{row.assignedStaff}</Typography><Typography variant="caption" color="text.secondary">{row.employeeId || "Employee ID unavailable"}</Typography></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.locationVerification} /></TableCell><TableCell><StatusChip status={row.status} /></TableCell><TableCell><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+      <TableContainer><Table size="small" aria-label="Patient assignment directory" sx={{ minWidth: 1100 }}><TableHead><TableRow>{["Patient & ID", "Mobile number", "Patient address", "Hub", "Care category", "Assigned employee", "Language", "Location check", "Session status", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || "Not provided"}</TableCell><TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.hub}</TableCell><TableCell>{row.careCategory}</TableCell><TableCell><Typography variant="body2">{row.assignedStaff}</Typography><Typography variant="caption" color="text.secondary">{row.employeeId || "Employee ID unavailable"}</Typography></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.locationVerification} /></TableCell><TableCell><StatusChip status={row.status} /></TableCell><TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setViewPatient(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell></TableRow>)}</TableBody></Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>No patient records match these filters.</Typography>}
     </Card>
     <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
@@ -118,5 +129,38 @@ export function PatientRecordsPage() {
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={savePatient} disabled={createMutation.isPending || !newPatient.id.trim() || !newPatient.name.trim() || !newPatient.address.trim()}>{editing ? "Update patient" : "Save patient"}</Button></DialogActions>
     </Dialog>
+    <Dialog open={Boolean(viewPatient)} onClose={() => setViewPatient(null)} fullWidth maxWidth="md" scroll="paper">{viewPatient && <><DialogTitle>Patient profile · {viewPatient.name}</DialogTitle><DialogContent dividers><Stack spacing={2.5} sx={{ pt: 1 }}>
+      <Grid container spacing={1.5}>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Patient ID</Typography><Typography>{viewPatient.id}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Mobile number</Typography><Typography>{viewPatient.phoneNumber || "Not provided"}</Typography></Grid>
+        <Grid size={12}><Typography variant="overline" color="text.secondary">Address</Typography><Typography>{viewPatient.address || "Not provided"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Preferred language</Typography><Typography>{viewPatient.language.toUpperCase()}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Care category</Typography><Typography>{viewPatient.careCategory}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Hub</Typography><Typography>{viewPatient.hub}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Current session status</Typography><Typography sx={{ textTransform: "capitalize" }}>{viewPatient.status}</Typography></Grid>
+        <Grid size={12}><Typography variant="overline" color="text.secondary">Assigned staff</Typography><Typography>{viewPatient.assignedStaff}{viewPatient.employeeId ? ` · ${viewPatient.employeeId}` : ""}</Typography></Grid>
+      </Grid>
+      <Stack spacing={1}>
+        <Typography variant="h6" fontWeight={700}>Upcoming tasks</Typography>
+        {upcomingTasks.isLoading && <LinearProgress />}
+        {upcomingTasks.isError && <Alert severity="error">Could not load this patient’s upcoming tasks.</Alert>}
+        {upcomingTasks.isSuccess && upcomingForPatient.length === 0 && <Alert severity="info">No upcoming assigned tasks for this patient.</Alert>}
+        {upcomingForPatient.length > 0 && <TableContainer component={Card} variant="outlined"><Table size="small" aria-label="Upcoming patient tasks"><TableHead><TableRow><TableCell>Duty interval · local time</TableCell><TableCell>Assigned staff</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForPatient.map((task) => <TableRow key={task.sessionId}>
+          <TableCell>{formatTaskInterval(task.scheduledStartAt, task.scheduledEndAt)}</TableCell>
+          <TableCell><Typography variant="body2">{task.employee.name}</Typography><Typography variant="caption" color="text.secondary">{task.employee.id || "Employee ID unavailable"}</Typography></TableCell>
+          <TableCell sx={{ textTransform: "capitalize" }}>{task.checkIn.status.replaceAll("_", " ")}</TableCell>
+          <TableCell sx={{ textTransform: "capitalize" }}>{task.checkOut.status.replaceAll("_", " ")}</TableCell>
+          <TableCell sx={{ textTransform: "capitalize" }}>{task.sessionStatus.replaceAll("_", " ")}</TableCell>
+        </TableRow>)}</TableBody></Table></TableContainer>}
+      </Stack>
+    </Stack></DialogContent><DialogActions><Button onClick={() => setViewPatient(null)}>Close profile</Button></DialogActions></>}</Dialog>
   </Stack>;
+}
+
+function formatTaskInterval(start: string, end: string) {
+  const format = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  };
+  return `${format(start)} – ${format(end)}`;
 }
