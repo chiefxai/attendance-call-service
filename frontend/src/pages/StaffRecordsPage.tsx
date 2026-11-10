@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import PersonAddAltRoundedIcon from "@mui/icons-material/PersonAddAltRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
+import { AxiosError } from "axios";
 import { createStaff, fetchStaff, type CreateStaffPayload, type StaffRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 
-export function StaffRecordsPage() {
+function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }\n\nexport function StaffRecordsPage() {
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
@@ -67,7 +68,7 @@ export function StaffRecordsPage() {
       <DialogTitle>Add staff</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          {createMutation.isError && <Alert severity="error">{createMutation.error instanceof Error ? createMutation.error.message : "Could not save staff record."}</Alert>}
+          {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} onChange={(event) => setNewStaff((current) => ({ ...current, id: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} /></Grid>
