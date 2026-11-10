@@ -11,7 +11,7 @@ import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import { fetchAttendance, fetchOperationsSummary, type AttendanceRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 
-const dateTime = (value: string | null) => value ? new Date(value).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "—";
+const dateTime = (value: string | null) => value ? new Date(value).toLocaleString([], { dateStyle: "short", timeStyle: "medium" }) : "—";
 type AttendanceStatus = "pending" | "checkin" | "checkout" | "processing" | "delayed";
 
 function attendanceStatus(row: AttendanceRecord): AttendanceStatus {
@@ -100,8 +100,8 @@ export function AttendancePage({ embedded = false }: { embedded?: boolean }) {
           <TableCell><Typography variant="body2" fontWeight={700}>{row.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{row.employee.name} · {row.employee.id || "staff ID unavailable"}</Typography></TableCell>
           <TableCell><Typography variant="body2" fontWeight={650}>{row.patient.name}</Typography><Typography variant="caption" color="text.secondary">{row.patient.id || "patient ID unavailable"}</Typography></TableCell>
           <TableCell sx={{ whiteSpace: "nowrap" }}>{dateTime(row.scheduledStartAt)}<Typography variant="caption" display="block" color="text.secondary">to {dateTime(row.scheduledEndAt)}</Typography></TableCell>
-          <TableCell sx={{ whiteSpace: "nowrap" }}><StatusChip status={row.checkIn.status} /><Typography variant="caption" display="block" color="text.secondary">{dateTime(row.checkIn.reportedAt)}</Typography></TableCell>
-          <TableCell sx={{ whiteSpace: "nowrap" }}><StatusChip status={row.checkOut.status} /><Typography variant="caption" display="block" color="text.secondary">{dateTime(row.checkOut.reportedAt)}</Typography></TableCell>
+          <TableCell sx={{ whiteSpace: "nowrap" }}><Typography variant="body2">{dateTime(row.checkIn.reportedAt)}</Typography></TableCell>
+          <TableCell sx={{ whiteSpace: "nowrap" }}><Typography variant="body2">{dateTime(row.checkOut.reportedAt)}</Typography></TableCell>
           <TableCell>{row.language.toUpperCase()}</TableCell><TableCell><AttendanceStatusChip status={attendanceStatus(row)} />{attendanceStatus(row) === "delayed" && <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: .5, maxWidth: 220 }}>{delayDetail(row)}</Typography>}</TableCell><TableCell><Button size="small" onClick={() => navigate(`/sessions/${row.sessionId}`)}>View</Button></TableCell>
         </TableRow>)}</TableBody>
       </Table></TableContainer>
