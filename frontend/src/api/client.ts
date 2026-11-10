@@ -189,7 +189,7 @@ export interface AssignmentPayload {
   scheduledStartAt: string;
   scheduledEndAt: string;
   metadata?: { timeZone?: string; [key: string]: unknown };
-  employee: { id: string; name: string; phoneNumber: string; address?: string };
+  employee: { id: string; name: string; companyName?: string; phoneNumber: string; address?: string };
   patient: { id: string; name: string; address: string; phoneNumber?: string };
 }
 
@@ -243,6 +243,7 @@ export interface OperationsSummary {
 export interface CreateStaffPayload {
   id: string;
   name: string;
+  companyName?: string;
   phoneNumber: string;
   address: string;
   language: string;
@@ -261,6 +262,7 @@ export interface CreatePatientPayload {
 export interface StaffRecord {
   id: string;
   name: string;
+  companyName: string;
   phoneNumber: string | null;
   phoneMasked: string | null;
   address: string;
