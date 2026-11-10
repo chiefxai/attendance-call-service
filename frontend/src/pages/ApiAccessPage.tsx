@@ -50,7 +50,7 @@ function errorText(error: unknown) {
   return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 }
 
-export function ApiAccessPage() {
+export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "docs" }) {
   const [adminToken, setAdminToken] = useState("");
   const [label, setLabel] = useState("Athulya platform integration");
   const [revealedKey, setRevealedKey] = useState("");
@@ -90,7 +90,9 @@ export function ApiAccessPage() {
   const copy = (value: string) => navigator.clipboard?.writeText(value);
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="PLATFORM INTEGRATION" title="API keys & docs" description="Create a scoped service key, connect this browser, and send duty assignments directly from your platform." />
+    {section === "docs" && <PageHeader eyebrow="PLATFORM INTEGRATION" title="API documentation" description="Integrate assignment scheduling, session results, recordings, transcripts, and completion callbacks." />}
+    {section === "settings" && <PageHeader eyebrow="SERVICE API" title="API configuration" description="Manage service keys and connect this browser to the selected workspace." />}
+    {section === "settings" && <>
     <Alert severity="info">The integration API schedules both check-in and check-out calls. Set API_KEY_ADMIN_TOKEN in the VM .env (generate one with openssl rand -hex 32) and restart the backend. Keys are shown once, stored as hashes on the service, and can be revoked here. Keep the admin secret and API keys server-side in your platform.</Alert>
 
     <Grid container spacing={2}>
@@ -134,6 +136,9 @@ export function ApiAccessPage() {
       </Grid>
     </Grid>
 
+    </>}
+
+    {section === "docs" && <>
     <SectionCard title="Create an assignment from your platform" subtitle="POST an assignment payload. A 202 response returns the durable session ID; the service schedules both stages and retries asynchronously.">
       <Stack spacing={1.5}>
         <Typography variant="body2">Endpoint: <Box component="code">POST /api/call-service/assignments</Box></Typography>
@@ -191,5 +196,6 @@ export function ApiAccessPage() {
         <Typography variant="caption" color="text.secondary">The receiver should persist the idempotency key and return a 2xx response for duplicate requests without applying attendance twice. Recordings are retrieved separately using the session artifacts and recording endpoints above.</Typography>
       </Stack>
     </SectionCard>
+    </>}
   </Stack>;
 }

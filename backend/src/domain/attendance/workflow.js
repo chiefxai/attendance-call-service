@@ -136,8 +136,16 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     if (!attempt) return;
     if (classifyCallStatus(attempt.status) === "not_answered") {
       const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
-      const config = { initialMs: (retry.initialMinutes || 5) * 60_000, multiplier: retry.multiplier || 1.2, maxMs: (retry.maxMinutes || 30) * 60_000 };
-      if (noAnswerCount >= (retry.maxConsecutiveNoAnswer || 5)) {
+      const organizationSettings = repository.getOrganizationCallSettings
+        ? await repository.getOrganizationCallSettings(attempt.organizationId)
+        : {};
+      const retrySettings = organizationSettings.callRetry || {};
+      const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 5;
+      const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
+      const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
+      const maxConsecutiveNoAnswer = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 5;
+      const config = { initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000 };
+      if (noAnswerCount >= maxConsecutiveNoAnswer) {
         await repository.setStageStatus(attempt.sessionId, attempt.stage, "not_answered", {
           reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: noAnswerCount,
         });
