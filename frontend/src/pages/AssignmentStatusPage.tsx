@@ -87,7 +87,7 @@ export function AssignmentStatusPage() {
         <Card id="session-call-logs"><CardContent sx={{ p: 3 }}>
           <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1.5}>
             <Box><Typography variant="h6">Call logs and recordings</Typography><Typography variant="body2" color="text.secondary">View attempts, transcripts, and recordings separately for check-in and check-out.</Typography></Box>
-            <Button variant="outlined" startIcon={artifacts.isFetching ? <CircularProgress size={16} /> : <ArticleRoundedIcon />} onClick={showCallLogs} disabled={artifacts.isFetching}>
+            <Button variant="outlined" startIcon={artifacts.isFetching ? <CircularProgress size={16} /> : <ArticleRoundedIcon />} onClick={() => showCallLogs()} disabled={artifacts.isFetching}>
               {artifacts.data ? "Refresh call logs" : "View call logs"}
             </Button>
           </Stack>
