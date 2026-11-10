@@ -18,6 +18,8 @@ const repositoryMethods = Object.freeze([
   "getAttendanceSession(sessionId)",
   "listAttendanceSessions(organizationId, filters)",
   "getOperationsSummary(organizationId)",
+  "createStaffDirectoryRecord(organizationId, staff)",
+  "createPatientDirectoryRecord(organizationId, patient)",
   "listStaffDirectory(organizationId, filters)",
   "listPatientDirectory(organizationId, filters)",
   "listSupervisionQueue(organizationId, filters)",
