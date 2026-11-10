@@ -185,17 +185,17 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     if (token.direction === "inbound") {
       repository.getInboundCall(token.inboundCallId, token.organizationId).then(async (inboundCall) => {
         if (!inboundCall || inboundCall.providerCallId !== token.callId) {
-          socket.write("HTTP/1.1 403 Forbidden\\r\\nConnection: close\\r\\n\\r\\n"); socket.destroy(); return;
+          socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); socket.destroy(); return;
         }
         const claimed = await repository.claimInboundCallStream(inboundCall.id);
         if (!claimed) {
-          socket.write("HTTP/1.1 409 Conflict\\r\\nConnection: close\\r\\n\\r\\n"); socket.destroy(); return;
+          socket.write("HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n"); socket.destroy(); return;
         }
         activeCalls.add(token.callId);
         wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request, { token, inboundCall }));
       }).catch((error) => {
         console.error("[vobiz-inbound] media context lookup failed", error.message);
-        socket.write("HTTP/1.1 503 Service Unavailable\\r\\nConnection: close\\r\\n\\r\\n"); socket.destroy();
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n"); socket.destroy();
       });
       return true;
     }
@@ -414,7 +414,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
           "When the caller is finished, thank them, say goodbye, then call end_call.",
           "Agent instructions:", agent.systemPrompt || "Listen carefully, be warm, and record the caller's request accurately.",
           "Patient context:", JSON.stringify({ patient: { id: agentContext.patient?.id || null, name: agentContext.patient?.name || null, address: agentContext.patient?.address || null }, matchedByRegisteredPhone: Boolean(inboundCall.patient?.id) }),
-        ].join("\\n\\n") : [
+        ].join("\n\n") : [
           "You are an AI attendance caller for home care shifts. You are calling the employee only; never call or ask the patient to speak.",
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
           `Speak unmistakably and naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}.`,
