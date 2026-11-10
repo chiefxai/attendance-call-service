@@ -334,6 +334,656 @@ class PostgresRepository {
     }
     return items.slice(0, Math.min(Number(limit) || 100, 500));
   }
+  async listDueFollowUpCalls(limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const sql = "WITH followups AS (\n" +
+      "  SELECT id AS session_id, organization_id, 'check_in' AS stage, active_context->'checkIn' AS stage_context\n" +
+      "  FROM attendance_sessions WHERE check_in_status='follow_up' AND session_status <> 'completed'\n" +
+      "  UNION ALL\n" +
+      "  SELECT id AS session_id, organization_id, 'check_out' AS stage, active_context->'checkOut' AS stage_context\n" +
+      "  FROM attendance_sessions WHERE check_out_status='follow_up' AND session_status <> 'completed'\n" +
+      ")\n" +
+      "SELECT f.session_id, f.organization_id, f.stage, f.stage_context->>'reason' AS reason, f.stage_context->>'nextCallAt' AS due_at,\n" +
+      "  COALESCE((SELECT MAX(a.attempt_number) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage),0)::int AS max_call_attempt,\n" +
+      "  COALESCE((SELECT MAX(CASE WHEN COALESCE(j.payload->>'attemptNumber','') ~ '^[0-9]+
+    const sessions = await this.listAttendanceSessions(organizationId, { search, status: "completed", limit });
+    return sessions.filter((session) => session.checkIn.status === "confirmed" && session.checkOut.status === "confirmed");
+  }
+  async getCallCenterData(organizationId) {
+    const [active, retries] = await Promise.all([
+      this.pool.query(
+        `SELECT a.id AS attempt_id,a.provider_call_id,a.stage,a.status,a.attempt_number,a.answered_at,a.created_at,
+                s.id AS session_id,s.external_assignment_id,s.language,s.employee->>'id' AS employee_id,
+                s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name,
+                s.patient->>'id' AS patient_id,s.active_context
+         FROM attendance_call_attempts a JOIN attendance_sessions s ON s.id=a.session_id
+         WHERE a.organization_id=$1 AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('ringing','inprogress','answered')
+         ORDER BY a.created_at DESC LIMIT 100`, [organizationId],
+      ),
+      this.pool.query(
+        `SELECT j.id,j.run_at,j.payload->>'stage' AS stage,j.payload->>'attemptNumber' AS attempt_number,
+                s.id AS session_id,s.external_assignment_id,s.language,s.employee->>'id' AS employee_id,
+                s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name
+         FROM attendance_jobs j JOIN attendance_sessions s ON j.payload->>'sessionId'=s.id::text
+         WHERE s.organization_id=$1 AND j.job_type='place_call' AND j.status='queued'
+         ORDER BY j.run_at LIMIT 100`, [organizationId],
+      ),
+    ]);
+    return {
+      activeCalls: active.rows.map((row) => ({ attemptId: row.attempt_id, callId: row.provider_call_id, sessionId: row.session_id,
+        assignmentId: row.external_assignment_id, stage: row.stage, status: row.status, attemptNumber: row.attempt_number,
+        employee: { id: row.employee_id, name: row.employee_name }, patient: { id: row.patient_id, name: row.patient_name },
+        language: row.language, startedAt: row.answered_at || row.created_at })),
+      retryQueue: retries.rows.map((row) => ({ jobId: row.id, sessionId: row.session_id, assignmentId: row.external_assignment_id,
+        stage: row.stage, attemptNumber: Number(row.attempt_number) || 1, runAt: row.run_at, language: row.language,
+        employee: { id: row.employee_id, name: row.employee_name }, patient: { name: row.patient_name } })),
+      maxConcurrentCalls: Number(process.env.MAX_CONCURRENT_CALLS) || 20,
+    };
+  }
+  async getAgentSessionContext(id, stage) {
+    const session = await this.getAttendanceSession(id);
+    if (!session) return null;
+    const attempts = await this.pool.query(
+      `SELECT stage,status,attempt_number,scheduled_at,answered_at,ended_at,outcome
+       FROM attendance_call_attempts WHERE session_id=$1 ORDER BY created_at`, [id],
+    );
+    const history = attempts.rows.map((row) => ({
+      stage: row.stage, status: row.status, attemptNumber: row.attempt_number,
+      scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
+      outcome: json(row.outcome),
+    }));
+    const context = session.activeContext || {};
+    return {
+      assignment: { id: session.assignmentId, scheduleVersion: session.scheduleVersion, ...(session.metadata || {}) },
+      employee: session.employee,
+      patient: session.patient,
+      stage,
+      scheduledStartAt: session.scheduledStartAt,
+      scheduledEndAt: session.scheduledEndAt,
+      priorCallStatus: history,
+      factsConfirmed: {
+        checkIn: context.checkIn || (session.checkInStatus === "confirmed" ? { status: "confirmed" } : {}),
+        checkOut: context.checkOut || (session.checkOutStatus === "confirmed" ? { status: "confirmed" } : {}),
+      },
+      requestedCallbackAt: context.checkIn?.nextCallAt || context.checkOut?.nextCallAt || null,
+      unresolvedQuestions: context.unresolvedQuestions || [],
+    };
+  }
+  async createCallAttempt({ organizationId, sessionId, stage, attemptNumber, callTargetRole = "employee", scheduledAt, consecutiveNoAnswer = 0 }) {
+    const r = await this.pool.query(
+      `INSERT INTO attendance_call_attempts (organization_id,session_id,stage,attempt_number,call_target_role,scheduled_at,status,consecutive_no_answer_before)
+       VALUES ($1,$2,$3,$4,$5,$6,'scheduled',$7)
+       ON CONFLICT (session_id,stage,attempt_number) DO NOTHING
+       RETURNING *`, [organizationId, sessionId, stage, attemptNumber, callTargetRole, scheduledAt, consecutiveNoAnswer],
+    );
+    if (r.rows[0]) return { ...this.mapAttempt(r.rows[0]), shouldPlace: true };
+    const existing = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 AND attempt_number=$3", [sessionId, stage, attemptNumber]);
+    const attempt = this.mapAttempt(existing.rows[0]);
+    // Capacity-deferred attempts stay scheduled; the conditional transition
+    // in markCallPlacing below ensures only one worker can place the call.
+    return { ...attempt, shouldPlace: attempt.status === "scheduled" && !attempt.providerCallId };
+  }
+  mapAttempt(row) {
+    if (!row) return null;
+    return { id: row.id, organizationId: row.organization_id, sessionId: row.session_id, stage: row.stage,
+      attemptNumber: row.attempt_number, callTargetRole: row.call_target_role, providerCallId: row.provider_call_id,
+      status: row.status, scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
+      consecutiveNoAnswerBefore: row.consecutive_no_answer_before || 0, recordingUrl: row.recording_url,
+      recordingObjectKey: row.recording_object_key, recordingContentType: row.recording_content_type,
+      outcome: json(row.outcome), durationSeconds: row.duration_seconds };
+  }
+  async getCallAttempt(id) {
+    const r = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE id=$1", [id]);
+    return this.mapAttempt(r.rows[0]);
+  }
+  async attachProviderCallId(id, providerCallId, response) {
+    await this.pool.query(
+      `UPDATE attendance_call_attempts SET provider_call_id=$2,status='ringing',raw_provider_event=$3::jsonb,updated_at=NOW() WHERE id=$1`,
+      [id, providerCallId, JSON.stringify(response || {})],
+    );
+  }
+  async markCallPlacing(id) {
+    const r = await this.pool.query("UPDATE attendance_call_attempts SET status='placing',updated_at=NOW() WHERE id=$1 AND status='scheduled' RETURNING id", [id]);
+    return r.rowCount === 1;
+  }
+  async reserveOutboundCallSlot({ callAttemptId, organizationId, maxConcurrentCalls, ttlMinutes = 180 }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // One transaction-scoped lock serializes capacity checks across replicas.
+      await client.query("SELECT pg_advisory_xact_lock($1)", [741928461]);
+      await client.query("DELETE FROM outbound_call_slots WHERE expires_at <= NOW()");
+      const existing = await client.query("SELECT 1 FROM outbound_call_slots WHERE call_attempt_id=$1", [callAttemptId]);
+      if (existing.rowCount) { await client.query("COMMIT"); return true; }
+      const count = await client.query("SELECT COUNT(*)::int AS active FROM outbound_call_slots");
+      if (count.rows[0].active >= maxConcurrentCalls) { await client.query("COMMIT"); return false; }
+      await client.query(
+        `INSERT INTO outbound_call_slots(call_attempt_id,organization_id,expires_at)
+         VALUES($1,$2,NOW()+($3 * INTERVAL '1 minute'))`,
+        [callAttemptId, organizationId, ttlMinutes],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+  async releaseOutboundCallSlot(callAttemptId) {
+    await this.pool.query("DELETE FROM outbound_call_slots WHERE call_attempt_id=$1", [callAttemptId]);
+  }
+  async markCallPlacementFailed(id, reason) {
+    await this.pool.query("UPDATE attendance_call_attempts SET status='placement_failed',raw_provider_event=$2::jsonb,updated_at=NOW() WHERE id=$1",
+      [id, JSON.stringify({ error: String(reason || "Call placement failed") })]);
+  }
+  async claimCallStream(id) {
+    const r = await this.pool.query(
+      `UPDATE attendance_call_attempts SET stream_started_at=NOW(),stream_ended_at=NULL,updated_at=NOW()
+       WHERE id=$1 AND LOWER(status) NOT IN ('completed','no-answer','noanswer','failed','busy','canceled','cancelled')
+         AND (stream_started_at IS NULL OR stream_ended_at IS NOT NULL) RETURNING id`, [id],
+    );
+    return r.rowCount === 1;
+  }
+  async endCallStream(id) {
+    await this.pool.query("UPDATE attendance_call_attempts SET stream_ended_at=NOW(),updated_at=NOW() WHERE id=$1 AND stream_ended_at IS NULL", [id]);
+  }
+  async updateCallByProviderId(event) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      let r = await client.query("SELECT * FROM attendance_call_attempts WHERE provider=$1 AND provider_call_id=$2 FOR UPDATE", [event.provider, event.providerCallId]);
+      if (r.rows[0]) {
+        const row = r.rows[0];
+        const raw = event.rawEvent || {};
+        const status = String(event.status || row.status).toLowerCase();
+        const safeProviderEvent = {
+          providerCallId: event.providerCallId,
+          status,
+          startTime: raw.StartTime || null,
+          answerTime: raw.AnswerTime || null,
+          endTime: raw.EndTime || null,
+          durationSeconds: event.durationSeconds || null,
+          recordingAvailable: Boolean(raw.RecordingUrl || raw.recording_url),
+        };
+        await client.query(
+          `UPDATE attendance_call_attempts SET status=$2, ended_at=$3, duration_seconds=$4,
+           answered_at=COALESCE(answered_at,$5), recording_url=COALESCE($6,recording_url), raw_provider_event=$7::jsonb, updated_at=NOW()
+           WHERE id=$1`,
+          [row.id, status, event.endedAt, event.durationSeconds, raw.AnswerTime || null, raw.RecordingUrl || raw.recording_url || null, JSON.stringify(safeProviderEvent)],
+        );
+        const terminal = ["completed", "no-answer", "noanswer", "failed", "busy", "canceled", "cancelled"].includes(status.replace(/[ _-]/g, ""));
+        if (terminal || raw.EndTime) await client.query("DELETE FROM outbound_call_slots WHERE call_attempt_id=$1", [row.id]);
+        await client.query(
+          `INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+           VALUES ($1,$2,'vobiz.call_status',$3::jsonb)`,
+          [row.organization_id, row.session_id, JSON.stringify({
+            provider: event.provider, providerCallId: event.providerCallId, status,
+            durationSeconds: event.durationSeconds || null, startTime: raw.StartTime || null,
+            answerTime: raw.AnswerTime || null, endTime: raw.EndTime || null,
+            recordingAvailable: Boolean(raw.RecordingUrl || raw.recording_url),
+          })],
+        );
+        await client.query("COMMIT");
+        return this.getCallAttempt(row.id);
+      }
+      r = await client.query("SELECT * FROM call_records WHERE provider=$1 AND provider_call_id=$2 FOR UPDATE", [event.provider, event.providerCallId]);
+      if (!r.rows[0]) { await client.query("COMMIT"); return null; }
+      await client.query("UPDATE call_records SET status=$3,updated_at=NOW() WHERE provider=$1 AND provider_call_id=$2", [event.provider, event.providerCallId, event.status]);
+      await client.query("COMMIT");
+      return { id: r.rows[0].id, status: event.status, genericCall: true };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async saveTranscript({ organizationId, sessionId, callAttemptId, language, text }) {
+    const r = await this.pool.query(
+      `INSERT INTO attendance_transcripts (organization_id,session_id,call_attempt_id,language,transcript)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (call_attempt_id) DO UPDATE SET transcript=EXCLUDED.transcript,language=EXCLUDED.language
+       RETURNING *`, [organizationId, sessionId, callAttemptId, language, text],
+    );
+    await this.pool.query("UPDATE attendance_call_attempts SET transcript_id=$2,updated_at=NOW() WHERE id=$1", [callAttemptId, r.rows[0].id]);
+    return r.rows[0];
+  }
+  async getTranscriptForCall(callAttemptId) {
+    const r = await this.pool.query("SELECT * FROM attendance_transcripts WHERE call_attempt_id=$1", [callAttemptId]);
+    return r.rows[0] ? { ...r.rows[0], text: r.rows[0].transcript } : null;
+  }
+  async saveCallOutcome(callAttemptId, outcome) {
+    await this.pool.query("UPDATE attendance_call_attempts SET outcome=$2::jsonb,updated_at=NOW() WHERE id=$1", [callAttemptId, JSON.stringify(outcome)]);
+    await this.pool.query(
+      `UPDATE attendance_transcripts SET extraction=$2::jsonb WHERE call_attempt_id=$1`, [callAttemptId, JSON.stringify(outcome)],
+    );
+  }
+  async nextAttemptNumber(sessionId, stage) {
+    const r = await this.pool.query("SELECT COALESCE(MAX(attempt_number),0)+1 AS next FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2", [sessionId, stage]);
+    return Number(r.rows[0].next);
+  }
+  async setStageStatus(sessionId, stage, status, contextPatch = {}) {
+    const column = stage === "check_in" ? "check_in_status" : "check_out_status";
+    const stageKey = stage === "check_in" ? "checkIn" : "checkOut";
+    await this.pool.query(
+      `WITH updated AS (
+         UPDATE attendance_sessions SET ${column}=$2,
+          active_context=jsonb_set(active_context, ARRAY[$3], COALESCE(active_context-> $3,'{}'::jsonb) || $4::jsonb, true), updated_at=NOW()
+          WHERE id=$1 RETURNING organization_id
+       )
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.stage_status',$5::jsonb FROM updated`,
+      [sessionId, status, stageKey, JSON.stringify(contextPatch), JSON.stringify({ stage, status, ...contextPatch })],
+    );
+  }
+  async setRecordingObjectKey(callAttemptId, key, contentType) {
+    await this.pool.query("UPDATE attendance_call_attempts SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1", [callAttemptId, key, contentType || null]);
+  }
+  async markSessionCompleted(sessionId) {
+    const result = await this.pool.query(
+      `WITH eligible AS (
+         SELECT id, organization_id, session_status
+         FROM attendance_sessions
+         WHERE id=$1 AND check_in_status='confirmed' AND check_out_status='confirmed'
+         FOR UPDATE
+       ), updated AS (
+         UPDATE attendance_sessions s SET session_status='completed',updated_at=NOW()
+         FROM eligible e
+         WHERE s.id=e.id AND e.session_status IS DISTINCT FROM 'completed'
+         RETURNING s.organization_id,s.id
+       ), audit AS (
+         INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+         SELECT organization_id,id,'attendance.session_completed','{}'::jsonb FROM updated
+       )
+       SELECT EXISTS(SELECT 1 FROM eligible) AS eligible`, [sessionId],
+    );
+    return result.rows[0]?.eligible === true;
+  }
+  async markSessionException(sessionId) {
+    await this.pool.query(
+      `WITH updated AS (UPDATE attendance_sessions SET session_status='exception',updated_at=NOW() WHERE id=$1 RETURNING organization_id)
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.session_exception','{}'::jsonb FROM updated`, [sessionId],
+    );
+  }
+  async getSessionArtifacts(sessionId) {
+    const session = await this.getAttendanceSession(sessionId);
+    if (!session) return null;
+    const [attempts, transcripts, events] = await Promise.all([
+      this.pool.query("SELECT * FROM attendance_call_attempts WHERE session_id=$1 ORDER BY created_at", [sessionId]),
+      this.pool.query("SELECT * FROM attendance_transcripts WHERE session_id=$1 ORDER BY created_at", [sessionId]),
+      this.pool.query("SELECT event_type,event_data,created_at FROM attendance_audit_events WHERE session_id=$1 ORDER BY created_at", [sessionId]),
+    ]);
+    return {
+      session,
+      callAttempts: attempts.rows.map((row) => this.mapAttempt(row)),
+      transcripts: transcripts.rows.map((row) => ({
+        id: row.id,
+        callAttemptId: row.call_attempt_id,
+        language: row.language,
+        text: row.transcript,
+        extraction: json(row.extraction),
+        createdAt: row.created_at,
+      })),
+      logs: events.rows.map((row) => ({
+        eventType: row.event_type,
+        data: json(row.event_data),
+        createdAt: row.created_at,
+      })),
+    };
+  }
+  async buildBackendAttendancePayload(sessionId) {
+    const artifacts = await this.getSessionArtifacts(sessionId);
+    if (!artifacts) return null;
+    return {
+      session: artifacts.session,
+      callAttempts: artifacts.callAttempts,
+      transcripts: artifacts.transcripts,
+    };
+  }
+  async markBackendDelivered(sessionId, response) {
+    await this.pool.query(
+      `WITH updated AS (
+         UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,
+          backend_delivered_at=NOW(),updated_at=NOW()
+          WHERE id=$1 AND session_status='completed' AND check_in_status='confirmed' AND check_out_status='confirmed'
+          RETURNING organization_id
+       )
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.backend_delivered',$3::jsonb FROM updated`,
+      [sessionId, JSON.stringify(response || {}), JSON.stringify({ status: response?.status || null })],
+    );
+  }
+}
+
+module.exports = { PostgresRepository };
+ THEN (j.payload->>'attemptNumber')::int END) FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage),0)::int AS max_job_attempt,\n" +
+      "  (SELECT j.id FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_job_id,\n" +
+      "  (SELECT CASE WHEN COALESCE(j.payload->>'attemptNumber','') ~ '^[0-9]+
+    const sessions = await this.listAttendanceSessions(organizationId, { search, status: "completed", limit });
+    return sessions.filter((session) => session.checkIn.status === "confirmed" && session.checkOut.status === "confirmed");
+  }
+  async getCallCenterData(organizationId) {
+    const [active, retries] = await Promise.all([
+      this.pool.query(
+        `SELECT a.id AS attempt_id,a.provider_call_id,a.stage,a.status,a.attempt_number,a.answered_at,a.created_at,
+                s.id AS session_id,s.external_assignment_id,s.language,s.employee->>'id' AS employee_id,
+                s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name,
+                s.patient->>'id' AS patient_id,s.active_context
+         FROM attendance_call_attempts a JOIN attendance_sessions s ON s.id=a.session_id
+         WHERE a.organization_id=$1 AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('ringing','inprogress','answered')
+         ORDER BY a.created_at DESC LIMIT 100`, [organizationId],
+      ),
+      this.pool.query(
+        `SELECT j.id,j.run_at,j.payload->>'stage' AS stage,j.payload->>'attemptNumber' AS attempt_number,
+                s.id AS session_id,s.external_assignment_id,s.language,s.employee->>'id' AS employee_id,
+                s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name
+         FROM attendance_jobs j JOIN attendance_sessions s ON j.payload->>'sessionId'=s.id::text
+         WHERE s.organization_id=$1 AND j.job_type='place_call' AND j.status='queued'
+         ORDER BY j.run_at LIMIT 100`, [organizationId],
+      ),
+    ]);
+    return {
+      activeCalls: active.rows.map((row) => ({ attemptId: row.attempt_id, callId: row.provider_call_id, sessionId: row.session_id,
+        assignmentId: row.external_assignment_id, stage: row.stage, status: row.status, attemptNumber: row.attempt_number,
+        employee: { id: row.employee_id, name: row.employee_name }, patient: { id: row.patient_id, name: row.patient_name },
+        language: row.language, startedAt: row.answered_at || row.created_at })),
+      retryQueue: retries.rows.map((row) => ({ jobId: row.id, sessionId: row.session_id, assignmentId: row.external_assignment_id,
+        stage: row.stage, attemptNumber: Number(row.attempt_number) || 1, runAt: row.run_at, language: row.language,
+        employee: { id: row.employee_id, name: row.employee_name }, patient: { name: row.patient_name } })),
+      maxConcurrentCalls: Number(process.env.MAX_CONCURRENT_CALLS) || 20,
+    };
+  }
+  async getAgentSessionContext(id, stage) {
+    const session = await this.getAttendanceSession(id);
+    if (!session) return null;
+    const attempts = await this.pool.query(
+      `SELECT stage,status,attempt_number,scheduled_at,answered_at,ended_at,outcome
+       FROM attendance_call_attempts WHERE session_id=$1 ORDER BY created_at`, [id],
+    );
+    const history = attempts.rows.map((row) => ({
+      stage: row.stage, status: row.status, attemptNumber: row.attempt_number,
+      scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
+      outcome: json(row.outcome),
+    }));
+    const context = session.activeContext || {};
+    return {
+      assignment: { id: session.assignmentId, scheduleVersion: session.scheduleVersion, ...(session.metadata || {}) },
+      employee: session.employee,
+      patient: session.patient,
+      stage,
+      scheduledStartAt: session.scheduledStartAt,
+      scheduledEndAt: session.scheduledEndAt,
+      priorCallStatus: history,
+      factsConfirmed: {
+        checkIn: context.checkIn || (session.checkInStatus === "confirmed" ? { status: "confirmed" } : {}),
+        checkOut: context.checkOut || (session.checkOutStatus === "confirmed" ? { status: "confirmed" } : {}),
+      },
+      requestedCallbackAt: context.checkIn?.nextCallAt || context.checkOut?.nextCallAt || null,
+      unresolvedQuestions: context.unresolvedQuestions || [],
+    };
+  }
+  async createCallAttempt({ organizationId, sessionId, stage, attemptNumber, callTargetRole = "employee", scheduledAt, consecutiveNoAnswer = 0 }) {
+    const r = await this.pool.query(
+      `INSERT INTO attendance_call_attempts (organization_id,session_id,stage,attempt_number,call_target_role,scheduled_at,status,consecutive_no_answer_before)
+       VALUES ($1,$2,$3,$4,$5,$6,'scheduled',$7)
+       ON CONFLICT (session_id,stage,attempt_number) DO NOTHING
+       RETURNING *`, [organizationId, sessionId, stage, attemptNumber, callTargetRole, scheduledAt, consecutiveNoAnswer],
+    );
+    if (r.rows[0]) return { ...this.mapAttempt(r.rows[0]), shouldPlace: true };
+    const existing = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 AND attempt_number=$3", [sessionId, stage, attemptNumber]);
+    const attempt = this.mapAttempt(existing.rows[0]);
+    // Capacity-deferred attempts stay scheduled; the conditional transition
+    // in markCallPlacing below ensures only one worker can place the call.
+    return { ...attempt, shouldPlace: attempt.status === "scheduled" && !attempt.providerCallId };
+  }
+  mapAttempt(row) {
+    if (!row) return null;
+    return { id: row.id, organizationId: row.organization_id, sessionId: row.session_id, stage: row.stage,
+      attemptNumber: row.attempt_number, callTargetRole: row.call_target_role, providerCallId: row.provider_call_id,
+      status: row.status, scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
+      consecutiveNoAnswerBefore: row.consecutive_no_answer_before || 0, recordingUrl: row.recording_url,
+      recordingObjectKey: row.recording_object_key, recordingContentType: row.recording_content_type,
+      outcome: json(row.outcome), durationSeconds: row.duration_seconds };
+  }
+  async getCallAttempt(id) {
+    const r = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE id=$1", [id]);
+    return this.mapAttempt(r.rows[0]);
+  }
+  async attachProviderCallId(id, providerCallId, response) {
+    await this.pool.query(
+      `UPDATE attendance_call_attempts SET provider_call_id=$2,status='ringing',raw_provider_event=$3::jsonb,updated_at=NOW() WHERE id=$1`,
+      [id, providerCallId, JSON.stringify(response || {})],
+    );
+  }
+  async markCallPlacing(id) {
+    const r = await this.pool.query("UPDATE attendance_call_attempts SET status='placing',updated_at=NOW() WHERE id=$1 AND status='scheduled' RETURNING id", [id]);
+    return r.rowCount === 1;
+  }
+  async reserveOutboundCallSlot({ callAttemptId, organizationId, maxConcurrentCalls, ttlMinutes = 180 }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // One transaction-scoped lock serializes capacity checks across replicas.
+      await client.query("SELECT pg_advisory_xact_lock($1)", [741928461]);
+      await client.query("DELETE FROM outbound_call_slots WHERE expires_at <= NOW()");
+      const existing = await client.query("SELECT 1 FROM outbound_call_slots WHERE call_attempt_id=$1", [callAttemptId]);
+      if (existing.rowCount) { await client.query("COMMIT"); return true; }
+      const count = await client.query("SELECT COUNT(*)::int AS active FROM outbound_call_slots");
+      if (count.rows[0].active >= maxConcurrentCalls) { await client.query("COMMIT"); return false; }
+      await client.query(
+        `INSERT INTO outbound_call_slots(call_attempt_id,organization_id,expires_at)
+         VALUES($1,$2,NOW()+($3 * INTERVAL '1 minute'))`,
+        [callAttemptId, organizationId, ttlMinutes],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+  async releaseOutboundCallSlot(callAttemptId) {
+    await this.pool.query("DELETE FROM outbound_call_slots WHERE call_attempt_id=$1", [callAttemptId]);
+  }
+  async markCallPlacementFailed(id, reason) {
+    await this.pool.query("UPDATE attendance_call_attempts SET status='placement_failed',raw_provider_event=$2::jsonb,updated_at=NOW() WHERE id=$1",
+      [id, JSON.stringify({ error: String(reason || "Call placement failed") })]);
+  }
+  async claimCallStream(id) {
+    const r = await this.pool.query(
+      `UPDATE attendance_call_attempts SET stream_started_at=NOW(),stream_ended_at=NULL,updated_at=NOW()
+       WHERE id=$1 AND LOWER(status) NOT IN ('completed','no-answer','noanswer','failed','busy','canceled','cancelled')
+         AND (stream_started_at IS NULL OR stream_ended_at IS NOT NULL) RETURNING id`, [id],
+    );
+    return r.rowCount === 1;
+  }
+  async endCallStream(id) {
+    await this.pool.query("UPDATE attendance_call_attempts SET stream_ended_at=NOW(),updated_at=NOW() WHERE id=$1 AND stream_ended_at IS NULL", [id]);
+  }
+  async updateCallByProviderId(event) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      let r = await client.query("SELECT * FROM attendance_call_attempts WHERE provider=$1 AND provider_call_id=$2 FOR UPDATE", [event.provider, event.providerCallId]);
+      if (r.rows[0]) {
+        const row = r.rows[0];
+        const raw = event.rawEvent || {};
+        const status = String(event.status || row.status).toLowerCase();
+        const safeProviderEvent = {
+          providerCallId: event.providerCallId,
+          status,
+          startTime: raw.StartTime || null,
+          answerTime: raw.AnswerTime || null,
+          endTime: raw.EndTime || null,
+          durationSeconds: event.durationSeconds || null,
+          recordingAvailable: Boolean(raw.RecordingUrl || raw.recording_url),
+        };
+        await client.query(
+          `UPDATE attendance_call_attempts SET status=$2, ended_at=$3, duration_seconds=$4,
+           answered_at=COALESCE(answered_at,$5), recording_url=COALESCE($6,recording_url), raw_provider_event=$7::jsonb, updated_at=NOW()
+           WHERE id=$1`,
+          [row.id, status, event.endedAt, event.durationSeconds, raw.AnswerTime || null, raw.RecordingUrl || raw.recording_url || null, JSON.stringify(safeProviderEvent)],
+        );
+        const terminal = ["completed", "no-answer", "noanswer", "failed", "busy", "canceled", "cancelled"].includes(status.replace(/[ _-]/g, ""));
+        if (terminal || raw.EndTime) await client.query("DELETE FROM outbound_call_slots WHERE call_attempt_id=$1", [row.id]);
+        await client.query(
+          `INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+           VALUES ($1,$2,'vobiz.call_status',$3::jsonb)`,
+          [row.organization_id, row.session_id, JSON.stringify({
+            provider: event.provider, providerCallId: event.providerCallId, status,
+            durationSeconds: event.durationSeconds || null, startTime: raw.StartTime || null,
+            answerTime: raw.AnswerTime || null, endTime: raw.EndTime || null,
+            recordingAvailable: Boolean(raw.RecordingUrl || raw.recording_url),
+          })],
+        );
+        await client.query("COMMIT");
+        return this.getCallAttempt(row.id);
+      }
+      r = await client.query("SELECT * FROM call_records WHERE provider=$1 AND provider_call_id=$2 FOR UPDATE", [event.provider, event.providerCallId]);
+      if (!r.rows[0]) { await client.query("COMMIT"); return null; }
+      await client.query("UPDATE call_records SET status=$3,updated_at=NOW() WHERE provider=$1 AND provider_call_id=$2", [event.provider, event.providerCallId, event.status]);
+      await client.query("COMMIT");
+      return { id: r.rows[0].id, status: event.status, genericCall: true };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async saveTranscript({ organizationId, sessionId, callAttemptId, language, text }) {
+    const r = await this.pool.query(
+      `INSERT INTO attendance_transcripts (organization_id,session_id,call_attempt_id,language,transcript)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (call_attempt_id) DO UPDATE SET transcript=EXCLUDED.transcript,language=EXCLUDED.language
+       RETURNING *`, [organizationId, sessionId, callAttemptId, language, text],
+    );
+    await this.pool.query("UPDATE attendance_call_attempts SET transcript_id=$2,updated_at=NOW() WHERE id=$1", [callAttemptId, r.rows[0].id]);
+    return r.rows[0];
+  }
+  async getTranscriptForCall(callAttemptId) {
+    const r = await this.pool.query("SELECT * FROM attendance_transcripts WHERE call_attempt_id=$1", [callAttemptId]);
+    return r.rows[0] ? { ...r.rows[0], text: r.rows[0].transcript } : null;
+  }
+  async saveCallOutcome(callAttemptId, outcome) {
+    await this.pool.query("UPDATE attendance_call_attempts SET outcome=$2::jsonb,updated_at=NOW() WHERE id=$1", [callAttemptId, JSON.stringify(outcome)]);
+    await this.pool.query(
+      `UPDATE attendance_transcripts SET extraction=$2::jsonb WHERE call_attempt_id=$1`, [callAttemptId, JSON.stringify(outcome)],
+    );
+  }
+  async nextAttemptNumber(sessionId, stage) {
+    const r = await this.pool.query("SELECT COALESCE(MAX(attempt_number),0)+1 AS next FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2", [sessionId, stage]);
+    return Number(r.rows[0].next);
+  }
+  async setStageStatus(sessionId, stage, status, contextPatch = {}) {
+    const column = stage === "check_in" ? "check_in_status" : "check_out_status";
+    const stageKey = stage === "check_in" ? "checkIn" : "checkOut";
+    await this.pool.query(
+      `WITH updated AS (
+         UPDATE attendance_sessions SET ${column}=$2,
+          active_context=jsonb_set(active_context, ARRAY[$3], COALESCE(active_context-> $3,'{}'::jsonb) || $4::jsonb, true), updated_at=NOW()
+          WHERE id=$1 RETURNING organization_id
+       )
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.stage_status',$5::jsonb FROM updated`,
+      [sessionId, status, stageKey, JSON.stringify(contextPatch), JSON.stringify({ stage, status, ...contextPatch })],
+    );
+  }
+  async setRecordingObjectKey(callAttemptId, key, contentType) {
+    await this.pool.query("UPDATE attendance_call_attempts SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1", [callAttemptId, key, contentType || null]);
+  }
+  async markSessionCompleted(sessionId) {
+    const result = await this.pool.query(
+      `WITH eligible AS (
+         SELECT id, organization_id, session_status
+         FROM attendance_sessions
+         WHERE id=$1 AND check_in_status='confirmed' AND check_out_status='confirmed'
+         FOR UPDATE
+       ), updated AS (
+         UPDATE attendance_sessions s SET session_status='completed',updated_at=NOW()
+         FROM eligible e
+         WHERE s.id=e.id AND e.session_status IS DISTINCT FROM 'completed'
+         RETURNING s.organization_id,s.id
+       ), audit AS (
+         INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+         SELECT organization_id,id,'attendance.session_completed','{}'::jsonb FROM updated
+       )
+       SELECT EXISTS(SELECT 1 FROM eligible) AS eligible`, [sessionId],
+    );
+    return result.rows[0]?.eligible === true;
+  }
+  async markSessionException(sessionId) {
+    await this.pool.query(
+      `WITH updated AS (UPDATE attendance_sessions SET session_status='exception',updated_at=NOW() WHERE id=$1 RETURNING organization_id)
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.session_exception','{}'::jsonb FROM updated`, [sessionId],
+    );
+  }
+  async getSessionArtifacts(sessionId) {
+    const session = await this.getAttendanceSession(sessionId);
+    if (!session) return null;
+    const [attempts, transcripts, events] = await Promise.all([
+      this.pool.query("SELECT * FROM attendance_call_attempts WHERE session_id=$1 ORDER BY created_at", [sessionId]),
+      this.pool.query("SELECT * FROM attendance_transcripts WHERE session_id=$1 ORDER BY created_at", [sessionId]),
+      this.pool.query("SELECT event_type,event_data,created_at FROM attendance_audit_events WHERE session_id=$1 ORDER BY created_at", [sessionId]),
+    ]);
+    return {
+      session,
+      callAttempts: attempts.rows.map((row) => this.mapAttempt(row)),
+      transcripts: transcripts.rows.map((row) => ({
+        id: row.id,
+        callAttemptId: row.call_attempt_id,
+        language: row.language,
+        text: row.transcript,
+        extraction: json(row.extraction),
+        createdAt: row.created_at,
+      })),
+      logs: events.rows.map((row) => ({
+        eventType: row.event_type,
+        data: json(row.event_data),
+        createdAt: row.created_at,
+      })),
+    };
+  }
+  async buildBackendAttendancePayload(sessionId) {
+    const artifacts = await this.getSessionArtifacts(sessionId);
+    if (!artifacts) return null;
+    return {
+      session: artifacts.session,
+      callAttempts: artifacts.callAttempts,
+      transcripts: artifacts.transcripts,
+    };
+  }
+  async markBackendDelivered(sessionId, response) {
+    await this.pool.query(
+      `WITH updated AS (
+         UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,
+          backend_delivered_at=NOW(),updated_at=NOW()
+          WHERE id=$1 AND session_status='completed' AND check_in_status='confirmed' AND check_out_status='confirmed'
+          RETURNING organization_id
+       )
+       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.backend_delivered',$3::jsonb FROM updated`,
+      [sessionId, JSON.stringify(response || {}), JSON.stringify({ status: response?.status || null })],
+    );
+  }
+}
+
+module.exports = { PostgresRepository };
+ THEN (j.payload->>'attemptNumber')::int END FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_attempt_number,\n" +
+      "  EXISTS(SELECT 1 FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='running') AS has_running_job,\n" +
+      "  (SELECT COALESCE(a.consecutive_no_answer_before,0)::int FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_no_answer_before,\n" +
+      "  (SELECT LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_attempt_status\n" +
+      "FROM followups f\n" +
+      "WHERE NULLIF(f.stage_context->>'nextCallAt','') IS NOT NULL AND (f.stage_context->>'nextCallAt')::timestamptz <= NOW()\n" +
+      "  AND NOT EXISTS(SELECT 1 FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage AND a.ended_at IS NULL AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('placing','ringing','answered','inprogress'))\n" +
+      "ORDER BY (f.stage_context->>'nextCallAt')::timestamptz LIMIT $1";
+    const { rows } = await this.pool.query(sql, [safeLimit]);
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      organizationId: row.organization_id,
+      stage: row.stage,
+      reason: row.reason,
+      dueAt: row.due_at,
+      maxCallAttempt: Number(row.max_call_attempt) || 0,
+      maxJobAttempt: Number(row.max_job_attempt) || 0,
+      queuedJobId: row.queued_job_id || null,
+      queuedAttemptNumber: row.queued_attempt_number == null ? null : Number(row.queued_attempt_number),
+      hasRunningJob: row.has_running_job === true,
+      lastNoAnswerBefore: Number(row.last_no_answer_before) || 0,
+      lastAttemptStatus: row.last_attempt_status || null,
+    }));
+  }
+
   async listAttendanceLedger(organizationId, { search = "", limit = 100 } = {}) {
     const sessions = await this.listAttendanceSessions(organizationId, { search, status: "completed", limit });
     return sessions.filter((session) => session.checkIn.status === "confirmed" && session.checkOut.status === "confirmed");
