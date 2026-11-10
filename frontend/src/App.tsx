@@ -5,7 +5,6 @@ import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton,
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
-import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
@@ -14,14 +13,13 @@ import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { AttendancePage } from "./pages/AttendancePage";
 import { CallCenterPage } from "./pages/CallCenterPage";
-import { DutySchedulesPage } from "./pages/DutySchedulesPage";
 import { AssignmentStatusPage } from "./pages/AssignmentStatusPage";
 import { NewAssignmentPage } from "./pages/NewAssignmentPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
+import { AttendanceSchedulesPage } from "./pages/AttendanceSchedulesPage";
 import { PageHeaderTargetContext } from "./components/OperationsUI";
 import { LoginPage } from "./pages/LoginPage";
 import { fetchCurrentUser, signOut, type WebUser } from "./api/client";
@@ -31,8 +29,7 @@ const navigation = [
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
   { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
-  { label: "Duty schedules", path: "/schedules", icon: <CalendarMonthRoundedIcon /> },
-  { label: "Attendance", path: "/attendance", icon: <FactCheckRoundedIcon /> },
+  { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon /> },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
@@ -104,8 +101,8 @@ function App() {
         <PageHeaderTargetContext.Provider value={headerTarget}>
         <Routes>
           <Route path="/" element={<OverviewPage />} />
-          <Route path="/attendance" element={<AttendancePage />} />
-          <Route path="/schedules" element={<DutySchedulesPage />} />
+          <Route path="/attendance" element={<AttendanceSchedulesPage />} />
+          <Route path="/schedules" element={<AttendanceSchedulesPage defaultSection="schedules" />} />
           <Route path="/call-center" element={<CallCenterPage />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />

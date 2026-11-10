@@ -12,7 +12,7 @@ import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../componen
 
 const dateTime = (value: string) => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
-export function DutySchedulesPage() {
+export function DutySchedulesPage({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [shift, setShift] = useState("all");
@@ -24,7 +24,7 @@ export function DutySchedulesPage() {
   const nextCalls = [...records].sort((a, b) => new Date(a.scheduledStartAt).getTime() - new Date(b.scheduledStartAt).getTime()).slice(0, 4);
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="ASSIGNMENT DISPATCH / CALL SCHEDULES" title="Duty schedules" description="Assignments and scheduled outbound attendance calls received by the service." actions={<Button component={RouterLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />}>New assignment</Button>} />
+    {!embedded && <PageHeader eyebrow="ASSIGNMENT DISPATCH / CALL SCHEDULES" title="Duty schedules" description="Assignments and scheduled outbound attendance calls received by the service." actions={<Button component={RouterLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />}>New assignment</Button>} />}
     {(sessions.isError || summary.isError) && <Alert severity="error">Could not load schedules from the backend.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Scheduled today" value={summary.data?.scheduledToday.toLocaleString() ?? "—"} detail="Assignments in today's shift window" icon={<CalendarMonthRoundedIcon />} /></Grid>
@@ -58,7 +58,7 @@ export function DutySchedulesPage() {
         }
       />
       {sessions.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Duty schedule assignments"><TableHead><TableRow>{["Assignment / staff", "Patient", "Scheduled duty", "Check-in", "Check-out", "Language", "Session", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={row.sessionId} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{row.employee.name} · {row.employee.id || "ID unavailable"}</Typography></TableCell><TableCell>{row.patient.name}</TableCell><TableCell>{dateTime(row.scheduledStartAt)}<Typography variant="caption" color="text.secondary" display="block">to {dateTime(row.scheduledEndAt)}</Typography></TableCell><TableCell><StatusChip status={row.checkIn.status} /></TableCell><TableCell><StatusChip status={row.checkOut.status} /></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.sessionStatus} /></TableCell><TableCell><Button size="small" onClick={() => navigate(`/sessions/${row.sessionId}`)}>Details</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+      <TableContainer><Table size="small" aria-label="Duty schedule assignments"><TableHead><TableRow>{["Assignment / staff", "Patient", "Scheduled duty", "Check-in time", "Check-out time", "Language", "Session", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={row.sessionId} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{row.employee.name} · {row.employee.id || "ID unavailable"}</Typography></TableCell><TableCell>{row.patient.name}</TableCell><TableCell>{dateTime(row.scheduledStartAt)}<Typography variant="caption" color="text.secondary" display="block">to {dateTime(row.scheduledEndAt)}</Typography></TableCell><TableCell><StatusChip status={row.checkIn.status} /><Typography variant="caption" display="block" color="text.secondary">{row.checkIn.reportedAt ? dateTime(row.checkIn.reportedAt) : "—"}</Typography></TableCell><TableCell><StatusChip status={row.checkOut.status} /><Typography variant="caption" display="block" color="text.secondary">{row.checkOut.reportedAt ? dateTime(row.checkOut.reportedAt) : "—"}</Typography></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.sessionStatus} /></TableCell><TableCell><Button size="small" onClick={() => navigate(`/sessions/${row.sessionId}`)}>Details</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
       {sessions.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 4 }}>No assignments match these filters.</Typography>}
     </Card>
   </Stack>;
