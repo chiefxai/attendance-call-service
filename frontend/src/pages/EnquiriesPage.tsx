@@ -288,10 +288,10 @@ export function EnquiriesPage() {
     </Dialog>
 
     <Dialog open={Boolean(resolveCall)} onClose={() => { if (!resolveMutation.isPending) setResolveCall(null); }} fullWidth maxWidth="sm">
-      <DialogTitle>Resolve patient enquiry</DialogTitle>
+      <DialogTitle>Assign staff to enquiry</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          <Typography variant="body2" color="text.secondary">Choose a staff member to assign for follow-up. Suggestions are listed first; you can choose any active staff member.</Typography>
+          <Typography variant="body2" color="text.secondary">Contact the selected staff member to confirm availability, then assign them to this enquiry. Suggestions are listed first; you can choose any active staff member.</Typography>
           {resolveCall?.staffSuggestions.length ? <Alert severity="info">Suggested staff are ordered by district and regional match. Confirm availability with the staff member before assigning.</Alert> : <Alert severity="warning">No staff matched the requested time and location. Select a staff member after your manual review.</Alert>}
           {staffDirectory.isLoading ? <CircularProgress size={24} /> : <FormControl fullWidth>
             <InputLabel id="resolve-staff-label">Staff member</InputLabel>
@@ -316,7 +316,7 @@ export function EnquiriesPage() {
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={() => setResolveCall(null)} disabled={resolveMutation.isPending}>Cancel</Button>
-        <Button variant="contained" disabled={!resolveCall || !resolveStaffId || resolveMutation.isPending} onClick={() => resolveCall && resolveMutation.mutate({ callId: resolveCall.id, staffId: resolveStaffId })}>{resolveMutation.isPending ? "Resolving…" : "Resolve enquiry"}</Button>
+        <Button variant="contained" disabled={!resolveCall || !resolveStaffId || resolveMutation.isPending} onClick={() => resolveCall && resolveMutation.mutate({ callId: resolveCall.id, staffId: resolveStaffId })}>{resolveMutation.isPending ? "Assigning…" : "Confirm assignment"}</Button>
       </DialogActions>
     </Dialog>
   </Stack>;
@@ -328,7 +328,7 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
     same_district: "Same district", same_region: "Same state", other_region: "Other area",
   }[match] || "Location not matched");
   const statusLabel = (status: IncomingCall["enquiryStatus"]) => ({
-    processing: "Processing", need_review: "Need review", suggestion: "Suggestion", shortage: "Shortage", resolved: "Resolved",
+    processing: "Processing", need_review: "Need review", suggestion: "Suggestion", shortage: "Need review · shortage", resolved: "Resolved",
   }[status] || "Need review");
   const statusColor = (status: IncomingCall["enquiryStatus"]) => ({
     processing: "info", need_review: "warning", suggestion: "success", shortage: "warning", resolved: "default",
@@ -337,46 +337,49 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
     <Stack direction="row" spacing={1} alignItems="center"><Typography variant="h6" fontWeight={700}>Incoming patient calls</Typography><Chip size="small" label={calls.length} /></Stack>
     {error && <Alert severity="error">Could not load incoming patient enquiries.</Alert>}
     {loading && <Box sx={{ display: "grid", placeItems: "center", py: 3 }}><CircularProgress size={24} /></Box>}
-    {calls.map((call) => <Card key={call.id}>
-      <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-        <Stack spacing={1.5}>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }}>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography fontWeight={700}>{call.patient?.name || "Incoming caller"}</Typography>
-              <Typography variant="body2" color="text.secondary">{call.fromNumber} · {formatTime(call.startedAt)}</Typography>
-            </Box>
-            <Chip size="small" color={statusColor(call.enquiryStatus)} label={statusLabel(call.enquiryStatus)} />
-          </Stack>
-          {(call.enquiryAnalysis?.activityName || call.enquiryAnalysis?.needsSummary) && <Box>
-            {call.enquiryAnalysis.activityName && <Typography variant="body2"><strong>Activity:</strong> {call.enquiryAnalysis.activityName}{call.enquiryAnalysis.durationMinutes ? ` · ${call.enquiryAnalysis.durationMinutes} min` : ""}</Typography>}
-            {call.enquiryAnalysis?.requestedStartAt && <Typography variant="body2"><strong>Requested start:</strong> {formatTime(call.enquiryAnalysis.requestedStartAt)}</Typography>}
-            {call.enquiryAnalysis?.needsSummary && <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}><strong>Need:</strong> {call.enquiryAnalysis.needsSummary}</Typography>}
-          </Box>}
-          {call.enquiryStatus === "need_review" && <Alert severity="info">{call.enquiryAnalysis?.missingDetails?.includes("patient_district")
-            ? "The patient's district is missing from the saved address, so staff location cannot be matched yet."
-            : call.enquiryAnalysis?.missingDetails?.includes("activity")
-              ? "The caller's need did not match an active care activity. Add or update the activity catalog, then follow up with the caller."
-              : "The agent could not confidently extract the request. Review the transcript and contact the caller if needed."} Review this enquiry before assigning staff.</Alert>}
-          {call.enquiryStatus === "shortage" && <Alert severity="warning">No staff without an overlapping duty were found for this time window. A human can review and choose any active staff member.</Alert>}
-          {call.staffSuggestions.length > 0 && call.enquiryStatus !== "resolved" && <>
-            <Alert severity="info">Up to 10 staff without an overlapping duty are shown by location match. Contact the suggested staff and confirm availability before making an assignment.</Alert>
-            <TableContainer sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}>
-            <Table size="small" aria-label="Suggested staff for patient enquiry">
-              <TableHead><TableRow><TableCell>#</TableCell><TableCell>Available staff</TableCell><TableCell>Phone</TableCell><TableCell>Location match</TableCell><TableCell>Address</TableCell></TableRow></TableHead>
-              <TableBody>{call.staffSuggestions.slice(0, 10).map((staff, index) => <TableRow key={staff.id}>
-                <TableCell>{index + 1}</TableCell><TableCell><Typography fontWeight={650}>{staff.name}</Typography><Typography variant="caption" color="text.secondary">{staff.id}</Typography></TableCell>
-                <TableCell>{staff.phoneNumber || "Not provided"}</TableCell><TableCell><Chip size="small" variant="outlined" label={locationLabel(staff.locationMatch)} /></TableCell><TableCell>{staff.address || "Not provided"}</TableCell>
-              </TableRow>)}</TableBody>
-            </Table>
-            </TableContainer>
-          </>}
-          {call.enquiryStatus === "resolved" && call.resolvedStaff && <Alert severity="success">Resolved with {call.resolvedStaff.name}{call.resolvedStaff.phoneNumber ? ` · ${call.resolvedStaff.phoneNumber}` : ""}.</Alert>}
-          {(call.enquiryStatus === "suggestion" || call.enquiryStatus === "shortage") && <Box><Button variant="contained" size="small" onClick={() => onResolve(call)}>Resolve</Button></Box>}
-          {call.transcript && <Box sx={{ p: 1.5, bgcolor: "action.hover", borderRadius: 1.5 }}><Typography variant="subtitle2">Transcript</Typography><Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}>{call.transcript}</Typography></Box>}
-          {call.hasRecording && <audio controls preload="none" src={incomingCallRecordingUrl(call.id)} style={{ width: "100%" }} />}
-        </Stack>
-      </CardContent>
-    </Card>)}
+    {calls.length > 0 && <TableContainer component={Card} sx={{ overflowX: "auto" }}>
+      <Table aria-label="Patient enquiries" sx={{ minWidth: 900 }}>
+        <TableHead><TableRow>
+          <TableCell>Name</TableCell><TableCell>Phone number</TableCell><TableCell>Need</TableCell><TableCell>Timing</TableCell><TableCell>Status</TableCell>
+        </TableRow></TableHead>
+        <TableBody>{calls.map((call) => <TableRow key={call.id} hover>
+          <TableCell sx={{ minWidth: 150 }}>
+            <Typography fontWeight={700}>{call.patient?.name || "Incoming caller"}</Typography>
+            <Typography variant="caption" color="text.secondary">Call {formatTime(call.startedAt)}</Typography>
+          </TableCell>
+          <TableCell sx={{ minWidth: 140 }}><a href={`tel:${call.fromNumber}`} style={{ color: "inherit" }}>{call.fromNumber}</a></TableCell>
+          <TableCell sx={{ minWidth: 220, maxWidth: 360 }}>
+            <Typography variant="body2">{call.enquiryAnalysis?.needsSummary || call.enquiryAnalysis?.activityName || (call.enquiryStatus === "processing" ? "Transcribing call…" : "Need not captured")}</Typography>
+            {call.enquiryAnalysis?.activityName && call.enquiryAnalysis?.needsSummary && <Typography variant="caption" color="text.secondary">{call.enquiryAnalysis.activityName}{call.enquiryAnalysis.durationMinutes ? ` · ${call.enquiryAnalysis.durationMinutes} min` : ""}</Typography>}
+          </TableCell>
+          <TableCell sx={{ minWidth: 170 }}>
+            <Typography variant="body2">{formatTime(call.enquiryAnalysis?.requestedStartAt)}</Typography>
+            {call.enquiryAnalysis?.durationMinutes && <Typography variant="caption" color="text.secondary">{call.enquiryAnalysis.durationMinutes} min</Typography>}
+          </TableCell>
+          <TableCell sx={{ minWidth: 240 }}>
+            <Stack spacing={1} alignItems="flex-start">
+              <Chip size="small" color={statusColor(call.enquiryStatus)} label={statusLabel(call.enquiryStatus)} />
+              {call.enquiryStatus === "suggestion" && call.staffSuggestions.length > 0 && <Stack spacing={.5} sx={{ width: "100%" }}>
+                <Typography variant="caption" color="text.secondary">Suggested staff · contact to confirm</Typography>
+                {call.staffSuggestions.slice(0, 10).map((staff, index) => <Stack key={staff.id} direction="row" spacing={.75} alignItems="center" flexWrap="wrap">
+                  <Typography variant="body2">{index + 1}. {staff.name}</Typography>
+                  {staff.phoneNumber && <Button size="small" component="a" href={`tel:${staff.phoneNumber}`} sx={{ minWidth: 0, py: 0, px: .5 }}>{staff.phoneNumber}</Button>}
+                  <Chip size="small" variant="outlined" label={locationLabel(staff.locationMatch)} />
+                </Stack>)}
+              </Stack>}
+              {call.enquiryStatus === "resolved" && call.resolvedStaff && <Typography variant="body2">Assigned: {call.resolvedStaff.name}</Typography>}
+              {call.enquiryStatus === "need_review" && <Typography variant="caption" color="text.secondary">Human review required</Typography>}
+              {call.enquiryStatus === "shortage" && <Typography variant="caption" color="text.secondary">Staff shortage · human review and manual assignment required</Typography>}
+              {call.enquiryStatus === "suggestion" && <Typography variant="caption" color="text.secondary">Human to call and confirm before assignment</Typography>}
+              {call.enquiryStatus === "resolved" && <Typography variant="caption" color="text.secondary">{call.resolvedStaff?.phoneNumber || ""}</Typography>}
+              {!["processing", "resolved"].includes(call.enquiryStatus) && <Button variant="outlined" size="small" onClick={() => onResolve(call)}>{call.enquiryStatus === "suggestion" ? "Confirm & assign" : call.enquiryStatus === "shortage" ? "Review shortage & assign" : "Review & assign"}</Button>}
+              {call.transcript && <Box sx={{ mt: .5, maxWidth: 260 }}><Typography variant="caption" color="text.secondary" sx={{ display: "block", whiteSpace: "pre-wrap" }}>{call.transcript}</Typography></Box>}
+              {call.hasRecording && <audio controls preload="none" src={incomingCallRecordingUrl(call.id)} style={{ width: 220, maxWidth: "100%" }} />}
+            </Stack>
+          </TableCell>
+        </TableRow>)}</TableBody>
+      </Table>
+    </TableContainer>}
     {!loading && !error && calls.length === 0 && <Card><CardContent><Typography variant="body2" color="text.secondary">No incoming patient calls yet.</Typography></CardContent></Card>}
   </Stack>;
 }

@@ -417,8 +417,8 @@ class PostgresRepository {
         await client.query("COMMIT");
         return null;
       }
-      if (!["suggestion", "shortage"].includes(enquiryResult.rows[0].enquiry_status)) {
-        const error = new Error("Only enquiries with a staff suggestion or shortage can be resolved");
+      if (!["need_review", "suggestion", "shortage"].includes(enquiryResult.rows[0].enquiry_status)) {
+        const error = new Error("Only enquiries needing review or staff assignment can be resolved");
         error.status = 409;
         throw error;
       }
