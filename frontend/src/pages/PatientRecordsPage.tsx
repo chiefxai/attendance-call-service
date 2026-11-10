@@ -43,7 +43,7 @@ export function PatientRecordsPage() {
     const phoneNumber = phoneInput ? normalizeIndianMobile(phoneInput) : "";
     if (phoneInput && !phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
-    createMutation.mutate({ ...newPatient, id: newPatient.id.trim(), name: newPatient.name.trim(), phoneNumber, address: newPatient.address.trim(), careCategory: newPatient.careCategory?.trim(), hub: newPatient.hub?.trim() });
+    createMutation.mutate({ ...newPatient, id: newPatient.id.trim(), name: newPatient.name.trim(), phoneNumber: phoneNumber || undefined, address: newPatient.address.trim(), careCategory: newPatient.careCategory?.trim(), hub: newPatient.hub?.trim() });
   };
   const categories = [...new Set(records.map((row) => row.careCategory).filter((value) => value !== "Not specified"))];
   const hubs = [...new Set(records.map((row) => row.hub).filter((value) => value !== "Not specified"))];
