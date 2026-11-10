@@ -252,8 +252,10 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
 
     const current = await repository.getAttendanceSession(sessionId);
     if (current.checkInStatus === "confirmed" && current.checkOutStatus === "confirmed") {
-      await repository.markSessionCompleted(sessionId);
-      await queue.enqueue("deliver_attendance", { sessionId }, { idempotencyKey: `deliver:${sessionId}` });
+      const eligibleForCompletion = await repository.markSessionCompleted(sessionId);
+      if (eligibleForCompletion) {
+        await queue.enqueue("deliver_attendance", { sessionId }, { idempotencyKey: `deliver:${sessionId}` });
+      }
     } else {
       const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
       const bothStagesSettled = terminal.has(current.checkInStatus) && terminal.has(current.checkOutStatus);
@@ -263,7 +265,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
 
   async function deliverAttendance({ sessionId }) {
     const session = await repository.getAttendanceSession(sessionId);
-    if (!session || session.checkInStatus !== "confirmed" || session.checkOutStatus !== "confirmed") return;
+    if (!session || session.sessionStatus !== "completed" || session.checkInStatus !== "confirmed" || session.checkOutStatus !== "confirmed") return;
     const result = await backend.sendAttendance(await repository.buildBackendAttendancePayload(sessionId), {
       idempotencyKey: `attendance-session:${sessionId}`,
     });

@@ -544,11 +544,24 @@ class PostgresRepository {
     await this.pool.query("UPDATE attendance_call_attempts SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1", [callAttemptId, key, contentType || null]);
   }
   async markSessionCompleted(sessionId) {
-    await this.pool.query(
-      `WITH updated AS (UPDATE attendance_sessions SET session_status='completed',updated_at=NOW() WHERE id=$1 RETURNING organization_id)
-       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
-       SELECT organization_id,$1,'attendance.session_completed','{}'::jsonb FROM updated`, [sessionId],
+    const result = await this.pool.query(
+      `WITH eligible AS (
+         SELECT id, organization_id, session_status
+         FROM attendance_sessions
+         WHERE id=$1 AND check_in_status='confirmed' AND check_out_status='confirmed'
+         FOR UPDATE
+       ), updated AS (
+         UPDATE attendance_sessions s SET session_status='completed',updated_at=NOW()
+         FROM eligible e
+         WHERE s.id=e.id AND e.session_status IS DISTINCT FROM 'completed'
+         RETURNING s.organization_id,s.id
+       ), audit AS (
+         INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+         SELECT organization_id,id,'attendance.session_completed','{}'::jsonb FROM updated
+       )
+       SELECT EXISTS(SELECT 1 FROM eligible) AS eligible`, [sessionId],
     );
+    return result.rows[0]?.eligible === true;
   }
   async markSessionException(sessionId) {
     await this.pool.query(
@@ -596,7 +609,9 @@ class PostgresRepository {
     await this.pool.query(
       `WITH updated AS (
          UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,
-          backend_delivered_at=NOW(),updated_at=NOW() WHERE id=$1 RETURNING organization_id
+          backend_delivered_at=NOW(),updated_at=NOW()
+          WHERE id=$1 AND session_status='completed' AND check_in_status='confirmed' AND check_out_status='confirmed'
+          RETURNING organization_id
        )
        INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
        SELECT organization_id,$1,'attendance.backend_delivered',$3::jsonb FROM updated`,
