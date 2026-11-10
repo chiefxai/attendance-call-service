@@ -39,6 +39,8 @@ export function EnquiriesPage() {
   const [phoneError, setPhoneError] = useState("");
   const [formError, setFormError] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<PatientRecord | null>(null);
+  const [enquiryMessage, setEnquiryMessage] = useState("");
+  const [selectedMessage, setSelectedMessage] = useState("");
   const queryClient = useQueryClient();
   const patients = useQuery({
     queryKey: ["patients"],
@@ -48,6 +50,7 @@ export function EnquiriesPage() {
     mutationFn: createPatient,
     onSuccess: async (patient) => {
       setSelectedPatient(patient);
+      setSelectedMessage(enquiryMessage.trim());
       setDialogOpen(false);
       setFormError("");
       await queryClient.invalidateQueries({ queryKey: ["patients"] });
@@ -61,6 +64,7 @@ export function EnquiriesPage() {
     setPatientForm(emptyPatient());
     setPhoneError("");
     setFormError("");
+    setEnquiryMessage("");
     setDialogOpen(true);
   };
 
@@ -71,6 +75,7 @@ export function EnquiriesPage() {
       return;
     }
     setSelectedPatient(patient);
+    setSelectedMessage(enquiryMessage.trim());
     setDialogOpen(false);
     setFormError("");
   };
@@ -122,8 +127,12 @@ export function EnquiriesPage() {
             </Box>
             <Button variant="outlined" onClick={openDialog}>Choose another patient</Button>
           </Stack>
+          {selectedMessage && <Box sx={{ mt: 2, p: 2, border: "1px solid #e4ebe7", borderRadius: 2, bgcolor: "#fafcfb" }}>
+            <Typography variant="subtitle2" fontWeight={700}>How can we help?</Typography>
+            <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}>{selectedMessage}</Typography>
+          </Box>}
           <Alert severity="info" sx={{ mt: 2 }}>
-            Patient details are ready. Enquiry-specific fields and follow-up actions can be added once that workflow is defined.
+            Patient and needs are held as an intake draft for now. Enquiry-specific fields and follow-up actions can be added once that workflow is defined.
           </Alert>
         </CardContent>
       </Card>
@@ -221,19 +230,30 @@ export function EnquiriesPage() {
               <Grid size={12}><TextField fullWidth label="Hub (optional)" value={patientForm.hub || ""} onChange={(event) => updatePatient("hub", event.target.value)} /></Grid>
             </Grid>
           )}
-          {formError && mode === "new" && <Alert severity="error">{formError}</Alert>}
+          <TextField
+            fullWidth
+            required
+            multiline
+            minRows={3}
+            label="How can we help?"
+            placeholder="Describe the patient’s needs or the help they are looking for."
+            value={enquiryMessage}
+            onChange={(event) => setEnquiryMessage(event.target.value)}
+            helperText="Add a short note about the patient’s needs or requested care."
+          />
+          {formError && <Alert severity="error">{formError}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={() => setDialogOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
         {mode === "existing" ? (
-          <Button variant="contained" onClick={useExistingPatient} disabled={!existingPatientId || patients.isLoading}>Use patient</Button>
+          <Button variant="contained" onClick={useExistingPatient} disabled={!existingPatientId || !enquiryMessage.trim() || patients.isLoading}>Use patient</Button>
         ) : (
           <Button
             variant="contained"
             startIcon={createMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <AddRoundedIcon />}
             onClick={createNewPatient}
-            disabled={createMutation.isPending || !patientForm.name.trim() || !patientForm.address.trim() || Boolean(phoneError)}
+            disabled={createMutation.isPending || !patientForm.name.trim() || !patientForm.address.trim() || !enquiryMessage.trim() || Boolean(phoneError)}
           >
             {createMutation.isPending ? "Saving patient…" : "Create patient"}
           </Button>
