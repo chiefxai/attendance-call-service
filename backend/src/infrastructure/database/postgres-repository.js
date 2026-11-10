@@ -273,10 +273,10 @@ class PostgresRepository {
       const key = person.id || person.name;
       if (!key || latest.has(key)) continue;
       const state = session.sessionStatus === "active" ? "on duty" : session.sessionStatus;
-      const record = { id: person.id || session.employee.name, name: person.name, phoneMasked: person.phoneMasked,
+      const record = { id: person.id || session.employee.name, name: person.name, phoneNumber: person.phoneNumber || null, phoneMasked: this.maskPhone(person.phoneNumber), address: person.address || "",
         language: session.language, patientName: session.patient.name, patientId: session.patient.id,
         dutyStatus: state, assignmentId: session.assignmentId, sessionId: session.sessionId };
-      if ((status === "all" || status === state) && (!search || `${record.id} ${record.name} ${record.patientName}`.toLowerCase().includes(search.toLowerCase()))) latest.set(key, record);
+      if ((status === "all" || status === state) && (!search || `${record.id} ${record.name} ${record.patientName} ${record.address}`.toLowerCase().includes(search.toLowerCase()))) latest.set(key, record);
     }
     return [...latest.values()].slice(0, Math.min(Number(limit) || 100, 500));
   }
@@ -288,11 +288,11 @@ class PostgresRepository {
       const key = patient.id || patient.name;
       if (!key || latest.has(key)) continue;
       const metadata = session.metadata || {};
-      const record = { id: patient.id || patient.name, name: patient.name, language: session.language,
+      const record = { id: patient.id || patient.name, name: patient.name, phoneNumber: patient.phoneNumber || null, address: patient.address || "", language: session.language,
         assignedStaff: session.employee.name, employeeId: session.employee.id,
         careCategory: metadata.careCategory || "Not specified", hub: metadata.hub || "Not specified",
         locationVerification: "not_integrated", status: session.sessionStatus };
-      if ((status === "all" || status === record.status) && (!search || `${record.id} ${record.name} ${record.assignedStaff}`.toLowerCase().includes(search.toLowerCase()))) latest.set(key, record);
+      if ((status === "all" || status === record.status) && (!search || `${record.id} ${record.name} ${record.assignedStaff} ${record.address}`.toLowerCase().includes(search.toLowerCase()))) latest.set(key, record);
     }
     return [...latest.values()].slice(0, Math.min(Number(limit) || 100, 500));
   }
