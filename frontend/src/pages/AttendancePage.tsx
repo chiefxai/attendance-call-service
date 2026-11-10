@@ -102,8 +102,7 @@ export function AttendancePage({ embedded = false }: { embedded?: boolean }) {
           <TableCell sx={{ whiteSpace: "nowrap" }}>{dateTime(row.scheduledStartAt)}<Typography variant="caption" display="block" color="text.secondary">to {dateTime(row.scheduledEndAt)}</Typography></TableCell>
           <TableCell sx={{ whiteSpace: "nowrap" }}><StatusChip status={row.checkIn.status} /><Typography variant="caption" display="block" color="text.secondary">{dateTime(row.checkIn.reportedAt)}</Typography></TableCell>
           <TableCell sx={{ whiteSpace: "nowrap" }}><StatusChip status={row.checkOut.status} /><Typography variant="caption" display="block" color="text.secondary">{dateTime(row.checkOut.reportedAt)}</Typography></TableCell>
-          <TableCell>{row.language.toUpperCase()}</TableCell><TableCell><AttendanceStatusChip status={attendanceStatus(row)} />{attendanceStatus(row) === "delayed" && <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: .5, maxWidth: 220 }}>{delayDetail(row)}</Typography>}</TableCell><TableCell><StatusChip status={row.backendDeliveryStatus} /></TableCell>
-          <TableCell><Button size="small" onClick={() => navigate(`/sessions/${row.sessionId}`)}>View</Button></TableCell>
+          <TableCell>{row.language.toUpperCase()}</TableCell><TableCell><AttendanceStatusChip status={attendanceStatus(row)} />{attendanceStatus(row) === "delayed" && <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: .5, maxWidth: 220 }}>{delayDetail(row)}</Typography>}</TableCell><TableCell><Button size="small" onClick={() => navigate(`/sessions/${row.sessionId}`)}>View</Button></TableCell>
         </TableRow>)}</TableBody>
       </Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No attendance sessions match these filters.</Typography>}
