@@ -37,7 +37,7 @@ starts the services, and checks `https://<hostname>/healthz`. It does not
 create DNS records or GCP firewall rules; those must be in place first. Point
 Vobiz's answer and status webhooks at the generated HTTPS URLs. Caddy forwards
 HTTP and WebSocket upgrades to the API on the VM loopback interface. Operations
-API routes must be protected by application authentication; Vobiz callbacks
+API routes are protected by provisioned web accounts and HttpOnly sessions; Vobiz callbacks
 are validated by Vobiz signatures.
 
 The API and worker use Docker host networking on the Linux VM so Vertex AI can
@@ -55,6 +55,23 @@ confirmed. If either stage exhausts its configured retries or needs review, the
 session becomes an exception after both stages have settled.
 
 Compose runs `backend-migrate` before starting the API and worker.
+
+## Dashboard sign-in and account provisioning
+
+The dashboard now requires an email and password. Accounts are created on the VM by an administrator; there is no account-creation page. Sign-in uses a 12-hour HttpOnly, SameSite session cookie, while platform integrations continue using service API keys.
+
+After deployment and database migrations, provision an account interactively:
+
+```sh
+read -r -p "Login email: " web_email
+read -r -p "Display name: " web_name
+read -r -s -p "Password (at least 12 characters): " web_password
+printf '\n'
+printf '%s\n%s\n%s\n' "$web_email" "$web_name" "$web_password" | sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.vertex-credentials.yml exec -T backend-api node scripts/create-web-user.js
+unset web_password
+```
+
+Run the same command to provision additional accounts. The account is scoped to `DEFAULT_ORGANIZATION_ID` and password material is stored as a salted scrypt hash. No API key or admin secret needs to be entered in the dashboard. Use the UI's **Sign out** control to revoke the current session.
 
 Useful operations:
 
