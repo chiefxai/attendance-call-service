@@ -102,7 +102,7 @@ function App() {
         <Routes>
           <Route path="/" element={<OverviewPage />} />
           <Route path="/attendance" element={<AttendanceSchedulesPage />} />
-          <Route path="/schedules" element={<AttendanceSchedulesPage defaultSection="schedules" />} />
+          <Route path="/schedules" element={<AttendanceSchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
