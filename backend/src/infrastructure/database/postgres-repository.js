@@ -15,6 +15,62 @@ class PostgresRepository {
     this.pool = pool;
   }
 
+  async findWebUserByEmail(email) {
+    const { rows } = await this.pool.query(
+      `SELECT id,organization_id,email,display_name,password_salt,password_hash,active
+       FROM web_users WHERE lower(email)=lower($1) LIMIT 1`,
+      [email],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.id,
+      organizationId: row.organization_id,
+      email: row.email,
+      displayName: row.display_name,
+      passwordSalt: row.password_salt,
+      passwordHash: row.password_hash,
+      active: row.active,
+    } : null;
+  }
+
+  async createWebUser({ organizationId, email, displayName, passwordSalt, passwordHash }) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO web_users (organization_id,email,display_name,password_salt,password_hash)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id,organization_id,email,display_name,active,created_at`,
+      [organizationId, email, displayName, passwordSalt, passwordHash],
+    );
+    return rows[0];
+  }
+
+  async createWebSession(userId, tokenHash, expiresAt) {
+    await this.pool.query(
+      `INSERT INTO web_sessions (user_id,token_hash,expires_at) VALUES ($1,$2,$3)`,
+      [userId, tokenHash, expiresAt],
+    );
+  }
+
+  async resolveWebSession(tokenHash) {
+    const { rows } = await this.pool.query(
+      `UPDATE web_sessions s SET last_used_at=NOW()
+       FROM web_users u
+       WHERE s.token_hash=$1 AND s.user_id=u.id AND s.revoked_at IS NULL
+         AND s.expires_at>NOW() AND u.active=TRUE
+       RETURNING u.id,u.organization_id,u.email,u.display_name`,
+      [tokenHash],
+    );
+    const row = rows[0];
+    return row ? { id: row.id, organizationId: row.organization_id, email: row.email, displayName: row.display_name } : null;
+  }
+
+  async revokeWebSession(tokenHash) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE web_sessions SET revoked_at=NOW() WHERE token_hash=$1 AND revoked_at IS NULL`,
+      [tokenHash],
+    );
+    return rowCount > 0;
+  }
+
   async getOrganizationCallSettings(organizationId) {
     const { rows } = await this.pool.query(
       "SELECT settings FROM organization_call_settings WHERE organization_id=$1",
