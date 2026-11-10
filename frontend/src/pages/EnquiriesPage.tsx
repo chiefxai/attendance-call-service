@@ -51,7 +51,7 @@ export function EnquiriesPage() {
   });
   const incomingCalls = useQuery({
     queryKey: ["incoming-calls"],
-    queryFn: fetchIncomingCalls,
+    queryFn: () => fetchIncomingCalls(),
     refetchInterval: (query) => query.state.data?.some((call) => call.enquiryStatus === "processing") ? 4000 : 15000,
   });
   const staffDirectory = useQuery({ queryKey: ["staff", "enquiry-resolution"], queryFn: () => fetchStaff({ limit: 500 }) });
