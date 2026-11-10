@@ -190,6 +190,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     let pendingHangupCheckpoint = null;
     let hangupRequested = false;
     let hangupScheduled = false;
+    let callerResponseObserved = false;
     const playedCheckpoints = new Set();
     const pendingAudio = [];
     const seenToolCalls = new Set();
@@ -235,12 +236,15 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       if (call.name !== "end_call" || seenToolCalls.has(call.id)) return;
       seenToolCalls.add(call.id);
       console.info(`[vobiz-live] end_call requested call=${token.callId} generatedAudioParts=${generatedAudioParts} latestCheckpoint=${latestCheckpoint || "none"}`);
-      if (generatedAudioParts === 0) {
-        console.warn(`[vobiz-live] ignored end_call before any speech call=${token.callId}`);
+      if (generatedAudioParts === 0 || !callerResponseObserved) {
+        const reason = callerResponseObserved ? "agent_audio_missing" : "employee_response_missing";
+        console.warn(`[vobiz-live] ignored premature end_call call=${token.callId} reason=${reason}`);
         try {
-          await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: false, reason: "Speak to the employee before ending the call." } } }] });
+          await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: false, reason: "The employee has not answered yet. Keep the call open and wait for their response before ending." } } }] });
           liveSession?.sendClientContent({
-            turns: [{ role: "user", parts: [{ text: "You have not spoken yet. Greet the employee in the required language and begin the attendance check now." }] }],
+            turns: [{ role: "user", parts: [{ text: callerResponseObserved
+              ? "The employee has answered. Continue the required verification checklist, speak to them, and do not end the call until the required details are collected."
+              : "Your greeting/question has been delivered, but the employee has not answered. Keep the call connected and wait for the employee to speak. If needed, repeat the question once, then wait again. Do not end the call." }] }],
             turnComplete: true,
           });
         } catch (error) { console.error(`[vobiz-live] rejected early end_call call=${token.callId}`, error.message); }
@@ -273,6 +277,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
           `Speak unmistakably and naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}.`,
           "Use the supplied session context and the previous call attempts so you remember the full assignment and what has already happened.",
+          "Never simulate an employee response. Ask one short question at a time and wait for a live answer before continuing. Keep the call connected while waiting; do not end it until the employee has spoken during this call and the required attendance details are collected.",
           "For check-in, use a strict one-question-at-a-time script and do not skip any step: (1) ask the employee to state their own full name, wait for the answer; (2) ask them to state the assigned patient full name, wait; (3) ask them to state or confirm the patient home's address or one distinctive address detail, wait; (4) ask whether they have reached the patient, wait; (5) ask the actual arrival time, wait. Ask these questions even if the employee volunteers information out of order. Never answer a question on the employee's behalf and never reveal the expected name or address before they answer. Compare every answer with the assignment context. Do not end the call until all five answers are collected and clear; if an answer is unclear, ask one short clarification question. Do not read out private phone numbers or unnecessarily disclose the full address. Do not guess or claim GPS verification.",
           "For check-in, establish whether the employee reached the assigned patient and the actual arrival time. If they have not arrived, ask their expected arrival time and confirm a clear callback time.",
           "For check-out, establish whether the duty is complete and the actual departure time. If they are still working, ask the expected departure time and confirm when to call back.",
@@ -295,7 +300,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             },
             tools: [{ functionDeclarations: [{
               name: "end_call",
-              description: "End this attendance call only after the mandatory check-in or check-out verification checklist has been completed, including address/location confirmation for check-in.",
+              description: "End this attendance call only after the employee has spoken during this call and the mandatory check-in or check-out verification checklist has been completed, including address/location confirmation for check-in.",
               parameters: { type: "OBJECT", properties: {} },
             }] }],
           },
@@ -312,6 +317,14 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
                 // Live.connect() can deliver this callback before its promise
                 // resolves and assigns liveSession. Defer session I/O until
                 // the await below has completed.
+              }
+              // Gemini Live sends input transcription as a top-level server message.
+              // Keep the serverContent fallback for compatible SDK/model variants.
+              const callerText = response.inputTranscription?.text?.trim()
+                || response.serverContent?.inputTranscription?.text?.trim();
+              if (callerText && !callerResponseObserved) {
+                callerResponseObserved = true;
+                console.info(`[vobiz-live] employee response detected call=${token.callId} transcriptChars=${callerText.length}`);
               }
               if (response.serverContent?.interrupted) safeSend({ event: "clearAudio" });
               for (const part of response.serverContent?.modelTurn?.parts || []) {
