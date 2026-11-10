@@ -46,8 +46,21 @@ jobs:
         env:
           REMOTE_SCRIPT: |
             set -Eeuo pipefail
+            trap 'status=$?; echo "Remote deployment failed at line ${LINENO} (exit ${status})" >&2; exit "$status"' ERR
             cd "$GCP_DEPLOY_PATH"
-            test "$(git branch --show-current)" = "main"
+            if [[ -n "$(git status --porcelain)" ]]; then
+              echo "Deployment checkout has local changes; refusing to switch branches." >&2
+              git status --short
+              exit 1
+            fi
+            git fetch --prune origin main
+            if [[ "$(git branch --show-current)" != "main" ]]; then
+              if git show-ref --verify --quiet refs/heads/main; then
+                git switch main
+              else
+                git switch --track -c main origin/main
+              fi
+            fi
             git pull --ff-only origin main
             echo "Deploying commit $(git rev-parse --short HEAD)"
 
@@ -93,5 +106,6 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --zone "$GCP_VM_ZONE" \
             --tunnel-through-iap \
+            --ssh-key-expire-after=15m \
             --quiet \
             --command "$remote_command"
