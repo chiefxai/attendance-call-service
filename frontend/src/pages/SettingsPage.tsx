@@ -64,7 +64,7 @@ export function SettingsPage() {
             helperText={settings.data.source.defaultFromNumber === "settings" ? "Workspace setting override · E.164 format" : "Using .env fallback · saving here overrides it"}
             inputProps={{ inputMode: "tel" }}
           />
-          <Box><Typography variant="h6">No-answer retry policy</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>The retry delay grows exponentially and stops at the configured attempt limit.</Typography></Box>
+          <Box><Typography variant="h6">No-answer retry policy</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>The retry delay grows exponentially and stops at the configured attempt limit. {settings.data.source.retry === "settings" ? "Workspace override is active." : "Values currently come from .env."}</Typography></Box>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="number" label="Maximum consecutive unanswered calls" value={form.retry.maxConsecutiveNoAnswer} onChange={(event) => updateRetry("maxConsecutiveNoAnswer", event.target.value)} inputProps={{ min: 1, max: 20, step: 1 }} helperText="Allowed range: 1–20 calls" /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="number" label="First retry delay (minutes)" value={form.retry.initialMinutes} onChange={(event) => updateRetry("initialMinutes", event.target.value)} inputProps={{ min: 1, max: 1440, step: 1 }} helperText="Allowed range: 1–1440 minutes" /></Grid>
