@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Alert, Box, Button, Card, CardContent, Chip, InputAdornment, Popover, Stack, TextField, Typography } from "@mui/material";
 import FilterListRoundedIcon from "@mui/icons-material/FilterListRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
@@ -7,11 +8,22 @@ export function DemoDataNotice({ children = "Illustrative preview data — live 
   return <Alert severity="info" icon={false} sx={{ py: 0, border: "1px solid #dbe6ff", bgcolor: "#f2f6ff", color: "#49618a", "& .MuiAlert-message": { py: 0.85, fontSize: 12 } }}>{children}</Alert>;
 }
 
+export const PageHeaderTargetContext = createContext<HTMLElement | null>(null);
+
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
-  return <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "flex-end" }} spacing={2} sx={{ minWidth: 0 }}>
-    <Box sx={{ minWidth: 0, flex: 1 }}>{eyebrow && <Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em">{eyebrow}</Typography>}<Typography variant="h4" sx={{ mt: eyebrow ? .35 : 0, fontSize: { xs: "1.8rem", sm: "2.125rem" }, lineHeight: 1.2, overflowWrap: "anywhere" }}>{title}</Typography>{description && <Typography color="text.secondary" sx={{ mt: .75, maxWidth: 760 }}>{description}</Typography>}</Box>
-    {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>{actions}</Stack>}
-  </Stack>;
+  const target = useContext(PageHeaderTargetContext);
+  if (!target) return null;
+  return createPortal(
+    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} spacing={{ xs: 1, sm: 2 }} sx={{ width: "100%", minWidth: 0 }}>
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        {eyebrow && <Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em" noWrap>{eyebrow}</Typography>}
+        <Typography variant="h5" sx={{ mt: eyebrow ? .1 : 0, fontWeight: 750 }} noWrap>{title}</Typography>
+        {description && <Typography variant="body2" color="text.secondary" sx={{ mt: .25, maxWidth: 760 }}>{description}</Typography>}
+      </Box>
+      {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "flex-start", sm: "flex-end" }, flexShrink: 0 }}>{actions}</Stack>}
+    </Stack>,
+    target,
+  );
 }
 
 export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accent = "#1557c0", tag }: { label: string; value: string; detail?: string; icon: ReactNode; tint?: string; accent?: string; tag?: string }) {
