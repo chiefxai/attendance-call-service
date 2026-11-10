@@ -1,16 +1,18 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fs = require("node:fs/promises");
 const { createPostgresPool } = require("../src/infrastructure/database/postgres-pool");
 const { PostgresRepository } = require("../src/infrastructure/database/postgres-repository");
 
 async function main() {
-  const email = String(process.env.AUTH_USER_EMAIL || "").trim().toLowerCase();
-  const password = String(process.env.AUTH_USER_PASSWORD || "");
-  const displayName = String(process.env.AUTH_USER_NAME || "").trim() || email;
+  const [rawEmail = "", rawName = "", rawPassword = ""] = (await fs.readFile(0, "utf8")).split(/\\r?\\n/);
+  const email = rawEmail.trim().toLowerCase();
+  const password = rawPassword;
+  const displayName = rawName.trim() || email;
   const organizationId = process.env.DEFAULT_ORGANIZATION_ID;
-  if (!email || !/^\S+@\S+\.\S+$/.test(email) || email.length > 254) throw new Error("Set a valid AUTH_USER_EMAIL.");
-  if (password.length < 12 || password.length > 1024) throw new Error("AUTH_USER_PASSWORD must be at least 12 characters.");
+  if (!email || !/^\S+@\S+\.\S+$/.test(email) || email.length > 254) throw new Error("Provide a valid email as the first input line.");
+  if (password.length < 12 || password.length > 1024) throw new Error("Password must be at least 12 characters.");
   if (!organizationId) throw new Error("DEFAULT_ORGANIZATION_ID is required.");
   const pool = createPostgresPool();
   try {
