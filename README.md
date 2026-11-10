@@ -7,8 +7,8 @@ See [backend/README.md](backend/README.md) for backend integration and setup.
 
 ## Application architecture
 
-The service has two coordinated workflows: outbound employee attendance calls and
-inbound patient enquiries. PostgreSQL stores operational records and the durable
+The service coordinates three voice workflows: inbound patient enquiries,
+outbound staff availability confirmation, and employee attendance calls. PostgreSQL stores operational records and the durable
 job queue; MinIO stores private call recordings. Vobiz handles telephony, while
 Vertex AI provides live speech and post-call language processing.
 
@@ -74,70 +74,144 @@ flowchart LR
   Host -->|create assignments using service API| Caddy
 ```
 
-### Outbound attendance flow
+## Detailed call workflows
+
+The service runs three voice workflows: patient enquiry intake, staff availability
+confirmation, and employee attendance verification. Audio capture and call status
+updates happen for each voice call; transcription and intent extraction run
+asynchronously after the call. The diagrams use decision nodes to show the retry
+and human-review outcomes explicitly.
+
+### 1. Inbound patient enquiry
 
 ```mermaid
-sequenceDiagram
-  autonumber
-  participant P as Host platform or operator
-  participant API as Service API
-  participant DB as PostgreSQL and durable queue
-  participant W as Queue workers
-  participant V as Vobiz
-  participant L as Vertex Live attendance agent
-  participant PC as Vertex transcription and LangChain post-call agent
-  participant H as Host platform callback
-
-  P->>API: POST assignment with staff, patient, language and UTC schedule
-  API->>DB: Validate overlap; save session and enqueue check-in and check-out
-  W->>DB: Claim due call job within concurrency limit
-  W->>V: Place employee call
-  V->>API: Signed answer webhook and media WebSocket
-  API->>L: Provide full session context and stage prompt
-  L-->>V: Live speech response; exchange employee audio
-  V-->>L: Employee audio
-  L->>API: End-of-call audio and call outcome
-  API->>DB: Save call status and recording metadata
-  API->>DB: Enqueue post-call processing
-  W->>PC: Transcribe, extract intent and determine next action
-  PC->>DB: Save transcript, outcome, audit and next schedule/retry
-  Note over W,DB: Unanswered calls and requested callbacks are rescheduled using configurable retry/backoff. Check-out stays part of the same session.
-  W->>H: POST completion only after both stages confirm
+flowchart TD
+  A[Patient calls Athulya number] --> B[Vobiz sends signed answer webhook]
+  B --> C[API validates signature and loads caller context]
+  C --> D{Registered patient number?}
+  D -->|Yes| E[Load matched patient contact only]
+  D -->|No| F{Allow non-patient calls setting enabled?}
+  F -->|No| G[Reject call]
+  F -->|Yes| H[Answer as unregistered caller with generic intake context]
+  E --> I[Open media stream and start patient support agent]
+  H --> I
+  I --> J[Greet by local time and language; use patient name when known]
+  J --> K[Ask what care is needed and requested start time]
+  K --> L[Confirm request was noted and explain that care team will follow up]
+  L --> M[Save call metadata and private recording]
+  M --> N[Queue transcription and post-call analysis]
+  N --> O[Transcribe audio and extract need, activity, start time, language]
+  O --> P{Need and activity clear?}
+  P -->|No| Q[Set need review for human follow-up]
+  P -->|Yes| R[Apply configured activity duration]
+  R --> S[Find staff with no overlapping duty in requested time window]
+  S --> T[Rank candidates by same district, then region; return up to 10]
+  T --> U{Any available candidates?}
+  U -->|No| V[Set shortage and send to human review]
+  U -->|Yes| W[Show suggestion and start staff availability call workflow]
+  Q --> X[Show transcript, recording, and review details in Enquiries]
+  V --> X
+  W --> X
 ```
 
-### Inbound patient enquiry and appointment flow
+Patient calls use a dedicated patient-support prompt, separate from the staff
+attendance prompt. If the caller is not registered and non-patient inbound calls
+are disabled, the call is rejected before an agent conversation begins. Activity
+aliases map different descriptions of a need to a configured care activity; its
+configured duration is used to calculate the duty window from the requested start
+without asking the patient for an end time.
+
+### 2. Outbound staff availability confirmation
 
 ```mermaid
-sequenceDiagram
-  autonumber
-  participant Patient as Patient caller
-  participant V as Vobiz
-  participant API as Service API and realtime voice gateway
-  participant DB as PostgreSQL
-  participant Live as Vertex Live patient agent
-  participant PC as Transcription and LangChain post-call agent
-  participant Booking as Vertex Live appointment coordinator
-  participant Worker as Queue workers
-  participant Ops as Operations UI
-
-  Patient->>V: Call registered inbound number
-  V->>API: Signed inbound answer webhook
-  API->>DB: Match caller to patient contact; check non-patient call setting
-  API-->>V: Accept supported caller or reject according to setting
-  V->>API: Open media WebSocket
-  API->>Live: Pass matched patient context and preferred language
-  Live-->>Patient: Greet by local time, ask need and requested start time
-  Patient-->>Live: Describe care need
-  Live->>API: Conversation audio
-  API->>DB: Save enquiry and recording reference; enqueue processing
-  Worker->>PC: Transcribe and classify activity, time and intent
-  PC->>DB: Save transcript, activity duration and available staff suggestions
-  Ops->>DB: View enquiry and suggested staff in the UI
-  Worker->>Booking: Call suggested staff sequentially to confirm availability
-  Booking->>Worker: Available, unavailable, unclear or no answer
-  Worker->>DB: Save each attempt; retry next candidate or flag for review
-  Worker->>DB: On confirmation, create attendance session and enqueue both stages
+flowchart TD
+  A[Post-call analysis returns ordered staff suggestions] --> B[Queue candidate call with index zero]
+  B --> C{Candidate exists?}
+  C -->|No| D[Set no staff available or not answered]
+  D --> E[Operations team reviews enquiry and contacts patient]
+  C -->|Yes| F[Create appointment call attempt and place Vobiz call]
+  F --> G{Call answered?}
+  G -->|No: busy, failed, timeout, no answer| H[Save attempt and recording if available]
+  H --> I[Queue next suggested staff member]
+  I --> C
+  G -->|Yes| J[Appointment agent explains task, requested time, and duration]
+  J --> K[Ask staff to confirm identity and availability]
+  K --> L[Queue recording transcription and availability extraction]
+  L --> M{Clear response?}
+  M -->|No or missing confirmation| N[Set needs review; human checks attempt]
+  M -->|Unavailable| O[Save unavailable outcome]
+  O --> I
+  M -->|Available and confirmed| P[Schedule tool rechecks exact date-time overlap]
+  P --> Q{Still available?}
+  Q -->|No: conflict or schedule error| N
+  Q -->|Yes| R[Create attendance session atomically]
+  R --> S[Queue check-in at start and check-out at end]
+  S --> T[Set booking scheduled and show session in Attendance]
+  I --> U{All suggestions exhausted?}
+  U -->|Yes| D
 ```
+
+The appointment coordinator calls candidates one at a time in the post-call
+suggestion order. No-answer, busy, failed, timeout, and an explicit unavailable
+response advance to the next candidate. An unclear response or missing required
+confirmation is marked for human review. A confirmed available response is checked
+again against current schedules inside the transaction before the attendance
+session is created. If no candidate confirms, the enquiry remains for operations
+follow-up and no attendance session is created automatically.
+
+### 3. Outbound employee attendance verification
+
+```mermaid
+flowchart TD
+  A[Host API or staff-booking tool creates one session] --> B[Validate employee overlap and save people plus session]
+  B --> C[Durably schedule check-in and check-out jobs]
+  C --> D[Worker claims due job within call concurrency limit]
+  D --> E[Place outbound Vobiz call to employee]
+  E --> F{Employee answers?}
+  F -->|No| G[Save attempt and queue configured backoff retry]
+  G --> H{No-answer limit reached?}
+  H -->|No| D
+  H -->|Yes| I[Mark stage not answered and raise exception]
+  F -->|Yes| J[Connect stage-specific live audio agent with full session context]
+  J --> K{Check-in or check-out?}
+  K -->|Check-in| L[Ask whether employee reached the patient location]
+  L --> M{Reached?}
+  M -->|Yes| N[Verify employee and ask patient name and address]
+  N --> O[Capture actual arrival time]
+  M -->|No| P[Ask expected arrival time and schedule callback]
+  K -->|Check-out| Q[Ask whether duty is complete]
+  Q --> R{Duty complete?}
+  R -->|Yes| S[Capture actual departure time]
+  R -->|No| T[Ask when to call back; keep check-out pending]
+  O --> U[Save call recording and enqueue post-call processing]
+  P --> U
+  S --> U
+  T --> U
+  U --> V[Transcribe, extract intent and verify required fields]
+  V --> W{Stage confirmed with required details?}
+  W -->|Yes| X[Mark that stage confirmed]
+  W -->|Callback requested| Y[Schedule follow-up at requested time]
+  Y --> D
+  W -->|Unclear or invalid assignment| Z[Mark review and send to operations]
+  X --> AA{Both check-in and check-out confirmed?}
+  AA -->|No| AB[Keep session open; continue the other stage or its retries]
+  AB --> C
+  AA -->|Yes| AC[Mark session completed]
+  AC --> AD[Queue idempotent completion POST to host backend]
+  I --> AE[Keep session as exception; no completion callback]
+  Z --> AE
+```
+
+Check-in requires arrival confirmation, employee verification, patient name and
+address verification, and the reported arrival time. A late arrival or requested
+callback keeps the stage pending; on a later answered call the agent captures the
+actual arrival time. Check-out asks only about duty completion and actual departure
+time, without repeating patient-detail questions. Check-in and check-out are
+scheduled together in the same session; a failure in one stage does not silently
+complete or discard the other. The session completes and is delivered to the host
+only when both stages are confirmed. The overdue-call reconciler recovers a missed
+due job, while the configured retry limit eventually raises an exception for
+human handling.
 
 PostgreSQL is the source of truth for session state, call attempts, schedule and
 retry timing, transcripts, staff/patient directories, care activities, API keys,
