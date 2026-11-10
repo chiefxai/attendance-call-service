@@ -16,6 +16,16 @@ import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
+function formatDutyDateTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatDutyInterval(start: string | null, end: string | null) {
+  if (!start || !end) return "Schedule time unavailable";
+  return `${formatDutyDateTime(start)} – ${formatDutyDateTime(end)}`;
+}
+
 export function StaffRecordsPage() {
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("all");
@@ -113,6 +123,6 @@ export function StaffRecordsPage() {
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={saveStaff} disabled={createMutation.isPending || !newStaff.id.trim() || !newStaff.name.trim() || !newStaff.phoneNumber.trim() || !newStaff.address.trim()}>{editing ? "Update staff" : "Save staff"}</Button></DialogActions>
     </Dialog>
-    <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="sm">{selected && <><DialogTitle>Employee assignment · {selected.id}</DialogTitle><DialogContent><Stack spacing={1.5} sx={{ pt: 1 }}><Typography variant="h6">{selected.name}</Typography><Typography variant="body2">Calling language: {selected.language.toUpperCase()}</Typography><Typography variant="body2" color="text.secondary">Registered employee phone: {selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography><Typography variant="body2" color="text.secondary">Staff address: {selected.address || "Not provided"}</Typography><Typography variant="body2" color="text.secondary">Current patient: {selected.patientName}</Typography><Typography variant="body2" color="text.secondary">Assignment: {selected.assignmentId}</Typography><Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert></Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>
+    <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="sm">{selected && <><DialogTitle>Staff assignment · {selected.id}</DialogTitle><DialogContent><Stack spacing={1.5} sx={{ pt: 1 }}><Typography variant="h6">{selected.name}</Typography><Typography variant="body2" color="text.secondary">Registered employee phone: {selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography><Typography variant="body2" color="text.secondary">Staff address: {selected.address || "Not provided"}</Typography><Typography variant="subtitle2" sx={{ mt: 1 }}>Assigned patient</Typography><Typography variant="body2">{selected.patientName}{selected.patientId ? ` · ${selected.patientId}` : ""}</Typography><Typography variant="subtitle2" sx={{ mt: 1 }}>Scheduled duty interval · your local time</Typography><Typography variant="body2">{formatDutyInterval(selected.scheduledStartAt, selected.scheduledEndAt)}</Typography><Typography variant="body2">Calling language: {selected.language.toUpperCase()}</Typography><Typography variant="body2" color="text.secondary">Assignment: {selected.assignmentId}</Typography><Typography variant="body2" color="text.secondary">Duty status: {selected.dutyStatus}</Typography><Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert></Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>
   </Stack>;
 }
