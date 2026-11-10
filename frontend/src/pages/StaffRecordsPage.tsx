@@ -11,7 +11,9 @@ import { AxiosError } from "axios";
 import { createStaff, fetchStaff, type CreateStaffPayload, type StaffRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 
-function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }\n\nexport function StaffRecordsPage() {
+function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
+
+export function StaffRecordsPage() {
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
