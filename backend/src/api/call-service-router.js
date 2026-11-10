@@ -153,6 +153,23 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     } catch (error) { return fail(res, error); }
   });
 
+  router.put("/staff/:id", async (req, res) => {
+    const id = String(req.params.id || "").trim();
+    const name = String(req.body?.name || "").trim();
+    const phoneNumber = normalizeIndianMobile(req.body?.phoneNumber);
+    const address = String(req.body?.address || "").trim();
+    const language = String(req.body?.language || "en").trim().toLowerCase();
+    if (!id || id.length > 120) return res.status(400).json({ error: "Staff ID is invalid." });
+    if (!name || name.length > 120) return res.status(400).json({ error: "Staff name is required and must be at most 120 characters." });
+    if (!phoneNumber) return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." });
+    if (!address || address.length > 1000) return res.status(400).json({ error: "Staff address is required and must be at most 1000 characters." });
+    if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
+    try {
+      const record = await repository.updateStaffDirectoryRecord(org(req), { id, name, phoneNumber, address, language });
+      return res.json(record);
+    } catch (error) { return fail(res, error); }
+  });
+
   router.get("/staff", async (req, res) => {
     try { res.json(await repository.listStaffDirectory(org(req), { search: req.query.search || "", status: req.query.status || "all", limit: req.query.limit || 100 })); }
     catch (error) { fail(res, error); }
@@ -177,6 +194,27 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const record = await repository.createPatientDirectoryRecord(org(req), { id, name, phoneNumber, address, language, careCategory, hub });
       if (!record) return res.status(409).json({ error: "A patient record with this ID already exists." });
       return res.status(201).json(record);
+    } catch (error) { return fail(res, error); }
+  });
+
+  router.put("/patients/:id", async (req, res) => {
+    const id = String(req.params.id || "").trim();
+    const name = String(req.body?.name || "").trim();
+    const phoneInput = String(req.body?.phoneNumber || "").trim();
+    const phoneNumber = phoneInput ? normalizeIndianMobile(phoneInput) : "";
+    const address = String(req.body?.address || "").trim();
+    const language = String(req.body?.language || "en").trim().toLowerCase();
+    const careCategory = String(req.body?.careCategory || "").trim();
+    const hub = String(req.body?.hub || "").trim();
+    if (!id || id.length > 120) return res.status(400).json({ error: "Patient ID is invalid." });
+    if (!name || name.length > 120) return res.status(400).json({ error: "Patient name is required and must be at most 120 characters." });
+    if (phoneInput && !phoneNumber) return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." });
+    if (!address || address.length > 1000) return res.status(400).json({ error: "Patient address is required and must be at most 1000 characters." });
+    if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
+    if (careCategory.length > 120 || hub.length > 120) return res.status(400).json({ error: "Care category and hub must be at most 120 characters." });
+    try {
+      const record = await repository.updatePatientDirectoryRecord(org(req), { id, name, phoneNumber, address, language, careCategory, hub });
+      return res.json(record);
     } catch (error) { return fail(res, error); }
   });
 
@@ -264,6 +302,15 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const agent = await repository.getAgent(organizationId, body.agentId);
       if (!agent?.active) return res.status(400).json({ error: "An active agent in this organization is required" });
       const session = await queue.transaction(async (client) => {
+        await repository.createStaffDirectoryRecord(organizationId, {
+          id: body.employee.id, name: body.employee.name, phoneNumber: employeePhone,
+          address: String(body.employee.address || "").trim(), language: body.language,
+        }, client);
+        await repository.createPatientDirectoryRecord(organizationId, {
+          id: body.patient.id, name: body.patient.name, phoneNumber: patientPhone || undefined,
+          address: String(body.patient.address || "").trim(), language: body.language,
+          careCategory: body.metadata?.careCategory, hub: body.metadata?.hub,
+        }, client);
         const created = await repository.createAttendanceSession({
           organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
           agentId: body.agentId, fromNumber, language: body.language,
