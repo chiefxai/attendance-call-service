@@ -8,6 +8,7 @@ import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
+import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
@@ -19,6 +20,7 @@ import { NewAssignmentPage } from "./pages/NewAssignmentPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
+import { EnquiriesPage } from "./pages/EnquiriesPage";
 import { AttendanceSchedulesPage } from "./pages/AttendanceSchedulesPage";
 import { PageHeaderTargetContext } from "./components/OperationsUI";
 import { LoginPage } from "./pages/LoginPage";
@@ -29,6 +31,7 @@ const navigation = [
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
   { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
+  { label: "Enquiries", path: "/enquiries", icon: <ContactSupportRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon /> },
@@ -106,6 +109,7 @@ function App() {
           <Route path="/call-center" element={<CallCenterPage />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
+          <Route path="/enquiries" element={<EnquiriesPage />} />
           <Route path="/assignments/new" element={<NewAssignmentPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/api-access" element={<ApiAccessPage section="docs" />} />
