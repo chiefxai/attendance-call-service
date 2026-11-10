@@ -36,7 +36,7 @@ export function StaffRecordsPage() {
   const [selected, setSelected] = useState<StaffRecord | null>(null);
   const [editing, setEditing] = useState<StaffRecord | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [newStaff, setNewStaff] = useState<CreateStaffPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
+  const [newStaff, setNewStaff] = useState<CreateStaffPayload>({ id: "", name: "", companyName: "", phoneNumber: "", address: "", language: "en" });
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), refetchInterval: 30_000 });
@@ -50,13 +50,13 @@ export function StaffRecordsPage() {
     onSuccess: async () => {
       setAddOpen(false);
       setEditing(null);
-      setNewStaff({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
+      setNewStaff({ id: "", name: "", companyName: "", phoneNumber: "", address: "", language: "en" });
       setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["staff"] });
     },
   });
   const records = query.data || [];
-  const filtered = records.filter((row) => (!search || `${row.name} ${row.id} ${row.phoneNumber || ""} ${row.patientName} ${row.address}`.toLowerCase().includes(search.toLowerCase()))
+  const filtered = records.filter((row) => (!search || `${row.name} ${row.companyName} ${row.id} ${row.phoneNumber || ""} ${row.patientName} ${row.address}`.toLowerCase().includes(search.toLowerCase()))
     && (language === "all" || row.language.toLowerCase() === language)
     && (status === "all" || row.dutyStatus === status));
   const languages = [...new Set(records.map((row) => row.language.toLowerCase()))];
@@ -71,19 +71,19 @@ export function StaffRecordsPage() {
     const phoneNumber = normalizeIndianMobile(newStaff.phoneNumber);
     if (!phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
-    const payload = { ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), phoneNumber, address: newStaff.address.trim() };
+    const payload = { ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), companyName: newStaff.companyName?.trim() || "", phoneNumber, address: newStaff.address.trim() };
     createMutation.mutate({ payload, id: payload.id, update: Boolean(editing) });
   };
   const activeFilters = Number(language !== "all") + Number(status !== "all");
   const openAdd = () => {
     setEditing(null);
-    setNewStaff({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
+    setNewStaff({ id: "", name: "", companyName: "", phoneNumber: "", address: "", language: "en" });
     setPhoneError("");
     setAddOpen(true);
   };
   const openEdit = (record: StaffRecord) => {
     setEditing(record);
-    setNewStaff({ id: record.id, name: record.name, phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
+    setNewStaff({ id: record.id, name: record.name, companyName: record.companyName || "", phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
     setPhoneError("");
     setAddOpen(true);
   };
@@ -117,7 +117,7 @@ export function StaffRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 1050 }}><TableHead><TableRow>{["Staff identity", "Mobile number", "Staff address", "Calling language", "Current patient", "Assignment", "Session state", "Profile"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || row.phoneMasked || "Not supplied"}</TableCell><TableCell sx={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell>{row.patientName}</TableCell><TableCell>{row.assignmentId}</TableCell><TableCell><StatusChip status={row.dutyStatus} /></TableCell><TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setSelected(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+      <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 1050 }}><TableHead><TableRow>{["Staff identity", "Company / vendor", "Mobile number", "Staff address", "Calling language", "Current patient", "Assignment", "Session state", "Profile"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.companyName || "Independent"}</TableCell><TableCell>{row.phoneNumber || row.phoneMasked || "Not supplied"}</TableCell><TableCell sx={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell>{row.patientName}</TableCell><TableCell>{row.assignmentId}</TableCell><TableCell><StatusChip status={row.dutyStatus} /></TableCell><TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setSelected(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell></TableRow>)}</TableBody></Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No staff records match these filters.</Typography>}
     </Card>
     <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
@@ -128,6 +128,7 @@ export function StaffRecordsPage() {
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} InputProps={editing ? { readOnly: true } : undefined} onChange={(event) => setNewStaff((current) => ({ ...current, id: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={newStaff.companyName || ""} onChange={(event) => setNewStaff((current) => ({ ...current, companyName: event.target.value }))} helperText="Optional for independent staff." /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={newStaff.phoneNumber} onChange={(event) => { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(newStaff.phoneNumber); if (!newStaff.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Calling language</InputLabel><Select label="Calling language" value={newStaff.language} onChange={(event) => setNewStaff((current) => ({ ...current, language: event.target.value }))}><MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
             <Grid size={12}><AddressFields required value={newStaff.address} onChange={(address) => setNewStaff((current) => ({ ...current, address }))} /></Grid>
@@ -140,6 +141,7 @@ export function StaffRecordsPage() {
       <Grid container spacing={1.5}>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Staff ID</Typography><Typography>{selected.id}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Mobile number</Typography><Typography>{selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Company / vendor</Typography><Typography>{selected.companyName || "Independent"}</Typography></Grid>
         <Grid size={12}><Typography variant="overline" color="text.secondary">Address</Typography><Typography>{selected.address || "Not provided"}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Calling language</Typography><Typography>{selected.language.toUpperCase()}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Current duty status</Typography><Typography sx={{ textTransform: "capitalize" }}>{selected.dutyStatus}</Typography></Grid>
