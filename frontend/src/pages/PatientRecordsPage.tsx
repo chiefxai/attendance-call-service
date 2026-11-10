@@ -9,6 +9,7 @@ import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import { AxiosError } from "axios";
 import { createPatient, fetchPatients, type CreatePatientPayload } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
+import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
@@ -20,6 +21,7 @@ export function PatientRecordsPage() {
   const [status, setStatus] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
   const [newPatient, setNewPatient] = useState<CreatePatientPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
+  const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), refetchInterval: 30_000 });
   const createMutation = useMutation({
@@ -27,6 +29,7 @@ export function PatientRecordsPage() {
     onSuccess: async () => {
       setAddOpen(false);
       setNewPatient({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
+      setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["patients"] });
     },
   });
@@ -35,6 +38,13 @@ export function PatientRecordsPage() {
     && (hub === "all" || row.hub === hub) && (category === "all" || row.careCategory === category)
     && (language === "all" || row.language.toLowerCase().includes(language)) && (status === "all" || row.status === status));
   const active = records.filter((row) => row.status === "active").length;
+  const savePatient = () => {
+    const phoneInput = newPatient.phoneNumber?.trim() || "";
+    const phoneNumber = phoneInput ? normalizeIndianMobile(phoneInput) : "";
+    if (phoneInput && !phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
+    setPhoneError("");
+    createMutation.mutate({ ...newPatient, id: newPatient.id.trim(), name: newPatient.name.trim(), phoneNumber, address: newPatient.address.trim(), careCategory: newPatient.careCategory?.trim(), hub: newPatient.hub?.trim() });
+  };
   const categories = [...new Set(records.map((row) => row.careCategory).filter((value) => value !== "Not specified"))];
   const hubs = [...new Set(records.map((row) => row.hub).filter((value) => value !== "Not specified"))];
   const activeFilters = Number(hub !== "all") + Number(category !== "all") + Number(language !== "all") + Number(status !== "all");
@@ -76,7 +86,7 @@ export function PatientRecordsPage() {
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Patient ID" value={newPatient.id} onChange={(event) => setNewPatient((current) => ({ ...current, id: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newPatient.name} onChange={(event) => setNewPatient((current) => ({ ...current, name: event.target.value }))} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="tel" label="Phone number (optional)" placeholder="+919876543210" helperText="If provided, use E.164 format." value={newPatient.phoneNumber || ""} onChange={(event) => setNewPatient((current) => ({ ...current, phoneNumber: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="tel" label="Indian mobile number (optional)" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "If provided, enter 10 digits; 91 or +91 is optional."} value={newPatient.phoneNumber || ""} onChange={(event) => { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const input = newPatient.phoneNumber?.trim() || ""; if (!input) { setPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Preferred language</InputLabel><Select label="Preferred language" value={newPatient.language} onChange={(event) => setNewPatient((current) => ({ ...current, language: event.target.value }))}><MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
             <Grid size={12}><TextField fullWidth required multiline minRows={2} label="Patient address" value={newPatient.address} onChange={(event) => setNewPatient((current) => ({ ...current, address: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Care category (optional)" value={newPatient.careCategory || ""} onChange={(event) => setNewPatient((current) => ({ ...current, careCategory: event.target.value }))} /></Grid>
@@ -84,7 +94,7 @@ export function PatientRecordsPage() {
           </Grid>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={() => setAddOpen(false)} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={() => createMutation.mutate({ ...newPatient, id: newPatient.id.trim(), name: newPatient.name.trim(), phoneNumber: newPatient.phoneNumber?.trim(), address: newPatient.address.trim(), careCategory: newPatient.careCategory?.trim(), hub: newPatient.hub?.trim() })} disabled={createMutation.isPending || !newPatient.id.trim() || !newPatient.name.trim() || !newPatient.address.trim()}>Save patient</Button></DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={() => setAddOpen(false)} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={savePatient} disabled={createMutation.isPending || !newPatient.id.trim() || !newPatient.name.trim() || !newPatient.address.trim()}>Save patient</Button></DialogActions>
     </Dialog>
   </Stack>;
 }
