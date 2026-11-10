@@ -157,6 +157,7 @@ export interface AttendanceRecord {
 
 export interface CallingSettings {
   defaultFromNumber: string;
+  allowNonPatientInboundCalls: boolean;
   retry: {
     maxConsecutiveNoAnswer: number;
     initialMinutes: number;

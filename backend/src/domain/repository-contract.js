@@ -29,6 +29,8 @@ const repositoryMethods = Object.freeze([
   "listSupervisionQueue(organizationId, filters)",
   "listAttendanceLedger(organizationId, filters)",
   "getCallCenterData(organizationId)",
+  "getOrganizationCallSettings(organizationId)",
+  "saveOrganizationCallSettings(organizationId, settings)",
   "getAgentSessionContext(sessionId, stage)",
   "findPatientContactByPhone(organizationId, phoneNumber)",
   "createInboundCall(call)",
