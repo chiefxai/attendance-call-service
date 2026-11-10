@@ -7,11 +7,34 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-api.interceptors.request.use((config) => {
-  const key = window.sessionStorage.getItem("attendance_api_key");
-  if (key) config.headers.Authorization = `Bearer ${key}`;
-  return config;
+
+export interface WebUser {
+  id: string;
+  email: string;
+  displayName: string;
+}
+
+const authApi = axios.create({
+  baseURL: "/api/auth",
+  timeout: 20_000,
+  withCredentials: true,
+  headers: { "Content-Type": "application/json" },
 });
+
+export async function signIn(email: string, password: string) {
+  const response = await authApi.post<{ user: WebUser }>("/login", { email, password });
+  return response.data;
+}
+
+export async function fetchCurrentUser() {
+  const response = await authApi.get<{ user: WebUser }>("/me");
+  return response.data;
+}
+
+export async function signOut() {
+  const response = await authApi.post<{ success: boolean }>("/logout");
+  return response.data;
+}
 
 export interface ServiceApiKey {
   id: string;
