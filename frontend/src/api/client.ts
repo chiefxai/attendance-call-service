@@ -8,6 +8,14 @@ export const api = axios.create({
 });
 
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) window.dispatchEvent(new Event("attendance:unauthorized"));
+    return Promise.reject(error);
+  },
+);
+
 export interface WebUser {
   id: string;
   email: string;
