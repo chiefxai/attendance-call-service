@@ -64,7 +64,7 @@ export function StaffRecordsPage() {
       />
       {query.isLoading && <LinearProgress />}
       <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 1050 }}><TableHead><TableRow>{["Staff identity", "Contact", "Staff address", "Calling language", "Current patient", "Assignment", "Session state", "Profile"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneMasked || "Not supplied"}</TableCell><TableCell sx={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell>{row.patientName}</TableCell><TableCell>{row.assignmentId}</TableCell><TableCell><StatusChip status={row.dutyStatus} /></TableCell><TableCell><Button size="small" onClick={() => setSelected(row)}>View</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
-      {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No employee assignments match these filters.</Typography>}
+      {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No staff records match these filters.</Typography>}
     </Card>
     <Dialog open={addOpen} onClose={() => { if (!createMutation.isPending) setAddOpen(false); }} fullWidth maxWidth="sm">
       <DialogTitle>Add staff</DialogTitle>
