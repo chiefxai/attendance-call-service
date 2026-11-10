@@ -160,11 +160,11 @@ function requestError(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-function FormField({ label, value, onChange, required = false, type = "text", helperText, multiline = false, rows, error = false, onBlur }: {
+function FormField({ label, value, onChange, required = false, type = "text", helperText, multiline = false, rows, error = false, onBlur, readOnly = false }: {
   label: string; value: string; onChange: (value: string) => void; required?: boolean;
-  type?: string; helperText?: string; multiline?: boolean; rows?: number; error?: boolean; onBlur?: () => void;
+  type?: string; helperText?: string; multiline?: boolean; rows?: number; error?: boolean; onBlur?: () => void; readOnly?: boolean;
 }) {
-  return <TextField fullWidth size="small" label={label} value={value} required={required} type={type} helperText={helperText} error={error} multiline={multiline} rows={rows} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} InputLabelProps={type === "datetime-local" ? { shrink: true } : undefined} />;
+  return <TextField fullWidth size="small" label={label} value={value} required={required} type={type} helperText={helperText} error={error} multiline={multiline} rows={rows} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} InputProps={readOnly ? { readOnly: true } : undefined} InputLabelProps={type === "datetime-local" ? { shrink: true } : undefined} />;
 }
 
 export function NewAssignmentPage() {
@@ -251,6 +251,17 @@ export function NewAssignmentPage() {
       patientPhone: patient.phoneNumber || "", patientAddress: patient.address || "" }));
   };
 
+  const selectedEmployee = staff.data?.find((row) => row.id === form.employeeId) || null;
+  const selectedPatient = patients.data?.find((row) => row.id === form.patientId) || null;
+  const clearStaff = () => {
+    setPhoneError("");
+    setForm((current) => ({ ...current, employeeId: "", employeeName: "", employeePhone: "", employeeAddress: "" }));
+  };
+  const clearPatient = () => {
+    setPatientPhoneError("");
+    setForm((current) => ({ ...current, patientId: "", patientName: "", patientPhone: "", patientAddress: "" }));
+  };
+
   return (
     <Stack spacing={3}>
       <PageHeader eyebrow="SCHEDULE OUTBOUND CALLS" title="New assignment" description="Add the shift and contact details. The AI calls the employee at check-in and check-out times." />
@@ -278,30 +289,32 @@ export function NewAssignmentPage() {
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
             <Typography variant="h6">Employee to call</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>The current outbound workflow only calls the employee.</Typography>
             <Grid container spacing={2} sx={{ mb: 2 }}>
-              <Grid size={12}><TextField select fullWidth size="small" label="Select saved employee" value={staff.data?.some((row) => row.id === form.employeeId) ? form.employeeId : ""} onChange={(event) => selectStaff(event.target.value)} disabled={staff.isLoading || !staff.data?.length} helperText={staff.data?.length ? "Selecting a saved employee fills their contact, address, and language." : "No saved employees yet. Enter the employee details below."}>
+              <Grid size={12}><TextField select fullWidth size="small" label="Select saved employee" value={staff.data?.some((row) => row.id === form.employeeId) ? form.employeeId : ""} onChange={(event) => event.target.value === "__new__" ? clearStaff() : selectStaff(event.target.value)} disabled={staff.isLoading} helperText={staff.data?.length ? "Stored name and mobile are locked. New staff details are saved when you create the assignment." : "Enter new employee details; they are saved to Staff records when you create the assignment."}>
                 <MenuItem value="" disabled>{staff.isLoading ? "Loading saved employees…" : "Choose an employee"}</MenuItem>
+                <MenuItem value="__new__">Enter new employee details</MenuItem>
                 {staff.data?.map((employee) => <MenuItem key={employee.id} value={employee.id}>{employee.name} · {employee.id}{employee.phoneMasked ? ` · ${employee.phoneMasked}` : ""}</MenuItem>)}
               </TextField></Grid>
             </Grid>
             <Grid container spacing={2}>
-              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee ID" value={form.employeeId} onChange={update("employeeId")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee name" value={form.employeeName} onChange={update("employeeName")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee mobile number" value={form.employeePhone} onChange={(value) => { setPhoneError(""); update("employeePhone")(value); }} required error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} onBlur={() => { const normalized = normalizeIndianMobile(form.employeePhone); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setForm((current) => ({ ...current, employeePhone: normalized })); } }} /></Grid>
+              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee ID" value={form.employeeId} onChange={update("employeeId")} required readOnly={Boolean(selectedEmployee)} /></Grid>
+              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee name" value={form.employeeName} onChange={update("employeeName")} required readOnly={Boolean(selectedEmployee)} /></Grid>
+              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee mobile number" value={form.employeePhone} readOnly={Boolean(selectedEmployee)} helperText={selectedEmployee ? "Stored number is locked. Edit it in Staff records if needed." : "Enter 10 digits; 91 or +91 country code is optional."} onChange={(value) => { setPhoneError(""); update("employeePhone")(value); }} required error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} onBlur={() => { const normalized = normalizeIndianMobile(form.employeePhone); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setForm((current) => ({ ...current, employeePhone: normalized })); } }} /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee address" value={form.employeeAddress} onChange={update("employeeAddress")} required /></Grid>
             </Grid>
           </CardContent></Card>
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
             <Typography variant="h6">Assigned patient details</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>Used to verify the assignment during the employee call. The patient is not called.</Typography>
             <Grid container spacing={2} sx={{ mb: 2 }}>
-              <Grid size={12}><TextField select fullWidth size="small" label="Select saved patient" value={patients.data?.some((row) => row.id === form.patientId) ? form.patientId : ""} onChange={(event) => selectPatient(event.target.value)} disabled={patients.isLoading || !patients.data?.length} helperText={patients.data?.length ? "Selecting a saved patient fills their contact and address." : "No saved patients yet. Enter the patient details below."}>
+              <Grid size={12}><TextField select fullWidth size="small" label="Select saved patient" value={patients.data?.some((row) => row.id === form.patientId) ? form.patientId : ""} onChange={(event) => event.target.value === "__new__" ? clearPatient() : selectPatient(event.target.value)} disabled={patients.isLoading} helperText={patients.data?.length ? "Stored name and mobile are locked. New patient details are saved when you create the assignment." : "Enter new patient details; they are saved to Patient records when you create the assignment."}>
                 <MenuItem value="" disabled>{patients.isLoading ? "Loading saved patients…" : "Choose a patient"}</MenuItem>
+                <MenuItem value="__new__">Enter new patient details</MenuItem>
                 {patients.data?.map((patient) => <MenuItem key={patient.id} value={patient.id}>{patient.name} · {patient.id}</MenuItem>)}
               </TextField></Grid>
             </Grid>
             <Grid container spacing={2}>
-              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient ID" value={form.patientId} onChange={update("patientId")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient name" value={form.patientName} onChange={update("patientName")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient mobile number (optional)" value={form.patientPhone} onChange={(value) => { setPatientPhoneError(""); update("patientPhone")(value); }} error={Boolean(patientPhoneError)} helperText={patientPhoneError || "If provided, enter 10 digits; 91 or +91 is optional. The patient is not called."} onBlur={() => { const input = form.patientPhone.trim(); if (!input) { setPatientPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPatientPhoneError(INDIAN_MOBILE_ERROR); else { setPatientPhoneError(""); setForm((current) => ({ ...current, patientPhone: normalized })); } }} /></Grid>
+              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient ID" value={form.patientId} onChange={update("patientId")} required readOnly={Boolean(selectedPatient)} /></Grid>
+              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient name" value={form.patientName} onChange={update("patientName")} required readOnly={Boolean(selectedPatient)} /></Grid>
+              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient mobile number (optional)" value={form.patientPhone} readOnly={Boolean(selectedPatient)} helperText={selectedPatient ? "Stored number is locked. Edit it in Patient records if needed." : "If provided, enter 10 digits; 91 or +91 is optional. The patient is not called."} onChange={(value) => { setPatientPhoneError(""); update("patientPhone")(value); }} error={Boolean(patientPhoneError)} helperText={patientPhoneError || "If provided, enter 10 digits; 91 or +91 is optional. The patient is not called."} onBlur={() => { const input = form.patientPhone.trim(); if (!input) { setPatientPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPatientPhoneError(INDIAN_MOBILE_ERROR); else { setPatientPhoneError(""); setForm((current) => ({ ...current, patientPhone: normalized })); } }} /></Grid>
               <Grid size={12}><FormField label="Patient address" value={form.patientAddress} onChange={update("patientAddress")} required multiline rows={2} /></Grid>
             </Grid>
           </CardContent></Card>
