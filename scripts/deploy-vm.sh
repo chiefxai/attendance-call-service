@@ -99,6 +99,7 @@ for attempt in $(seq 1 60); do
   if curl --silent --show-error --fail --connect-timeout 5 "https://$DOMAIN/healthz" >/dev/null 2>&1; then
     echo "Deployment is healthy: https://$DOMAIN"
     echo "Vobiz answer URL: https://$DOMAIN/api/call-service/answer"
+    echo "Vobiz inbound answer URL: https://$DOMAIN/api/call-service/incoming/answer"
     echo "Vobiz status URL: https://$DOMAIN/api/call-service/webhooks/call-status"
     compose ps
     exit 0
