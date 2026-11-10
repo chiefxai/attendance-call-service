@@ -9,7 +9,7 @@ function normalizeIndianMobile(value) {
     : digits.length === 12 && digits.startsWith("91")
       ? digits.slice(2)
       : "";
-  return /^[6-9]\d{9}$/.test(mobile) ? " +91" + mobile : null;
+  return /^[6-9]\d{9}$/.test(mobile) ? "+91" + mobile : null;
 }
 
 module.exports = { normalizeIndianMobile };
