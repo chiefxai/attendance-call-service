@@ -5,6 +5,147 @@
 
 See [backend/README.md](backend/README.md) for backend integration and setup.
 
+## Application architecture
+
+The service has two coordinated workflows: outbound employee attendance calls and
+inbound patient enquiries. PostgreSQL stores operational records and the durable
+job queue; MinIO stores private call recordings. Vobiz handles telephony, while
+Vertex AI provides live speech and post-call language processing.
+
+```mermaid
+flowchart LR
+  subgraph Users[People and connected systems]
+    Ops[Operations team]
+    Employee[Care staff]
+    Patient[Patient]
+    Host[Host platform]
+    Vobiz[Vobiz telephony]
+  end
+
+  subgraph Public[Public application edge]
+    Caddy[Caddy TLS and reverse proxy]
+    UI[React and MUI operations app]
+  end
+
+  subgraph Service[Attendance calling service]
+    API[Express API and webhook handlers]
+    Live[Realtime voice gateway]
+    Worker[Async queue workers]
+    PostCall[LangChain post-call agent and tools]
+    Booking[Appointment booking voice agent]
+    PatientAgent[Patient support voice agent]
+    AttendanceAgent[Attendance voice agent]
+  end
+
+  subgraph Data[Persistent service data]
+    DB[(PostgreSQL: people, activities, sessions, calls, transcripts, settings, API keys, job queue)]
+    Store[(MinIO: private audio recordings)]
+  end
+
+  Vertex[Google Vertex AI: Gemini Live, transcription and extraction]
+
+  Ops --> UI
+  UI -->|HTTPS API; web session or service API key| Caddy
+  Caddy -->|static application| UI
+  Caddy -->|API and WebSocket proxy| API
+  API <--> DB
+  API -->|transactional jobs| DB
+  Worker <-->|claim and update jobs| DB
+  Worker -->|outbound call placement| Vobiz
+  Vobiz -->|signed answer and status callbacks| Caddy
+  Vobiz <-->|live audio stream| Caddy
+  API --> Live
+  Live <--> Vertex
+  Live --> Store
+  Worker -->|transcribe and analyze| Vertex
+  Worker --> PostCall
+  PostCall <--> DB
+  PostCall -->|follow-up jobs, staff suggestions, session scheduling| DB
+  Worker -->|staff availability calls| Vobiz
+  Live --> AttendanceAgent
+  Live --> PatientAgent
+  Live --> Booking
+  AttendanceAgent --> Vertex
+  PatientAgent --> Vertex
+  Booking --> Vertex
+  Employee <-->|attendance conversation| Vobiz
+  Patient <-->|patient support conversation| Vobiz
+  Worker -->|completion POST after check-in and check-out confirm| Host
+  Host -->|create assignments using service API| Caddy
+```
+
+### Outbound attendance flow
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant P as Host platform or operator
+  participant API as Service API
+  participant DB as PostgreSQL and durable queue
+  participant W as Queue workers
+  participant V as Vobiz
+  participant L as Vertex Live attendance agent
+  participant PC as Vertex transcription and LangChain post-call agent
+  participant H as Host platform callback
+
+  P->>API: POST assignment with staff, patient, language and UTC schedule
+  API->>DB: Validate overlap; save session and enqueue check-in and check-out
+  W->>DB: Claim due call job within concurrency limit
+  W->>V: Place employee call
+  V->>API: Signed answer webhook and media WebSocket
+  API->>L: Provide full session context and stage prompt
+  L-->>V: Live speech response; exchange employee audio
+  V-->>L: Employee audio
+  L->>API: End-of-call audio and call outcome
+  API->>DB: Save call status and recording metadata
+  API->>DB: Enqueue post-call processing
+  W->>PC: Transcribe, extract intent and determine next action
+  PC->>DB: Save transcript, outcome, audit and next schedule/retry
+  Note over W,DB: Unanswered calls and requested callbacks are rescheduled using configurable retry/backoff. Check-out stays part of the same session.
+  W->>H: POST completion only after both stages confirm
+```
+
+### Inbound patient enquiry and appointment flow
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Patient as Patient caller
+  participant V as Vobiz
+  participant API as Service API and realtime voice gateway
+  participant DB as PostgreSQL
+  participant Live as Vertex Live patient agent
+  participant PC as Transcription and LangChain post-call agent
+  participant Booking as Vertex Live appointment coordinator
+  participant Worker as Queue workers
+  participant Ops as Operations UI
+
+  Patient->>V: Call registered inbound number
+  V->>API: Signed inbound answer webhook
+  API->>DB: Match caller to patient contact; check non-patient call setting
+  API-->>V: Accept supported caller or reject according to setting
+  V->>API: Open media WebSocket
+  API->>Live: Pass matched patient context and preferred language
+  Live-->>Patient: Greet by local time, ask need and requested start time
+  Patient-->>Live: Describe care need
+  Live->>API: Conversation audio
+  API->>DB: Save enquiry and recording reference; enqueue processing
+  Worker->>PC: Transcribe and classify activity, time and intent
+  PC->>DB: Save transcript, activity duration and available staff suggestions
+  Ops->>DB: View enquiry and suggested staff in the UI
+  Worker->>Booking: Call suggested staff sequentially to confirm availability
+  Booking->>Worker: Available, unavailable, unclear or no answer
+  Worker->>DB: Save each attempt; retry next candidate or flag for review
+  Worker->>DB: On confirmation, create attendance session and enqueue both stages
+```
+
+PostgreSQL is the source of truth for session state, call attempts, schedule and
+retry timing, transcripts, staff/patient directories, care activities, API keys,
+and durable jobs. Audio is kept in private MinIO storage and is served through
+organization-scoped API endpoints. The worker applies the configured retention
+period to enquiry data and recordings. See [deployment and security guidance](backend/README.md)
+for credentials, callback setup, and retention settings.
+
 For automatic deployments after merges to `main`, see [GitHub Actions VM deployment](docs/github-actions-vm-deploy.md). This requires one-time GCP Workload Identity Federation, OS Login/IAP, and GitHub repository variable setup.
 
 ## Deploy on a GCP Linux VM
