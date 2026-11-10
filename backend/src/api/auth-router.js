@@ -48,7 +48,10 @@ function createAuthRouter({ express, repository }) {
     }
     try {
       const user = await repository.findWebUserByEmail(email);
-      if (!user || !user.active || !checkPassword(password, user.passwordSalt, user.passwordHash)) {
+      const passwordValid = user
+        ? checkPassword(password, user.passwordSalt, user.passwordHash)
+        : checkPassword(password, "attendance-auth-dummy-salt", "0".repeat(128));
+      if (!user || !user.active || !passwordValid) {
         const next = prior && prior.until > now ? { count: prior.count + 1, until: prior.until } : { count: 1, until: now + LOGIN_WINDOW_MS };
         loginFailures.set(ip, next);
         return res.status(401).json({ error: "Email or password is incorrect." });
