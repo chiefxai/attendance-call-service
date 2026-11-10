@@ -129,7 +129,7 @@ class PostgresRepository {
     const patientState = parts.length === 4 ? parts[0].trim() : "";
     const patientDistrict = parts.length === 4 ? parts[1].trim() : "";
     const { rows } = await this.pool.query(
-      `SELECT d.external_id,d.name,d.phone_number,d.address,d.language,
+      `SELECT d.external_id,d.name,d.company_name,d.phone_number,d.address,d.language,
          CASE
            WHEN $4<>'' AND split_part(d.address,' | ',2)<>'' AND lower(trim(split_part(d.address,' | ',2)))=lower($4) THEN 'same_district'
            WHEN $5<>'' AND split_part(d.address,' | ',1)<>'' AND lower(trim(split_part(d.address,' | ',1)))=lower($5) THEN 'same_region'
@@ -150,7 +150,7 @@ class PostgresRepository {
        LIMIT $6`,
       [organizationId, startAt, endAt, patientDistrict, patientState, Math.min(Math.max(Number(limit) || 10, 1), 10)],
     );
-    return rows.map((row) => ({ id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address,
+    return rows.map((row) => ({ id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number, address: row.address,
       language: row.language, locationMatch: row.location_match }));
   }
 
@@ -471,7 +471,7 @@ class PostgresRepository {
         throw Object.assign(new Error("Enquiry does not have a valid requested care window"), { status: 409 });
       }
       const patient = json(enquiry.patient_context) || {};
-      const employee = { id: staff.id, name: staff.name, phoneNumber: staff.phoneNumber, address: staff.address || "" };
+      const employee = { id: staff.id, name: staff.name, companyName: staff.companyName || "", phoneNumber: staff.phoneNumber, address: staff.address || "" };
       await this.assertEmployeeScheduleAvailable({ organizationId, employee, scheduledStartAt: start, scheduledEndAt: end }, client);
       await this.createStaffDirectoryRecord(organizationId, { ...employee, language: staff.language || enquiry.language }, client);
       const session = await this.createAttendanceSession({
@@ -573,7 +573,7 @@ class PostgresRepository {
         throw error;
       }
       const staffResult = await client.query(
-        `SELECT external_id,name,phone_number,address,language FROM staff_directory
+        `SELECT external_id,name,company_name,phone_number,address,language FROM staff_directory
          WHERE organization_id=$1 AND external_id=$2 AND active=TRUE FOR SHARE`, [organizationId, staffId],
       );
       if (!staffResult.rowCount) {
@@ -586,7 +586,7 @@ class PostgresRepository {
         `UPDATE inbound_calls SET enquiry_status='resolved',resolved_staff=$3::jsonb,resolved_at=NOW(),updated_at=NOW()
          WHERE id=$1 AND organization_id=$2
          RETURNING *`,
-        [id, organizationId, JSON.stringify({ id: staff.external_id, name: staff.name, phoneNumber: staff.phone_number,
+        [id, organizationId, JSON.stringify({ id: staff.external_id, name: staff.name, companyName: staff.company_name || "", phoneNumber: staff.phone_number,
           address: staff.address || "", language: staff.language || "en" })],
       );
       await client.query("COMMIT");
@@ -760,15 +760,15 @@ class PostgresRepository {
   }
   async createStaffDirectoryRecord(organizationId, person, client = this.pool) {
     const { rows } = await client.query(
-      `INSERT INTO staff_directory (organization_id,external_id,name,phone_number,address,language)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      `INSERT INTO staff_directory (organization_id,external_id,name,company_name,phone_number,address,language)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (organization_id,external_id) DO NOTHING
-       RETURNING external_id,name,phone_number,address,language`,
-      [organizationId, person.id, person.name, person.phoneNumber, person.address, person.language || "en"],
+       RETURNING external_id,name,company_name,phone_number,address,language`,
+      [organizationId, person.id, person.name, person.companyName || "", person.phoneNumber, person.address, person.language || "en"],
     );
     const row = rows[0];
     return row ? {
-      id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+      id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
       patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
@@ -776,17 +776,17 @@ class PostgresRepository {
 
   async updateStaffDirectoryRecord(organizationId, person) {
     const { rows } = await this.pool.query(
-      `INSERT INTO staff_directory (organization_id,external_id,name,phone_number,address,language,active)
-       VALUES ($1,$2,$3,$4,$5,$6,TRUE)
+      `INSERT INTO staff_directory (organization_id,external_id,name,company_name,phone_number,address,language,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)
        ON CONFLICT (organization_id,external_id) DO UPDATE SET
-         name=EXCLUDED.name, phone_number=EXCLUDED.phone_number, address=EXCLUDED.address,
+         name=EXCLUDED.name, company_name=EXCLUDED.company_name, phone_number=EXCLUDED.phone_number, address=EXCLUDED.address,
          language=EXCLUDED.language, active=TRUE, updated_at=NOW()
-       RETURNING external_id,name,phone_number,address,language`,
-      [organizationId, person.id, person.name, person.phoneNumber, person.address, person.language || "en"],
+       RETURNING external_id,name,company_name,phone_number,address,language`,
+      [organizationId, person.id, person.name, person.companyName || "", person.phoneNumber, person.address, person.language || "en"],
     );
     const row = rows[0];
     return row ? {
-      id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+      id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
       patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
@@ -834,7 +834,7 @@ class PostgresRepository {
   async listStaffDirectory(organizationId, { search = "", status = "all", limit = 100 } = {}) {
     const [profiles, sessions] = await Promise.all([
       this.pool.query(
-        `SELECT external_id,name,phone_number,address,language FROM staff_directory
+        `SELECT external_id,name,company_name,phone_number,address,language FROM staff_directory
          WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
         [organizationId],
       ),
@@ -843,7 +843,7 @@ class PostgresRepository {
     const records = new Map();
     for (const row of profiles.rows) {
       records.set(row.external_id, {
-        id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+        id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number,
         phoneMasked: this.maskPhone(row.phone_number), address: row.address || "", language: row.language,
         patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
       });
@@ -857,6 +857,7 @@ class PostgresRepository {
       records.set(key, {
         id: key,
         name: previous?.name || person.name,
+        companyName: previous?.companyName || person.companyName || "",
         phoneNumber: previous?.phoneNumber || person.phoneNumber || null,
         phoneMasked: previous?.phoneMasked || this.maskPhone(person.phoneNumber),
         address: previous?.address || person.address || "",
@@ -872,7 +873,7 @@ class PostgresRepository {
     }
     return [...records.values()]
       .filter((record) => (status === "all" || status === record.dutyStatus)
-        && (!search || `${record.id} ${record.name} ${record.patientName} ${record.address}`.toLowerCase().includes(search.toLowerCase())))
+        && (!search || `${record.id} ${record.name} ${record.companyName} ${record.patientName} ${record.address}`.toLowerCase().includes(search.toLowerCase())))
       .slice(0, Math.min(Number(limit) || 100, 500));
   }
 
