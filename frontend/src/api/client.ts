@@ -99,7 +99,7 @@ export interface AssignmentPayload {
   language: string;
   scheduledStartAt: string;
   scheduledEndAt: string;
-  employee: { id: string; name: string; phoneNumber: string; address: string };
+  employee: { id: string; name: string; phoneNumber: string; address?: string };
   patient: { id: string; name: string; address: string; phoneNumber?: string };
 }
 
