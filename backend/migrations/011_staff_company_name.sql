@@ -1,0 +1,2 @@
+ALTER TABLE staff_directory
+  ADD COLUMN IF NOT EXISTS company_name TEXT NOT NULL DEFAULT '';
