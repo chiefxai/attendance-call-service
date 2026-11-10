@@ -30,6 +30,14 @@ function localInputValue(date: Date) {
   return localDate.toISOString().slice(0, 16);
 }
 
+function getBrowserTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function toUtcIso(value: string) {
+  return new Date(value).toISOString();
+}
+
 function callLanguageCode(language: string) {
   const normalized = language.trim().toLowerCase();
   if (normalized.startsWith("ta") || normalized.includes("tamil")) return "ta";
@@ -48,7 +56,7 @@ const initialValues: FormValues = {
   patientId: "", patientName: "", patientPhone: "", patientAddress: "",
 };
 
-const BULK_HEADERS = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress"];
+const BULK_HEADERS = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress", "timeZone"];
 const MAX_BULK_ROWS = 200;
 interface BulkAssignmentRow { line: number; payload?: AssignmentPayload; errors: string[]; }
 interface BulkAssignmentResult { sessionId?: string; error?: string; }
@@ -86,7 +94,7 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
   if (sourceRows.length < 2) return { rows: [], error: "The CSV needs a header row and at least one assignment row." };
   const headers = sourceRows[0].map((value) => value.trim());
   const indexes = new Map(headers.map((header, index) => [header, index]));
-  const optionalHeaders = ["fromNumber", "patientPhone"];
+  const optionalHeaders = ["fromNumber", "patientPhone", "timeZone"];
   const missingHeaders = BULK_HEADERS.filter((header) => !optionalHeaders.includes(header) && !indexes.has(header));
   if (missingHeaders.length) return { rows: [], error: "Missing CSV columns: " + missingHeaders.join(", ") };
   const dataRows = sourceRows.slice(1);
@@ -101,10 +109,13 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
     const language = languageMap[get("language").toLowerCase()];
     const startValue = get("scheduledStartAt");
     const endValue = get("scheduledEndAt");
+    const assignmentTimeZone = get("timeZone") || getBrowserTimeZone();
     const hasTimezone = (value: string) => /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
     const startAt = Date.parse(startValue);
     const endAt = Date.parse(endValue);
     const errors: string[] = [];
+    try { new Intl.DateTimeFormat("en-US", { timeZone: assignmentTimeZone }).format(); }
+    catch { errors.push("timeZone must be a valid IANA timezone"); }
     if (!assignmentId) errors.push("assignmentId is required");
     else if (seenAssignments.has(assignmentId)) errors.push("assignmentId is duplicated in this file");
     else seenAssignments.add(assignmentId);
@@ -120,6 +131,7 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
       assignmentId, agentId, fromNumber: get("fromNumber"), language: language || "en",
       scheduledStartAt: Number.isFinite(startAt) ? new Date(startAt).toISOString() : "",
       scheduledEndAt: Number.isFinite(endAt) ? new Date(endAt).toISOString() : "",
+      metadata: { timeZone: assignmentTimeZone },
       employee: { id: get("employeeId"), name: get("employeeName"), phoneNumber: get("employeePhone"), address: get("employeeAddress") },
       patient: { id: get("patientId"), name: get("patientName"), address: get("patientAddress"), phoneNumber: get("patientPhone") },
     };
@@ -197,8 +209,8 @@ export function NewAssignmentPage() {
     event.preventDefault();
     const payload: AssignmentPayload = {
       assignmentId: form.assignmentId.trim(), agentId: form.agentId, fromNumber: form.fromNumber.trim(),
-      language: form.language, scheduledStartAt: new Date(form.scheduledStartAt).toISOString(),
-      scheduledEndAt: new Date(form.scheduledEndAt).toISOString(),
+      language: form.language, scheduledStartAt: toUtcIso(form.scheduledStartAt),
+      scheduledEndAt: toUtcIso(form.scheduledEndAt), metadata: { timeZone: getBrowserTimeZone() },
       employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), phoneNumber: form.employeePhone.trim(), address: form.employeeAddress.trim() },
       patient: { id: form.patientId.trim(), name: form.patientName.trim(), phoneNumber: form.patientPhone.trim(), address: form.patientAddress.trim() },
     };
@@ -235,7 +247,7 @@ export function NewAssignmentPage() {
       <Box component="form" onSubmit={submit}>
         <Stack spacing={2.5}>
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-            <Typography variant="h6">Shift and calling setup</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>Choose the active voice agent, language, and scheduled shift.</Typography>
+            <Typography variant="h6">Shift and calling setup</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>Choose the active voice agent, language, and scheduled shift. Times are entered in {getBrowserTimeZone()} and sent to the API in UTC.</Typography>
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6 }}><FormField label="Assignment ID" value={form.assignmentId} onChange={update("assignmentId")} required /></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><TextField select fullWidth size="small" label="Calling agent" required value={form.agentId} onChange={(event) => update("agentId")(event.target.value)} disabled={agents.isLoading || agents.data?.length === 0}><MenuItem value="" disabled>Select an active agent</MenuItem>{agents.data?.filter((agent) => agent.active).map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.name}</MenuItem>)}</TextField></Grid>
@@ -287,7 +299,7 @@ export function NewAssignmentPage() {
             <Box><Typography variant="h6">Create multiple sessions</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Upload a CSV with one assignment per row. Each row creates its own session and queues its check-in and check-out calls.</Typography>
             </Box>
-            <Alert severity="info">Use the template columns exactly. Dates must be ISO 8601 with a timezone, such as 2026-11-12T08:00:00+05:30. The agentId must match an active calling agent.</Alert>
+            <Alert severity="info">Use the template columns exactly. Dates must be ISO 8601 with a timezone, such as 2026-11-12T08:00:00+05:30. The optional timeZone column accepts an IANA name such as Asia/Kolkata; blank defaults to your browser timezone.</Alert>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
               <Button variant="outlined" onClick={downloadBulkTemplate} disabled={bulkRunning}>Download CSV template</Button>
               <Button component="label" variant="contained" startIcon={<UploadFileRoundedIcon />} disabled={bulkRunning || agents.isLoading || agents.isError}>

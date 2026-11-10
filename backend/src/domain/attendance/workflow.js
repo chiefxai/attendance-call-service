@@ -269,20 +269,16 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       const bothStagesSettled = terminal.has(current.checkInStatus) && terminal.has(current.checkOutStatus);
       if (bothStagesSettled) await repository.markSessionException(sessionId);
     }
-    // Deliver every completed call result immediately so the care-management
-    // application receives live check-in/check-out data, including review and
-    // exception outcomes. A later attempt sends the same session again with a
-    // new idempotency key and the care app upserts the live record.
-    if (callAttemptId) {
-      await queue.enqueue("deliver_attendance", { sessionId, callAttemptId }, {
-        idempotencyKey: `deliver:${sessionId}:${callAttemptId}`,
-      });
-    }
+
   }
 
   async function deliverAttendance({ sessionId, callAttemptId }) {
     const session = await repository.getAttendanceSession(sessionId);
-    if (!session) return;
+    // Only send a session after both attendance stages are confirmed. This
+    // protects against stale queue jobs and prevents incomplete records being
+    // delivered if another path enqueues this job prematurely.
+    if (!session || session.sessionStatus !== "completed"
+        || session.checkInStatus !== "confirmed" || session.checkOutStatus !== "confirmed") return;
     const result = await backend.sendAttendance(await repository.buildBackendAttendancePayload(sessionId), {
       idempotencyKey: `attendance-session:${sessionId}:${callAttemptId || "snapshot"}`,
     });

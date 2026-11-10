@@ -97,7 +97,7 @@ function createVertexCallAgent({ getClientForOrg, project, location } = {}) {
       "employeeNameConfirmed, patientNameConfirmed, and addressConfirmed must be true only when the employee's spoken answers match the assigned employee, patient, and address. Use false for a clear mismatch and null when the answer was not obtained.",
       "reportedArrivalTime (string|null), reportedDepartureTime (string|null),",
       "requestedCallbackAt (string|null), employeeIntent (string), exceptionCode (string|null), summary (string).",
-      "Use ISO 8601 timestamps with the assignment timezone when the transcript and context make that possible.",
+      "Use assignment.timeZone (the IANA timezone supplied by the frontend) to interpret spoken local clock times. Return reportedArrivalTime, reportedDepartureTime, and requestedCallbackAt as ISO 8601 UTC timestamps ending in Z. If the assignment timezone is missing or the employee's time is ambiguous, use null rather than guessing.",
       "Do not infer a time that the employee did not report. Use null when unclear.",
       "Session context:", formatSessionContext(sessionContext),
       "Transcript:", transcript || "",
