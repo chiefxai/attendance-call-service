@@ -41,6 +41,15 @@ async function main() {
   });
   app.use("/api/auth", createAuthRouter({ express, repository }));
   // Platform integrations authenticate with service keys; the web UI uses HttpOnly session cookies.
+  app.use("/api/call-service/incoming/answer", (req, res, next) => {
+    const startedAt = process.hrtime.bigint();
+    console.info(`[vobiz-inbound-http] received method=${req.method} contentType=${req.get("content-type") || "unknown"}`);
+    res.once("finish", () => {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+      console.info(`[vobiz-inbound-http] response method=${req.method} status=${res.statusCode} durationMs=${durationMs.toFixed(1)}`);
+    });
+    next();
+  });
   app.use("/api/call-service", router);
 
   const server = http.createServer(app);
