@@ -10,6 +10,7 @@ import TuneRoundedIcon from "@mui/icons-material/TuneRounded";
 import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import { AxiosError } from "axios";
 import { createAgent, createAssignment, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AgentLanguagePrompt, type AssignmentPayload } from "../api/client";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
