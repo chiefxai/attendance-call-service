@@ -316,23 +316,17 @@ export async function createAssignment(payload: AssignmentPayload) {
   return response.data;
 }
 
-export async function createServiceApiKey(label: string, adminToken: string) {
-  const response = await api.post<ServiceApiKey & { apiKey: string }>("/api-keys", { label }, {
-    headers: { "X-API-Admin-Token": adminToken },
-  });
+export async function createServiceApiKey(label: string) {
+  const response = await api.post<ServiceApiKey & { apiKey: string }>("/api-keys", { label });
   return response.data;
 }
 
-export async function fetchServiceApiKeys(adminToken: string) {
-  const response = await api.get<ServiceApiKey[]>("/api-keys", {
-    headers: { "X-API-Admin-Token": adminToken },
-  });
+export async function fetchServiceApiKeys() {
+  const response = await api.get<ServiceApiKey[]>("/api-keys");
   return response.data;
 }
 
-export async function revokeServiceApiKey(id: string, adminToken: string) {
-  const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`, {
-    headers: { "X-API-Admin-Token": adminToken },
-  });
+export async function revokeServiceApiKey(id: string) {
+  const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`);
   return response.data;
 }
