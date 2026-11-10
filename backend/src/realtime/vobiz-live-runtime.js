@@ -101,7 +101,11 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
 
   async function answerHandler(req, res) {
     try {
-      if (!await verifyWebhook(req)) return res.status(401).send("Invalid Vobiz signature");
+      if (!await verifyWebhook(req)) {
+        console.warn("[vobiz-inbound] rejected Answer URL request: invalid Vobiz signature");
+        return res.status(401).send("Invalid Vobiz signature");
+      }
+      console.info("[vobiz-inbound] Answer URL request signature verified");
       const callId = req.body?.CallUUID || req.query?.CallUUID || req.body?.call_uuid || req.query?.call_uuid;
       const sessionId = req.query?.sessionId || req.body?.sessionId;
       const callAttemptId = req.query?.callAttemptId || req.body?.callAttemptId;
@@ -128,6 +132,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       streamUrl.protocol = wsProtocol;
       streamUrl.searchParams.set("token", token);
       res.set("Content-Type", "text/xml; charset=utf-8");
+      console.info(`[vobiz-inbound] returning bidirectional stream XML call=${callId}`);
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
     } catch (error) {
       return res.status(error.status || 503).send("Unable to initialize the voice session");
@@ -141,7 +146,10 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       const fromNumber = req.body?.From || req.body?.from || req.body?.Caller || "";
       const toNumber = req.body?.To || req.body?.to || "";
       const direction = String(req.body?.Direction || req.body?.direction || "inbound").toLowerCase();
-      if (!callId || !fromNumber || (direction && direction !== "inbound")) return res.status(400).send("Missing inbound Vobiz call details");
+      if (!callId || !fromNumber || (direction && direction !== "inbound")) {
+        console.warn(`[vobiz-inbound] rejected Answer URL payload callIdPresent=${Boolean(callId)} fromPresent=${Boolean(fromNumber)} direction=${direction || "unknown"}`);
+        return res.status(400).send("Missing inbound Vobiz call details");
+      }
 
       // This tool performs one exact patient-phone lookup and cannot enumerate
       // contacts or retrieve staff records.
@@ -156,6 +164,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         || agents.find((candidate) => candidate.active);
       if (!agent) return res.status(503).send("No active voice agent is configured");
       const inboundCall = await repository.createInboundCall({ organizationId, providerCallId: String(callId), fromNumber, toNumber, patient, agentId: agent.id, language });
+      console.info(`[vobiz-inbound] call initialized call=${callId} language=${language} patientMatched=${Boolean(patient?.id)}`);
       const token = createToken({ callId: String(callId), direction: "inbound", inboundCallId: inboundCall.id, organizationId }, getSecret());
       const publicBase = process.env.PUBLIC_BASE_URL
         ? new URL(process.env.PUBLIC_BASE_URL)
