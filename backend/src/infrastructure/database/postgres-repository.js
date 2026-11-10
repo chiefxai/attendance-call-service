@@ -396,7 +396,7 @@ class PostgresRepository {
     return row ? {
       id: row.external_id, name: row.name, phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
-      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
   }
 
@@ -414,7 +414,7 @@ class PostgresRepository {
     return row ? {
       id: row.external_id, name: row.name, phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
-      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
   }
 
@@ -471,7 +471,7 @@ class PostgresRepository {
       records.set(row.external_id, {
         id: row.external_id, name: row.name, phoneNumber: row.phone_number,
         phoneMasked: this.maskPhone(row.phone_number), address: row.address || "", language: row.language,
-        patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+        patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
       });
     }
     for (const session of sessions) {
