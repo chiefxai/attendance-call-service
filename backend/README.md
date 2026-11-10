@@ -241,4 +241,11 @@ Configure a Vobiz Voice Application:
 
 The Answer URL is a provider callback: application API-key authentication is bypassed only for that route, while Vobiz signature validation remains mandatory. The APIs `GET /api/call-service/incoming-calls`, `GET /api/call-service/incoming-calls/:id`, and `GET /api/call-service/incoming-calls/:id/recording` require the normal authenticated organization context.
 
+
+### Care activity durations and staff suggestions
+
+Configure the activity catalog in **Settings → Care activities**. Each organization can create, edit, and deactivate care activities with a default duration. The patient agent asks for the requested activity and start date/time; it does not ask the caller for duration or an end time. The post-call agent extracts the activity and start time, then the backend applies the configured duration, excludes staff with any overlapping duty, and returns up to 10 suggestions ordered by same district, same state, and other areas. Suggestions include the staff contact and appear in Enquiries for a human to follow up; the system does not assign a staff member automatically. A saved patient address must include the structured state and district fields for location ranking.
+
+The authenticated API is `GET /api/call-service/activities`, `POST /api/call-service/activities`, and `PUT /api/call-service/activities/:id`. The incoming call list includes `enquiryAnalysisStatus`, extracted activity and requested times, transcript, recording availability, and `staffSuggestions`.
+
 Set `DATA_RETENTION_DAYS=90`, `RETENTION_SCAN_INTERVAL_MS=3600000`, and `INBOUND_RECORDING_MAX_BYTES=52428800` in the service environment as needed. The worker deletes expired recording objects and inbound call rows.

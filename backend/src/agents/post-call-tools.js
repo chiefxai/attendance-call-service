@@ -35,6 +35,12 @@ const operationSchemas = [
     schema: z.object({ callAttemptId: z.string() }),
   },
   {
+    key: "transcribe_inbound_call",
+    name: "process_patient_enquiry_call",
+    description: "Transcribe an inbound patient-support recording, extract its requested care activity and start time, and save available staff suggestions for human follow-up.",
+    schema: z.object({ inboundCallId: z.string(), organizationId: z.string().optional() }),
+  },
+  {
     key: "extract_intent",
     name: "extract_attendance_details",
     description: "Extract employee intent, verification facts, and reported attendance time from the saved transcript.",

@@ -112,7 +112,7 @@ export interface IncomingPatientCall {
   id: string;
   status: "processing" | "ready" | "failed" | "no_answer" | "canceled" | "cancelled";
   fromNumber: string;
-  patient: { id?: string | null; name?: string | null; phoneNumber?: string | null; address?: string | null } | null;
+  patient: { id?: string | null; name?: string | null; phoneNumber?: string | null; address?: string | null; careCategory?: string | null; hub?: string | null } | null;
   language: string;
   startedAt: string;
   answeredAt: string | null;
@@ -121,6 +121,37 @@ export interface IncomingPatientCall {
   hasRecording: boolean;
   hasTranscript: boolean;
   transcript: string | null;
+  transcriptLanguage: string | null;
+  enquiryAnalysisStatus: "pending" | "processing" | "complete" | "needs_details" | "failed";
+  enquiryAnalysis: {
+    activityId?: string | null;
+    activityName?: string | null;
+    durationMinutes?: number | null;
+    requestedStartAt?: string | null;
+    requestedEndAt?: string | null;
+    needsSummary?: string;
+    requiresHumanFollowUp?: boolean;
+    missingDetails?: string[];
+  };
+  staffSuggestions: Array<{
+    id: string;
+    name: string;
+    phoneNumber: string | null;
+    address: string;
+    language: string;
+    locationMatch: "same_district" | "same_region" | "other_region";
+  }>;
+}
+export type IncomingCall = IncomingPatientCall;
+
+export interface CareActivity {
+  id: string;
+  name: string;
+  description: string;
+  durationMinutes: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AgentLanguagePrompt {
@@ -360,6 +391,20 @@ export async function fetchCallCenterData() {
   return response.data;
 }
 
+export async function fetchCareActivities(includeInactive = true) {
+  const response = await api.get<CareActivity[]>("/activities", { params: { includeInactive } });
+  return response.data;
+}
+
+export async function createCareActivity(activity: Pick<CareActivity, "name" | "description" | "durationMinutes">) {
+  const response = await api.post<CareActivity>("/activities", activity);
+  return response.data;
+}
+
+export async function updateCareActivity(id: string, activity: Pick<CareActivity, "name" | "description" | "durationMinutes" | "active">) {
+  const response = await api.put<CareActivity>("/activities/" + encodeURIComponent(id), activity);
+  return response.data;
+}
 export async function fetchIncomingCalls(limit = 100) {
   const response = await api.get<IncomingPatientCall[]>("/incoming-calls", { params: { limit } });
   return response.data;

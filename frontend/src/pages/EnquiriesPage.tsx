@@ -2,14 +2,13 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog, DialogActions,
-  DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select,
-  Stack, TextField, ToggleButton, ToggleButtonGroup, Typography,
+  DialogContent, DialogTitle, FormControl, Grid, InputLabel, MenuItem, Select,
+  Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
-import CallReceivedRoundedIcon from "@mui/icons-material/CallReceivedRounded";
 import { AxiosError } from "axios";
-import { createPatient, fetchIncomingCalls, fetchPatients, incomingCallRecordingUrl, type CreatePatientPayload, type PatientRecord } from "../api/client";
+import { createPatient, fetchIncomingCalls, fetchPatients, incomingCallRecordingUrl, type CreatePatientPayload, type IncomingCall, type PatientRecord } from "../api/client";
 import { PageHeader } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
@@ -43,14 +42,14 @@ export function EnquiriesPage() {
   const [enquiryMessage, setEnquiryMessage] = useState("");
   const [selectedMessage, setSelectedMessage] = useState("");
   const queryClient = useQueryClient();
-  const incomingCalls = useQuery({
-    queryKey: ["incoming-calls"],
-    queryFn: () => fetchIncomingCalls(100),
-    refetchInterval: 5_000,
-  });
   const patients = useQuery({
     queryKey: ["patients"],
     queryFn: () => fetchPatients({ limit: 500 }),
+  });
+  const incomingCalls = useQuery({
+    queryKey: ["incoming-calls"],
+    queryFn: fetchIncomingCalls,
+    refetchInterval: (query) => query.state.data?.some((call) => call.enquiryAnalysisStatus === "pending" || call.enquiryAnalysisStatus === "processing") ? 4000 : 15000,
   });
   const createMutation = useMutation({
     mutationFn: createPatient,
@@ -116,50 +115,7 @@ export function EnquiriesPage() {
       actions={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={openDialog}>Add enquiry</Button>}
     />
 
-    <Card>
-      <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-        <Stack spacing={2}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <CallReceivedRoundedIcon color="primary" />
-            <Box>
-              <Typography variant="h6" fontWeight={700}>Incoming patient calls</Typography>
-              <Typography variant="body2" color="text.secondary">Call recordings and transcripts appear here as processing finishes.</Typography>
-            </Box>
-          </Stack>
-          {incomingCalls.isLoading && <LinearProgress />}
-          {incomingCalls.isError && <Alert severity="error">Could not load incoming calls: {errorMessage(incomingCalls.error)}</Alert>}
-          {incomingCalls.isSuccess && incomingCalls.data.length === 0 && <Alert severity="info">No patient calls have been received yet.</Alert>}
-          <Stack spacing={1.5}>
-            {incomingCalls.data?.map((call) => (
-              <Card key={call.id} variant="outlined">
-                <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-                  <Stack spacing={1.5}>
-                    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1} alignItems={{ sm: "center" }}>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography fontWeight={700}>{call.patient?.name || "Unmatched caller"}</Typography>
-                        <Typography variant="body2" color="text.secondary">{call.fromNumber} · {new Date(call.startedAt).toLocaleString()}</Typography>
-                      </Box>
-                      <Chip size="small"
-                        color={call.status === "processing" ? "warning" : call.status === "ready" ? "success" : "default"}
-                        label={call.status === "processing" ? "Processing" : call.status === "ready" ? "Received" : call.status.replaceAll("_", " ")}
-                      />
-                    </Stack>
-                    {call.status === "processing" && <Alert severity="info">Call recording and transcription are processing. This entry updates automatically.</Alert>}
-                    {call.hasRecording && <audio controls preload="none" src={incomingCallRecordingUrl(call.id)} style={{ width: "100%" }} />}
-                    {call.transcript
-                      ? <Box sx={{ p: 1.5, bgcolor: "#f7f9f8", borderRadius: 1.5 }}>
-                          <Typography variant="subtitle2" fontWeight={700}>Call transcript</Typography>
-                          <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}>{call.transcript}</Typography>
-                        </Box>
-                      : call.status !== "processing" && <Typography variant="body2" color="text.secondary">No transcript is available for this call.</Typography>}
-                  </Stack>
-                </CardContent>
-              </Card>
-            ))}
-          </Stack>
-        </Stack>
-      </CardContent>
-    </Card>
+    <IncomingPatientEnquiries calls={incomingCalls.data || []} loading={incomingCalls.isLoading} error={incomingCalls.isError} />
 
     {selectedPatient ? (
       <Card>
@@ -311,5 +267,62 @@ export function EnquiriesPage() {
         )}
       </DialogActions>
     </Dialog>
+  </Stack>;
+}
+
+function IncomingPatientEnquiries({ calls, loading, error }: { calls: IncomingCall[]; loading: boolean; error: boolean }) {
+  const formatTime = (value?: string | null) => value ? new Date(value).toLocaleString() : "Not captured";
+  const locationLabel = (match: IncomingCall["staffSuggestions"][number]["locationMatch"]) => ({
+    same_district: "Same district", same_region: "Same state", other_region: "Other area",
+  }[match] || "Location not matched");
+  const statusLabel = (call: IncomingCall) => {
+    if (call.enquiryAnalysisStatus === "complete") return "Suggestions ready";
+    if (call.enquiryAnalysisStatus === "needs_details") return "Needs review";
+    if (call.enquiryAnalysisStatus === "failed") return "Processing failed";
+    return "Processing";
+  };
+  return <Stack spacing={1.5}>
+    <Stack direction="row" spacing={1} alignItems="center"><Typography variant="h6" fontWeight={700}>Incoming patient calls</Typography><Chip size="small" label={calls.length} /></Stack>
+    {error && <Alert severity="error">Could not load incoming patient enquiries.</Alert>}
+    {loading && <Box sx={{ display: "grid", placeItems: "center", py: 3 }}><CircularProgress size={24} /></Box>}
+    {calls.map((call) => <Card key={call.id}>
+      <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+        <Stack spacing={1.5}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography fontWeight={700}>{call.patient?.name || "Incoming caller"}</Typography>
+              <Typography variant="body2" color="text.secondary">{call.fromNumber} · {formatTime(call.startedAt)}</Typography>
+            </Box>
+            <Chip size="small" color={call.enquiryAnalysisStatus === "complete" ? "success" : call.enquiryAnalysisStatus === "failed" ? "error" : "warning"} label={statusLabel(call)} />
+          </Stack>
+          {(call.enquiryAnalysis?.activityName || call.enquiryAnalysis?.needsSummary) && <Box>
+            {call.enquiryAnalysis.activityName && <Typography variant="body2"><strong>Activity:</strong> {call.enquiryAnalysis.activityName}{call.enquiryAnalysis.durationMinutes ? ` · ${call.enquiryAnalysis.durationMinutes} min` : ""}</Typography>}
+            {call.enquiryAnalysis?.requestedStartAt && <Typography variant="body2"><strong>Requested start:</strong> {formatTime(call.enquiryAnalysis.requestedStartAt)}</Typography>}
+            {call.enquiryAnalysis?.needsSummary && <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}><strong>Need:</strong> {call.enquiryAnalysis.needsSummary}</Typography>}
+          </Box>}
+          {call.enquiryAnalysisStatus === "needs_details" && <Alert severity="info">{call.enquiryAnalysis?.missingDetails?.includes("patient_district")
+            ? "The patient's district is missing from the saved address, so staff location cannot be matched yet."
+            : call.enquiryAnalysis?.missingDetails?.includes("activity")
+              ? "The caller's need did not match an active care activity. Add or update the activity catalog, then follow up with the caller."
+              : "The requested start date/time was unclear or is in the past, so staff availability cannot be checked."} Review the transcript and follow up with the caller.</Alert>}
+          {call.enquiryAnalysisStatus === "complete" && call.staffSuggestions.length === 0 && <Alert severity="warning">No staff without an overlapping duty were found for this time window.</Alert>}
+          {call.staffSuggestions.length > 0 && <>
+            <Alert severity="info">Up to 10 staff without an overlapping duty are shown by location match. Contact the suggested staff and confirm availability before making an assignment.</Alert>
+            <TableContainer sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}>
+            <Table size="small" aria-label="Suggested staff for patient enquiry">
+              <TableHead><TableRow><TableCell>#</TableCell><TableCell>Available staff</TableCell><TableCell>Phone</TableCell><TableCell>Location match</TableCell><TableCell>Address</TableCell></TableRow></TableHead>
+              <TableBody>{call.staffSuggestions.slice(0, 10).map((staff, index) => <TableRow key={staff.id}>
+                <TableCell>{index + 1}</TableCell><TableCell><Typography fontWeight={650}>{staff.name}</Typography><Typography variant="caption" color="text.secondary">{staff.id}</Typography></TableCell>
+                <TableCell>{staff.phoneNumber || "Not provided"}</TableCell><TableCell><Chip size="small" variant="outlined" label={locationLabel(staff.locationMatch)} /></TableCell><TableCell>{staff.address || "Not provided"}</TableCell>
+              </TableRow>)}</TableBody>
+            </Table>
+            </TableContainer>
+          </>}
+          {call.transcript && <Box sx={{ p: 1.5, bgcolor: "action.hover", borderRadius: 1.5 }}><Typography variant="subtitle2">Transcript</Typography><Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}>{call.transcript}</Typography></Box>}
+          {call.hasRecording && <audio controls preload="none" src={incomingCallRecordingUrl(call.id)} style={{ width: "100%" }} />}
+        </Stack>
+      </CardContent>
+    </Card>)}
+    {!loading && !error && calls.length === 0 && <Card><CardContent><Typography variant="body2" color="text.secondary">No incoming patient calls yet.</Typography></CardContent></Card>}
   </Stack>;
 }

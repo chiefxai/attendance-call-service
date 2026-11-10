@@ -241,6 +241,46 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     );
     await repository.saveInboundCallTranscript(inboundCallId, {
       text: transcript.text, language: transcript.language || call.language,
+    }, call.organizationId);
+    const activities = await repository.listCareActivities(call.organizationId);
+    const analysis = await postCallAgent.extractPatientEnquiry({
+      patientContext: call.patient || {}, transcript: transcript.text, activities,
+      referenceTime: call.startedAt, timezone: process.env.APP_TIMEZONE || "Asia/Kolkata",
+    });
+    const activity = activities.find((candidate) => candidate.id === analysis.activityId);
+    const requestedStartText = String(analysis.requestedStartAt || "");
+    const requestedStart = requestedStartText ? new Date(requestedStartText) : null;
+    const hasExplicitZone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(requestedStartText);
+    const callStartedAt = new Date(call.startedAt || Date.now()).getTime();
+    const hasValidStart = Boolean(hasExplicitZone && requestedStart && Number.isFinite(requestedStart.getTime())
+      && requestedStart.getTime() >= callStartedAt - 60_000);
+    const patientAddressParts = String(call.patient?.address || "").split(" | ");
+    const hasPatientDistrict = patientAddressParts.length === 4 && Boolean(patientAddressParts[1].trim());
+    const needsDetails = !activity || !hasValidStart || !hasPatientDistrict;
+    let staffSuggestions = [];
+    let requestedEndAt = null;
+    if (activity && hasValidStart) {
+      requestedEndAt = new Date(requestedStart.getTime() + activity.durationMinutes * 60_000);
+    }
+    if (!needsDetails) {
+      staffSuggestions = await repository.findAvailableStaffForEnquiry({
+        organizationId: call.organizationId,
+        startAt: requestedStart.toISOString(), endAt: requestedEndAt.toISOString(),
+        patientAddress: call.patient?.address || "", limit: 10,
+      });
+    }
+    await repository.saveInboundEnquiryAnalysis(inboundCallId, {
+      organizationId: call.organizationId,
+      status: needsDetails ? "needs_details" : "complete",
+      analysis: {
+        activityId: activity?.id || null, activityName: activity?.name || analysis.requestedActivity || null,
+        durationMinutes: activity?.durationMinutes || null,
+        requestedStartAt: hasValidStart ? requestedStart.toISOString() : null,
+        requestedEndAt: requestedEndAt?.toISOString() || null,
+        needsSummary: String(analysis.needsSummary || "").slice(0, 2000), requiresHumanFollowUp: true,
+        missingDetails: [!activity ? "activity" : null, !hasValidStart ? "start_time" : null, !hasPatientDistrict ? "patient_district" : null].filter(Boolean),
+      },
+      staffSuggestions,
     });
     console.info(`[attendance-worker] inbound transcript saved call=${inboundCallId} characters=${transcript.text.length} language=${transcript.language || call.language}`);
   }

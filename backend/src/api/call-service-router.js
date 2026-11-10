@@ -267,10 +267,51 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       language: call.language, startedAt: call.startedAt, answeredAt: call.answeredAt,
       endedAt: call.endedAt, durationSeconds: call.durationSeconds,
       hasRecording, hasTranscript, transcript: call.transcript || null,
+      transcriptLanguage: call.transcriptLanguage || null,
+      enquiryAnalysisStatus: call.enquiryAnalysisStatus || "pending",
+      enquiryAnalysis: call.enquiryAnalysis || {},
+      staffSuggestions: call.staffSuggestions || [],
     };
   }
 
-  router.get("/incoming-calls", async (req, res) => {
+router.get("/activities", async (req, res) => {
+    try { res.set("Cache-Control", "private, no-store").json(await repository.listCareActivities(org(req), { includeInactive: req.query.includeInactive === "true" })); }
+    catch (error) { fail(res, error); }
+  });
+
+  router.post("/activities", async (req, res) => {
+    const name = String(req.body?.name || "").trim();
+    const description = String(req.body?.description || "").trim();
+    const durationMinutes = Number(req.body?.durationMinutes);
+    if (!name || name.length > 120) return res.status(400).json({ error: "Activity name is required and must be at most 120 characters." });
+    if (description.length > 500) return res.status(400).json({ error: "Description must be at most 500 characters." });
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
+    try { return res.status(201).json(await repository.createCareActivity(org(req), { name, description, durationMinutes })); }
+    catch (error) {
+      if (error.code === "23505") return res.status(409).json({ error: "An activity with this name already exists." });
+      return fail(res, error);
+    }
+  });
+
+  router.put("/activities/:id", async (req, res) => {
+    const name = String(req.body?.name || "").trim();
+    const description = String(req.body?.description || "").trim();
+    const durationMinutes = Number(req.body?.durationMinutes);
+    if (!name || name.length > 120) return res.status(400).json({ error: "Activity name is required and must be at most 120 characters." });
+    if (description.length > 500) return res.status(400).json({ error: "Description must be at most 500 characters." });
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
+    if (req.body?.active !== undefined && typeof req.body.active !== "boolean") return res.status(400).json({ error: "active must be a boolean." });
+    try {
+      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, description, durationMinutes, active: req.body?.active });
+      if (!activity) return res.status(404).json({ error: "Activity not found." });
+      return res.json(activity);
+    } catch (error) {
+      if (error.code === "23505") return res.status(409).json({ error: "An activity with this name already exists." });
+      return fail(res, error);
+    }
+  });
+
+    router.get("/incoming-calls", async (req, res) => {
     try {
       const calls = await repository.listInboundCalls(org(req), req.query.limit || 100);
       res.json(calls.map(serializeIncomingCall));

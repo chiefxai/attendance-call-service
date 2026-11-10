@@ -91,37 +91,26 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     return "en-IN";
   }
 
-  function inboundPatientAgentPrompt(language, dialect, greetingPeriod, patientContext, matchedByRegisteredPhone) {
+  function inboundPatientAgentPrompt(language, dialect, patientContext, matchedByRegisteredPhone, careActivities) {
     const name = process.env.INBOUND_PATIENT_AGENT_NAME || "Athulya Patient Care Assistant";
     const extraInstructions = process.env.INBOUND_PATIENT_AGENT_PROMPT?.trim();
     return [
       `You are ${name}, the incoming-call patient support voice assistant for Athulya Senior Care.`,
       `Speak naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}. Be warm, calm, and concise. Ask one short question at a time, then wait for the caller to answer.`,
-      `Use the local ${greetingPeriod} greeting in ${language}. Greet the patient by their first name when a registered name is available, then politely confirm who is speaking before discussing private care details. If no patient name is available, ask the caller for their name first.`,
-      "After confirming the caller name, ask what help or care they need. Listen without interrupting and ask a short follow-up only when needed.",
-      "After the caller explains their need, acknowledge it in their language: say you have noted the request, that the care team will coordinate an appropriate staff member for them, and that the team will contact them with next steps. Do not claim a staff member or appointment has already been assigned.",
-      "You answer patients and their caregivers who called Athulya. You are not making an outbound call.",
-      "Never introduce yourself as an attendance-management agent. Never say that you are calling to verify attendance, check a staff shift, confirm employee arrival or departure, or discuss employee check-in/check-out.",
+      `Use the local good ${inboundGreetingPeriod()} greeting in ${language}. Greet the patient by their first name when available, then confirm who is speaking before discussing private care details.`,
+      "After confirming the caller's name, ask what help or care they need. Listen carefully and identify the closest activity from the care activity catalog below.",
+      "Ask when they want this care to start, including the date if they say a relative day such as tomorrow. Do not ask for duration or end time; the platform uses the activity's configured duration. Repeat the activity and requested start date/time briefly to confirm.",
+      "Acknowledge the request in their language: say you have noted it and the care team will review it, coordinate an appropriate staff member, and contact them with next steps. Do not claim a staff member or appointment has already been assigned.",
+      "You answer patients and their caregivers who called Athulya. You are not making an outbound call. Never introduce yourself as attendance management or discuss staff attendance/check-in/check-out.",
       matchedByRegisteredPhone
         ? "The caller number matches a registered patient contact. Caller ID alone does not prove identity: ask the caller to confirm their name before discussing private care details."
-        : "This call was permitted by the organization's non-patient inbound-call setting. The caller is not matched to a registered patient; ask for their name and reason for calling, and do not imply that they are a registered patient.",
-      "Help with patient care-service questions and capture a concise message or request for the care team. You may ask about the patient's needs, preferred callback time, and safe contact preferences.",
-      "Use only the patient context provided below. Never reveal phone numbers, another patient's information, staff records, or internal attendance data. Do not diagnose, recommend treatment, promise availability, or claim you changed a booking. For immediate danger in India, direct the caller to emergency services at 112.",
-      "After confirming the need was noted and explaining that the care team will coordinate staff and contact them, thank the caller, say goodbye, and call end_call.",
+        : "This call was permitted by the organization's non-patient inbound-call setting. The caller is not matched to a registered patient; ask for their name and reason for calling, and do not imply that they are registered.",
+      "Use only the patient context below. Never reveal phone numbers, another patient's information, staff records, or internal attendance data. Do not diagnose, recommend treatment, promise availability, or claim to have changed a booking. For immediate danger in India, direct the caller to emergency services at 112.",
+      "When the caller is finished, summarize the request briefly, thank them, say goodbye, and call end_call.",
       extraInstructions ? `Additional patient-support instructions:\n${extraInstructions}` : "",
+      "Available care activities (id, name, duration minutes, description):", JSON.stringify(careActivities),
       "Patient context:", JSON.stringify({ patient: patientContext, matchedByRegisteredPhone }),
     ].filter(Boolean).join("\n\n");
-  }
-
-  function inboundGreetingPeriod() {
-    const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
-    try {
-      const hour = Number(new Intl.DateTimeFormat("en-IN", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(new Date()));
-      return hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-    } catch {
-      const hour = new Date().getUTCHours();
-      return hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-    }
   }
 
   function languageKey(language) {
@@ -357,11 +346,12 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       const language = displayLanguage(callContext.language);
       if (inboundCall) {
         const patientMatched = Boolean(inboundCall.patient?.id);
+        const greetingPeriod = inboundGreetingPeriod();
         const identity = patientMatched
           ? "A patient record matches the caller's registered phone. Confirm the caller's name before discussing private care details."
           : "The caller phone does not match a registered patient. Ask who is calling and do not assume identity.";
         liveSession.sendClientContent({
-          turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Answer an incoming patient-support call in ${language}. It is ${inboundGreetingPeriod()} in ${process.env.APP_TIMEZONE || "Asia/Kolkata"}. Introduce yourself as ${process.env.INBOUND_PATIENT_AGENT_NAME || "Athulya Patient Care Assistant"} from Athulya patient support. Use the patient first name from their record in the greeting when available, and confirm who is speaking. Do not mention attendance management or employee check-in/check-out. ${identity} Ask one question at a time. Once the caller describes their need, acknowledge that it is noted and say the care team will coordinate an appropriate staff member and contact them with next steps. Never disclose staff or other patients information. Do not provide diagnosis or medical advice. For immediate danger direct them to 112 in India.` }] }],
+          turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Answer an incoming patient-support call in ${language}. Introduce yourself as ${process.env.INBOUND_PATIENT_AGENT_NAME || "Athulya Patient Care Assistant"} from Athulya patient support. Greet with good ${greetingPeriod} in the caller's language and ask how you can help. Do not mention attendance management or employee check-in/check-out. ${identity} Ask one short question at a time and wait for the caller. Collect the requested activity and start date/time, but do not ask for end time or duration. Tell the caller the care team will review and contact them. Never reveal staff or other patients' details. Do not provide diagnosis or medical advice. For immediate danger direct them to 112 in India.` }] }],
           turnComplete: true,
         });
         console.info(`[vobiz-live] inbound greeting requested call=${token.callId} language=${language} patientMatched=${patientMatched}`);
@@ -442,11 +432,12 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     function startLiveSession() {
       if (liveSession) return;
       (async () => {
-        const [agent, agentContext] = await Promise.all([
+        const [agent, agentContext, careActivities] = await Promise.all([
           repository.getAgent(callContext.organizationId, callContext.agentId),
           inboundCall
             ? Promise.resolve({ patient: inboundCall.patient || {}, caller: { matchedPatient: Boolean(inboundCall.patient?.id) } })
             : repository.getAgentSessionContext(session.id, token.stage),
+          inboundCall ? repository.listCareActivities(callContext.organizationId) : Promise.resolve([]),
         ]);
         if (!agent?.active) throw new Error("Agent is missing or inactive");
         const client = await clientForOrg(callContext.organizationId);
@@ -457,9 +448,9 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         const systemPrompt = inboundCall ? inboundPatientAgentPrompt(
           language,
           String(languageConfig.dialect || "").trim(),
-          inboundGreetingPeriod(),
           { id: agentContext.patient?.id || null, name: agentContext.patient?.name || null, address: agentContext.patient?.address || null },
           Boolean(inboundCall.patient?.id),
+          careActivities,
         ) : [
           "You are an AI attendance caller for home care shifts. You are calling the employee only; never call or ask the patient to speak.",
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",

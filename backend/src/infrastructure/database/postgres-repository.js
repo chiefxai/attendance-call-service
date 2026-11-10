@@ -90,6 +90,70 @@ class PostgresRepository {
     return json(rows[0].settings) || {};
   }
 
+  async listCareActivities(organizationId, { includeInactive = false } = {}) {
+    const { rows } = await this.pool.query(
+      `SELECT id,name,description,duration_minutes,active,created_at,updated_at
+       FROM care_activities WHERE organization_id=$1 AND ($2::boolean OR active=TRUE)
+       ORDER BY active DESC, lower(name)`, [organizationId, includeInactive],
+    );
+    return rows.map((row) => ({ id: row.id, name: row.name, description: row.description,
+      durationMinutes: row.duration_minutes, active: row.active,
+      createdAt: row.created_at, updatedAt: row.updated_at }));
+  }
+
+  async createCareActivity(organizationId, activity) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO care_activities (organization_id,name,description,duration_minutes)
+       VALUES ($1,$2,$3,$4) RETURNING id,name,description,duration_minutes,active,created_at,updated_at`,
+      [organizationId, activity.name, activity.description || "", activity.durationMinutes],
+    );
+    const row = rows[0];
+    return { id: row.id, name: row.name, description: row.description, durationMinutes: row.duration_minutes,
+      active: row.active, createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+
+  async updateCareActivity(organizationId, id, activity) {
+    const { rows } = await this.pool.query(
+      `UPDATE care_activities SET name=$3,description=$4,duration_minutes=$5,active=$6,updated_at=NOW()
+       WHERE organization_id=$1 AND id=$2
+       RETURNING id,name,description,duration_minutes,active,created_at,updated_at`,
+      [organizationId, id, activity.name, activity.description || "", activity.durationMinutes, activity.active !== false],
+    );
+    const row = rows[0];
+    return row ? { id: row.id, name: row.name, description: row.description, durationMinutes: row.duration_minutes,
+      active: row.active, createdAt: row.created_at, updatedAt: row.updated_at } : null;
+  }
+
+  async findAvailableStaffForEnquiry({ organizationId, startAt, endAt, patientAddress, limit = 10 }) {
+    const parts = String(patientAddress || "").split(" | ");
+    const patientState = parts.length === 4 ? parts[0].trim() : "";
+    const patientDistrict = parts.length === 4 ? parts[1].trim() : "";
+    const { rows } = await this.pool.query(
+      `SELECT d.external_id,d.name,d.phone_number,d.address,d.language,
+         CASE
+           WHEN $4<>'' AND split_part(d.address,' | ',2)<>'' AND lower(trim(split_part(d.address,' | ',2)))=lower($4) THEN 'same_district'
+           WHEN $5<>'' AND split_part(d.address,' | ',1)<>'' AND lower(trim(split_part(d.address,' | ',1)))=lower($5) THEN 'same_region'
+           ELSE 'other_region'
+         END AS location_match
+       FROM staff_directory d
+       WHERE d.organization_id=$1 AND d.active=TRUE
+         AND NOT EXISTS (
+           SELECT 1 FROM attendance_sessions s
+           WHERE s.organization_id=d.organization_id AND s.employee->>'id'=d.external_id
+             AND s.scheduled_start_at < $3::timestamptz AND s.scheduled_end_at > $2::timestamptz
+         )
+       ORDER BY CASE
+           WHEN $4<>'' AND split_part(d.address,' | ',2)<>'' AND lower(trim(split_part(d.address,' | ',2)))=lower($4) THEN 0
+           WHEN $5<>'' AND split_part(d.address,' | ',1)<>'' AND lower(trim(split_part(d.address,' | ',1)))=lower($5) THEN 1
+           ELSE 2 END,
+         lower(d.name)
+       LIMIT $6`,
+      [organizationId, startAt, endAt, patientDistrict, patientState, Math.min(Math.max(Number(limit) || 10, 1), 10)],
+    );
+    return rows.map((row) => ({ id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address,
+      language: row.language, locationMatch: row.location_match }));
+  }
+
   async createApiKey(orgId, { label, prefix, hash }) {
     const { rows } = await this.pool.query(
       `INSERT INTO service_api_keys (organization_id,label,key_prefix,key_hash)
@@ -278,6 +342,8 @@ class PostgresRepository {
       patient: json(row.patient_context), agentId: row.agent_id, language: row.language,
       status: row.status, recordingObjectKey: row.recording_object_key,
       recordingContentType: row.recording_content_type, transcript: row.transcript,
+      transcriptLanguage: row.transcript_language, enquiryAnalysisStatus: row.enquiry_analysis_status || "pending",
+      enquiryAnalysis: json(row.enquiry_analysis) || {}, staffSuggestions: json(row.staff_suggestions) || [],
       startedAt: row.started_at, answeredAt: row.answered_at, endedAt: row.ended_at,
       durationSeconds: row.duration_seconds };
   }
@@ -320,10 +386,18 @@ class PostgresRepository {
     );
   }
 
-  async saveInboundCallTranscript(id, transcript) {
+  async saveInboundCallTranscript(id, transcript, organizationId) {
     await this.pool.query(
-      "UPDATE inbound_calls SET transcript=$2,transcript_language=$3,transcribed_at=NOW(),updated_at=NOW() WHERE id=$1",
-      [id, transcript.text, transcript.language || null],
+      "UPDATE inbound_calls SET transcript=$2,transcript_language=$3,transcribed_at=NOW(),enquiry_analysis_status='processing',updated_at=NOW() WHERE id=$1 AND organization_id=$4",
+      [id, transcript.text, transcript.language || null, organizationId],
+    );
+  }
+
+  async saveInboundEnquiryAnalysis(id, { organizationId, status = "needs_details", analysis = {}, staffSuggestions = [] } = {}) {
+    await this.pool.query(
+      `UPDATE inbound_calls SET enquiry_analysis_status=$2,enquiry_analysis=$3::jsonb,
+       staff_suggestions=$4::jsonb,updated_at=NOW() WHERE id=$1 AND organization_id=$5`,
+      [id, status, JSON.stringify(analysis || {}), JSON.stringify(staffSuggestions || []), organizationId],
     );
   }
 
