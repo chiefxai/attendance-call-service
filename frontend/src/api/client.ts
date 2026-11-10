@@ -41,6 +41,42 @@ export interface AssignmentStatus {
   backendDeliveryStatus: string;
 }
 
+export interface SessionCallAttempt {
+  id: string;
+  stage: "check_in" | "check_out";
+  attemptNumber: number;
+  status: string;
+  scheduledAt: string | null;
+  answeredAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  outcome: Record<string, unknown> | null;
+  recordingAvailable: boolean;
+  recordingUrl: string | null;
+}
+
+export interface SessionTranscript {
+  id: string;
+  callAttemptId: string;
+  language: string;
+  text: string;
+  extraction: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface SessionAuditLog {
+  eventType: string;
+  data: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SessionArtifacts {
+  session: { id: string; assignmentId: string; sessionStatus: string };
+  callAttempts: SessionCallAttempt[];
+  transcripts: SessionTranscript[];
+  logs: SessionAuditLog[];
+}
+
 export interface AgentLanguagePrompt {
   dialect: string;
   systemPrompt: string;
@@ -158,6 +194,16 @@ export interface CallCenterData {
 
 export async function fetchAssignmentStatus(sessionId: string) {
   const response = await api.get<AssignmentStatus>(`/assignments/${sessionId}/status`);
+  return response.data;
+}
+
+export async function fetchSessionArtifacts(sessionId: string) {
+  const response = await api.get<SessionArtifacts>(`/assignments/${sessionId}/artifacts`);
+  return response.data;
+}
+
+export async function fetchCallRecording(sessionId: string, attemptId: string) {
+  const response = await api.get<Blob>(`/assignments/${sessionId}/recordings/${attemptId}`, { responseType: "blob" });
   return response.data;
 }
 
