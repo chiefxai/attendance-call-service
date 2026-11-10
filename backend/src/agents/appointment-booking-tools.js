@@ -18,7 +18,7 @@ function createAppointmentBookingTools({ repository } = {}) {
     description: "Create the attendance duty schedule only after the staff member has explicitly confirmed availability for the activity and exact start time.",
     schema: z.object({
       inboundCallId: z.string().uuid(), organizationId: z.string().min(1),
-      staff: z.object({ id: z.string(), name: z.string(), phoneNumber: z.string(), address: z.string().optional(), language: z.string().optional() }),
+      staff: z.object({ id: z.string(), name: z.string(), companyName: z.string().optional(), phoneNumber: z.string(), address: z.string().optional(), language: z.string().optional() }),
       attendanceAgentId: z.string().uuid(), fromNumber: z.string().min(1),
     }),
   });
