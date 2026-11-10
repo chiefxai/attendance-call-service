@@ -6,7 +6,7 @@ const { createPostgresPool } = require("../src/infrastructure/database/postgres-
 const { PostgresRepository } = require("../src/infrastructure/database/postgres-repository");
 
 async function main() {
-  const [rawEmail = "", rawName = "", rawPassword = ""] = (await fs.readFile(0, "utf8")).split(/\\r?\\n/);
+  const [rawEmail = "", rawName = "", rawPassword = ""] = (await fs.readFile(0, "utf8")).split(/\r?\n/);
   const email = rawEmail.trim().toLowerCase();
   const password = rawPassword;
   const displayName = rawName.trim() || email;
