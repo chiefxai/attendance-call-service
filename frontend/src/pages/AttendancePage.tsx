@@ -49,14 +49,14 @@ function AttendanceStatusChip({ status }: { status: AttendanceStatus }) {
 }
 
 function exportCsv(data: AttendanceRecord[]) {
-  const header = ["Session ID", "Assignment", "Staff", "Staff ID", "Patient", "Patient ID", "Scheduled start", "Scheduled end", "Attendance status", "Check-in status", "Check-in actual", "Check-out status", "Check-out actual", "Backend delivery"];
-  const csv = [header, ...data.map((row) => [row.sessionId, row.assignmentId, row.employee.name, row.employee.id || "", row.patient.name, row.patient.id || "", row.scheduledStartAt, row.scheduledEndAt, attendanceStatus(row), row.checkIn.status, row.checkIn.reportedAt || "", row.checkOut.status, row.checkOut.reportedAt || "", row.backendDeliveryStatus])]
+  const header = ["Session ID", "Assignment", "Staff", "Staff ID", "Patient", "Patient ID", "Scheduled start", "Scheduled end", "Attendance status", "Check-in status", "Check-in time", "Check-out status", "Check-out time"];
+  const csv = [header, ...data.map((row) => [row.sessionId, row.assignmentId, row.employee.name, row.employee.id || "", row.patient.name, row.patient.id || "", row.scheduledStartAt, row.scheduledEndAt, attendanceStatus(row), row.checkIn.status, row.checkIn.reportedAt || "", row.checkOut.status, row.checkOut.reportedAt || ""])]
     .map((values) => values.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a"); link.href = url; link.download = "attendance.csv"; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function AttendancePage() {
+export function AttendancePage({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -70,7 +70,8 @@ export function AttendancePage() {
   const activeFilters = Number(status !== "all") + Number(language !== "all");
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="SHIFT VERIFICATION / LIVE ATTENDANCE DATA" title="Attendance management" description="Track saved employee check-in and check-out sessions across home-care assignments." actions={<><Button variant="outlined" startIcon={<FileDownloadRoundedIcon />} disabled={!records.length} onClick={() => exportCsv(filtered)}>Export CSV</Button><Button component={RouterLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />}>New assignment</Button></>} />
+    {!embedded && <PageHeader eyebrow="SHIFT VERIFICATION / LIVE ATTENDANCE DATA" title="Attendance management" description="Track saved employee check-in and check-out sessions across home-care assignments." actions={<><Button variant="outlined" startIcon={<FileDownloadRoundedIcon />} disabled={!records.length} onClick={() => exportCsv(filtered)}>Export CSV</Button><Button component={RouterLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />}>New assignment</Button></>} />}
+    {embedded && <Stack direction="row" justifyContent="flex-end"><Button variant="outlined" startIcon={<FileDownloadRoundedIcon />} disabled={!records.length} onClick={() => exportCsv(filtered)}>Export CSV</Button></Stack>}
     {(query.isError || summary.isError) && <Alert severity="error">Attendance data could not be loaded. Check backend availability and workspace access.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Total scheduled" value={summary.data?.scheduledToday.toLocaleString() ?? "—"} detail="Today's assignments" icon={<GroupRoundedIcon />} /></Grid>
@@ -94,7 +95,7 @@ export function AttendancePage() {
       />
       {query.isLoading && <LinearProgress />}
       <TableContainer sx={{ maxHeight: 560 }}><Table stickyHeader size="small" aria-label="Attendance records">
-        <TableHead><TableRow>{["Assignment / staff", "Client", "Scheduled shift", "Check-in", "Check-out", "Language", "Attendance status", "Backend sync", "Details"].map((label) => <TableCell key={label} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
+        <TableHead><TableRow>{["Assignment / staff", "Client", "Scheduled shift", "Check-in time", "Check-out time", "Language", "Attendance status", "Details"].map((label) => <TableCell key={label} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
         <TableBody>{filtered.map((row) => <TableRow key={row.sessionId} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{row.employee.name} · {row.employee.id || "staff ID unavailable"}</Typography></TableCell>
           <TableCell><Typography variant="body2" fontWeight={650}>{row.patient.name}</Typography><Typography variant="caption" color="text.secondary">{row.patient.id || "patient ID unavailable"}</Typography></TableCell>
