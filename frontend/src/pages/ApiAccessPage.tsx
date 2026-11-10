@@ -114,6 +114,28 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
     </>}
 
     {section === "docs" && <>
+    <SectionCard title="Documentation sections" subtitle="Choose a topic, then follow the endpoint examples below.">
+      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+        {[
+          ["#auth", "Authentication"], ["#directory", "Staff & patients"], ["#activities", "Care activities"],
+          ["#assignments", "Assignments"], ["#session-data", "Session data"], ["#enquiries", "Patient enquiries"],
+          ["#callbacks", "Completion callback"], ["#errors", "Errors & retries"],
+        ].map(([href, label]) => <Button key={href} size="small" variant="outlined" href={href}>{label}</Button>)}
+      </Stack>
+    </SectionCard>
+
+    <Box id="auth" sx={{ scrollMarginTop: 100 }}>
+    <SectionCard title="1. Authentication and base URL" subtitle="Use the service API key from your server. Keep it out of browser and mobile application code.">
+      <Stack spacing={1.25}>
+        <Typography variant="body2">Base URL: <Box component="code">https://calls.elvoryx.in/api/call-service</Box></Typography>
+        <Typography variant="body2">Send <Box component="code">Authorization: Bearer &lt;YOUR_API_KEY&gt;</Box> and <Box component="code">Content-Type: application/json</Box> on API requests. Create and revoke keys from the signed-in app under Settings → API configuration; the full key is shown once.</Typography>
+        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{`curl https://calls.elvoryx.in/api/call-service/agents \\\n  -H "Authorization: Bearer <YOUR_API_KEY>"`}</Box></Paper>
+        <Typography variant="caption" color="text.secondary">All records and recordings are scoped to the organization that owns the API key. Vobiz webhooks use provider signature validation instead of this bearer key.</Typography>
+      </Stack>
+    </SectionCard>
+    </Box>
+
+    <Box id="directory" sx={{ scrollMarginTop: 100 }}>
     <SectionCard title="Save staff and patient profiles" subtitle="Create directory records before scheduling assignments. Newly saved people appear in the New assignment dropdowns.">
       <Stack spacing={1.5}>
         <Typography variant="body2">Both endpoints require <Box component="code">Authorization: Bearer &lt;API_KEY&gt;</Box> and <Box component="code">Content-Type: application/json</Box>.</Typography>
@@ -132,7 +154,24 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
         <Typography variant="caption" color="text.secondary">Staff IDs and patient IDs must be unique within the organization. Indian phone numbers may be entered as 10 digits (9876543210), with the country code 91 (919876543210), or +91 (+919876543210); the service validates and normalizes them to +91 followed by 10 digits. Patient phone number is optional. Supported languages are English, Tamil, Malayalam, and Telugu.</Typography>
       </Stack>
     </SectionCard>
+    </Box>
 
+    <Box id="activities" sx={{ scrollMarginTop: 100 }}>
+    <SectionCard title="Manage care activities" subtitle="Define activity names, aliases and standard durations used to interpret patient requests and find staff availability.">
+      <Stack spacing={1.25}>
+        <Typography variant="body2"><Box component="code">GET /api/call-service/activities</Box> lists activities. Add one with <Box component="code">POST /api/call-service/activities</Box>; update one with <Box component="code">PUT /api/call-service/activities/&#123;ACTIVITY_ID&#125;</Box>.</Typography>
+        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{`{
+  "name": "Personal care",
+  "description": "Assistance with washing and dressing",
+  "aliases": ["bathing help", "daily hygiene"],
+  "durationMinutes": 60
+}`}</Box></Paper>
+        <Typography variant="caption" color="text.secondary">Duration must be 1–10080 minutes. Aliases let the post-call agent map different caller wording to the same activity. Updates may include <Box component="code">active</Box> to enable or disable an activity.</Typography>
+      </Stack>
+    </SectionCard>
+    </Box>
+
+    <Box id="assignments" sx={{ scrollMarginTop: 100 }}>
     <SectionCard title="Create an assignment from your platform" subtitle="POST an assignment payload. A 202 response returns the durable session ID; the service schedules both stages and retries asynchronously.">
       <Stack spacing={1.5}>
         <Typography variant="body2">Endpoint: <Box component="code">POST /api/call-service/assignments</Box></Typography>
@@ -146,8 +185,31 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
         <Typography variant="caption" color="text.secondary">Use the active agent UUID from the Agents endpoint. Times must include a timezone. Replace example IDs and phone numbers with your platform data. Store API keys in your backend secret manager and never put them in mobile or browser code.</Typography>
       </Stack>
     </SectionCard>
+    <SectionCard title="Check staff schedule overlap" subtitle="Check a staff member's existing duties before sending an assignment. Assignment creation performs this validation again atomically.">
+      <Stack spacing={1.25}>
+        <Typography variant="body2"><Box component="code">GET /api/call-service/assignments/overlap?employeeId=STAFF-1001&amp;startAt=2026-11-10T08:00:00%2B05:30&amp;endAt=2026-11-10T10:00:00%2B05:30</Box></Typography>
+        <Typography variant="body2">Response: <Box component="code">&#123; "overlap": false, "conflict": null &#125;</Box>. Times are compared as timezone-aware instants; send ISO 8601 timestamps with <Box component="code">Z</Box> or an explicit offset.</Typography>
+      </Stack>
+    </SectionCard>
+    </Box>
 
+    <Box id="session-data" sx={{ scrollMarginTop: 100 }}>
     <Grid container spacing={2}>
+      <Grid size={{ xs: 12 }}>
+        <SectionCard title="Read assignment status" subtitle="Poll this endpoint to monitor both required stages and the host delivery state.">
+          <Stack spacing={1.25}>
+            <Typography variant="body2">Endpoint: <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/status</Box></Typography>
+            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{`{
+  "sessionId": "<SESSION_ID>",
+  "sessionStatus": "in_progress",
+  "checkIn": { "status": "confirmed", "reportedAt": "2026-11-10T02:35:00.000Z" },
+  "checkOut": { "status": "scheduled", "reportedAt": null },
+  "backendDeliveryStatus": "pending"
+}`}</Box></Paper>
+            <Typography variant="caption" color="text.secondary">A session is complete only after check-in and check-out are confirmed. If a stage reaches its retry limit or needs review, the session remains an exception and is not sent as a confirmed completion.</Typography>
+          </Stack>
+        </SectionCard>
+      </Grid>
       <Grid size={{ xs: 12, lg: 6 }}>
         <SectionCard title="Retrieve a session transcript and logs" subtitle="Use the session ID returned when creating an assignment. The response includes both attendance stages, call attempts, transcripts, extracted outcomes, and audit events.">
           <Stack spacing={1.5}>
@@ -175,7 +237,20 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
         </SectionCard>
       </Grid>
     </Grid>
+    </Box>
 
+    <Box id="enquiries" sx={{ scrollMarginTop: 100 }}>
+    <SectionCard title="Patient enquiries and staff booking" subtitle="Read inbound patient enquiries, suggested staff and the automated availability call sequence.">
+      <Stack spacing={1.25}>
+        <Typography variant="body2"><Box component="code">GET /api/call-service/incoming-calls</Box> lists enquiries; <Box component="code">GET /api/call-service/incoming-calls/&#123;CALL_ID&#125;</Box> returns one enquiry with transcript, analysis, suggested staff and appointment-call attempts.</Typography>
+        <Typography variant="body2">To resolve an enquiry manually, send <Box component="code">POST /api/call-service/incoming-calls/&#123;CALL_ID&#125;/resolve</Box> with <Box component="code">&#123; "staffId": "STAFF-1001" &#125;</Box>. The server controls enquiry statuses; clients cannot set them directly.</Typography>
+        <Typography variant="body2">Inbound audio: <Box component="code">GET /api/call-service/incoming-calls/&#123;CALL_ID&#125;/recording</Box>. Appointment-staff call audio: <Box component="code">GET /api/call-service/incoming-calls/&#123;CALL_ID&#125;/appointment-attempts/&#123;ATTEMPT_ID&#125;/recording</Box>.</Typography>
+        <Typography variant="caption" color="text.secondary">Appointment calls try suggested staff sequentially. A confirmed available response creates the attendance session and queues its check-in and check-out calls. Unanswered calls or exhausted candidates are exposed for human follow-up.</Typography>
+      </Stack>
+    </SectionCard>
+    </Box>
+
+    <Box id="callbacks" sx={{ scrollMarginTop: 100 }}>
     <SectionCard title="Send completed attendance to your platform" subtitle="Configure your platform's receiving POST endpoint in the service VM environment.">
       <Stack spacing={1.5}>
         <Typography variant="body2">On completion, the service sends a POST when both check-in and check-out are confirmed. The request contains the session, call attempts, and transcripts.</Typography>
@@ -190,6 +265,17 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
         <Typography variant="caption" color="text.secondary">The receiver should persist the idempotency key and return a 2xx response for duplicate requests without applying attendance twice. Recordings are retrieved separately using the session artifacts and recording endpoints above.</Typography>
       </Stack>
     </SectionCard>
+    </Box>
+
+    <Box id="errors" sx={{ scrollMarginTop: 100 }}>
+    <SectionCard title="Errors, retries and idempotency" subtitle="Use the HTTP response and durable session status to decide what your integration should do next.">
+      <Stack spacing={1}>
+        <Typography variant="body2"><Box component="code">202</Box> means an assignment was accepted and queued. <Box component="code">400</Box> means required fields or values are invalid; <Box component="code">401</Box> means the bearer key is missing, invalid or revoked; <Box component="code">404</Box> means the resource is unavailable in this organization; <Box component="code">409</Box> indicates a duplicate or schedule conflict; <Box component="code">5xx</Box> is a service failure.</Typography>
+        <Typography variant="body2">Assignment IDs should be stable and unique per duty. When receiving completion callbacks, deduplicate on the <Box component="code">Idempotency-Key</Box>; callback delivery is retried after timeouts or non-2xx responses.</Typography>
+        <Typography variant="caption" color="text.secondary">Call scheduling, retries, transcription and completion delivery run asynchronously. Use the status and artifacts endpoints to retrieve the latest outcome rather than treating the initial 202 response as completion.</Typography>
+      </Stack>
+    </SectionCard>
+    </Box>
     </>}
   </Stack>;
 }
