@@ -1,4 +1,5 @@
 import { Grid, TextField } from "@mui/material";
+import type { ChangeEvent } from "react";
 
 export interface AddressParts {
   state: string;
@@ -28,7 +29,7 @@ export function AddressFields({ value, onChange, required = false }: {
   required?: boolean;
 }) {
   const parts = parseAddress(value);
-  const change = (key: keyof AddressParts) => (event: React.ChangeEvent<HTMLInputElement>) => {
+  const change = (key: keyof AddressParts) => (event: ChangeEvent<HTMLInputElement>) => {
     onChange(formatAddress({ ...parts, [key]: event.target.value }));
   };
   return (
