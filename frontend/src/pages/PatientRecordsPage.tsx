@@ -6,8 +6,11 @@ import PersonAddAltRoundedIcon from "@mui/icons-material/PersonAddAltRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
+import { AxiosError } from "axios";
 import { createPatient, fetchPatients, type CreatePatientPayload } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
+
+function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
 export function PatientRecordsPage() {
   const [search, setSearch] = useState("");
@@ -69,7 +72,7 @@ export function PatientRecordsPage() {
       <DialogTitle>Add patient</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          {createMutation.isError && <Alert severity="error">{createMutation.error instanceof Error ? createMutation.error.message : "Could not save patient record."}</Alert>}
+          {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Patient ID" value={newPatient.id} onChange={(event) => setNewPatient((current) => ({ ...current, id: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newPatient.name} onChange={(event) => setNewPatient((current) => ({ ...current, name: event.target.value }))} /></Grid>
