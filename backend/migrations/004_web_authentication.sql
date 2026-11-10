@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS web_users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (organization_id, email)
 );
-CREATE INDEX IF NOT EXISTS web_users_email_active_idx
-  ON web_users (lower(email), active);
+CREATE UNIQUE INDEX IF NOT EXISTS web_users_email_unique_idx
+  ON web_users (lower(email));
 
 CREATE TABLE IF NOT EXISTS web_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
