@@ -448,6 +448,8 @@ class PostgresRepository {
         dutyStatus: state,
         assignmentId: session.assignmentId,
         sessionId: session.sessionId,
+        scheduledStartAt: session.scheduledStartAt,
+        scheduledEndAt: session.scheduledEndAt,
       });
     }
     return [...records.values()]
