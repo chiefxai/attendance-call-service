@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
-import { AppBar, Avatar, Box, Button, Chip, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
+import { AppBar, Avatar, Box, Chip, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
-import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
@@ -70,15 +69,13 @@ function App() {
           <IconButton onClick={() => setMobileOpen(true)} sx={{ display: { md: "none" }, mr: 1 }} aria-label="Open navigation"><MenuRoundedIcon /></IconButton>
           <Box ref={setHeaderTarget} sx={{ flex: 1, minWidth: 0 }} />
           <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650, display: { xs: "none", sm: "inline-flex" } }} />
-          <IconButton component={NavLink} to="/assignments/new" aria-label="New assignment" sx={{ display: { xs: "inline-flex", sm: "none" } }}><AddRoundedIcon /></IconButton>
-          <Button component={NavLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />} sx={{ ml: 1.5, display: { xs: "none", sm: "inline-flex" } }}>New assignment</Button>
         </Toolbar>
       </AppBar>
       <Box component="nav" sx={{ width: { xs: 0, md: drawerWidth }, flex: { xs: "0 0 0px", md: `0 0 ${drawerWidth}px` }, minWidth: 0 }} aria-label="Primary navigation">
         <Drawer variant="temporary" open={mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box" } }}>{drawer}</Drawer>
         <Drawer variant="permanent" open sx={{ display: { xs: "none", md: "block" }, "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box", borderRight: "1px solid #e8eeeb" } }}>{drawer}</Drawer>
       </Box>
-      <Box component="main" sx={{ flex: "1 1 auto", minWidth: 0, maxWidth: { xs: "100%", md: `calc(100% - ${drawerWidth}px)` }, boxSizing: "border-box", px: { xs: 1.5, sm: 3, lg: 5 }, pt: { xs: "160px", sm: "132px" }, pb: 6 }}>
+      <Box component="main" sx={{ flex: "1 1 auto", minWidth: 0, maxWidth: { xs: "100%", md: `calc(100% - ${drawerWidth}px)` }, boxSizing: "border-box", px: { xs: 1.5, sm: 3, lg: 5 }, pt: { xs: "128px", sm: "104px" }, pb: 6 }}>
         <PageHeaderTargetContext.Provider value={headerTarget}>
         <Routes>
           <Route path="/" element={<OverviewPage />} />

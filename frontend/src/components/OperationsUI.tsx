@@ -10,15 +10,13 @@ export function DemoDataNotice({ children = "Illustrative preview data — live 
 
 export const PageHeaderTargetContext = createContext<HTMLElement | null>(null);
 
-export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
+export function PageHeader({ title, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
   const target = useContext(PageHeaderTargetContext);
   if (!target) return null;
   return createPortal(
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} spacing={{ xs: 1, sm: 2 }} sx={{ width: "100%", minWidth: 0 }}>
       <Box sx={{ minWidth: 0, flex: 1 }}>
-        {eyebrow && <Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em" noWrap>{eyebrow}</Typography>}
-        <Typography variant="h5" sx={{ mt: eyebrow ? .1 : 0, fontWeight: 750 }} noWrap>{title}</Typography>
-        {description && <Typography variant="body2" color="text.secondary" sx={{ mt: .25, maxWidth: 760 }}>{description}</Typography>}
+        <Typography variant="h5" sx={{ fontWeight: 750 }} noWrap>{title}</Typography>
       </Box>
       {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "flex-start", sm: "flex-end" }, flexShrink: 0 }}>{actions}</Stack>}
     </Stack>,
