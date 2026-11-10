@@ -10,6 +10,7 @@ import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import ArticleRoundedIcon from "@mui/icons-material/ArticleRounded";
 import { fetchAssignmentStatus, fetchCallRecording, fetchSessionArtifacts } from "../api/client";
 import { useNavigate } from "react-router-dom";
+import { PageHeader } from "../components/OperationsUI";
 
 function statusColor(status: string): "success" | "error" | "warning" | "default" {
   if (status === "confirmed" || status === "completed") return "success";
@@ -66,8 +67,7 @@ export function AssignmentStatusPage() {
 
   return (
     <Stack spacing={3}>
-      <Button startIcon={<ArrowBackRoundedIcon />} onClick={() => navigate(-1)} sx={{ alignSelf: "flex-start" }}>Back to overview</Button>
-      <Box><Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em">ASSIGNMENT TRACKING</Typography><Typography variant="h4" sx={{ mt: .5 }}>Session status</Typography><Typography color="text.secondary" sx={{ mt: .75, overflowWrap: "anywhere" }}>{sessionId}</Typography></Box>
+      <PageHeader eyebrow="ASSIGNMENT TRACKING" title="Session status" description={sessionId} actions={<Button startIcon={<ArrowBackRoundedIcon />} onClick={() => navigate(-1)}>Back</Button>} />
       {query.isLoading && <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>}
       {query.isError && <Alert severity="error">Could not load this session. Confirm the session ID and that your account can access this assignment.</Alert>}
       {query.data && <>
