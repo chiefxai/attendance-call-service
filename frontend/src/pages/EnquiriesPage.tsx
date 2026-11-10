@@ -48,7 +48,7 @@ export function EnquiriesPage() {
   });
   const incomingCalls = useQuery({
     queryKey: ["incoming-calls"],
-    queryFn: fetchIncomingCalls,
+    queryFn: () => fetchIncomingCalls(),
     refetchInterval: (query) => query.state.data?.some((call) => call.enquiryAnalysisStatus === "pending" || call.enquiryAnalysisStatus === "processing") ? 4000 : 15000,
   });
   const createMutation = useMutation({
