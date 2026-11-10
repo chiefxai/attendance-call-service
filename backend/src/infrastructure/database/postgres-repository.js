@@ -15,6 +15,25 @@ class PostgresRepository {
     this.pool = pool;
   }
 
+  async getOrganizationCallSettings(organizationId) {
+    const { rows } = await this.pool.query(
+      "SELECT settings FROM organization_call_settings WHERE organization_id=$1",
+      [organizationId],
+    );
+    return rows[0] ? json(rows[0].settings) || {} : {};
+  }
+
+  async saveOrganizationCallSettings(organizationId, settings) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO organization_call_settings (organization_id, settings)
+       VALUES ($1,$2::jsonb)
+       ON CONFLICT (organization_id) DO UPDATE SET settings=EXCLUDED.settings, updated_at=NOW()
+       RETURNING settings`,
+      [organizationId, JSON.stringify(settings || {})],
+    );
+    return json(rows[0].settings) || {};
+  }
+
   async createApiKey(orgId, { label, prefix, hash }) {
     const { rows } = await this.pool.query(
       `INSERT INTO service_api_keys (organization_id,label,key_prefix,key_hash)
