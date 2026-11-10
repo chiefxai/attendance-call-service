@@ -1,0 +1,2 @@
+ALTER TABLE care_activities
+  ADD COLUMN IF NOT EXISTS aliases TEXT[] NOT NULL DEFAULT '{}';

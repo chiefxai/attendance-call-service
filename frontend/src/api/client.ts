@@ -118,6 +118,9 @@ export interface IncomingPatientCall {
   answeredAt: string | null;
   endedAt: string | null;
   durationSeconds: number | null;
+  enquiryStatus: "processing" | "need_review" | "suggestion" | "shortage" | "resolved";
+  resolvedStaff: { id: string; name: string; phoneNumber: string | null; address: string; language: string } | null;
+  resolvedAt: string | null;
   hasRecording: boolean;
   hasTranscript: boolean;
   transcript: string | null;
@@ -147,6 +150,7 @@ export type IncomingCall = IncomingPatientCall;
 export interface CareActivity {
   id: string;
   name: string;
+  aliases: string[];
   description: string;
   durationMinutes: number;
   active: boolean;
@@ -396,17 +400,24 @@ export async function fetchCareActivities(includeInactive = true) {
   return response.data;
 }
 
-export async function createCareActivity(activity: Pick<CareActivity, "name" | "description" | "durationMinutes">) {
+export async function createCareActivity(activity: Pick<CareActivity, "name" | "aliases" | "description" | "durationMinutes">) {
   const response = await api.post<CareActivity>("/activities", activity);
   return response.data;
 }
 
-export async function updateCareActivity(id: string, activity: Pick<CareActivity, "name" | "description" | "durationMinutes" | "active">) {
+export async function updateCareActivity(id: string, activity: Pick<CareActivity, "name" | "aliases" | "description" | "durationMinutes" | "active">) {
   const response = await api.put<CareActivity>("/activities/" + encodeURIComponent(id), activity);
   return response.data;
 }
 export async function fetchIncomingCalls(limit = 100) {
   const response = await api.get<IncomingPatientCall[]>("/incoming-calls", { params: { limit } });
+  return response.data;
+}
+
+export async function resolveIncomingEnquiry(id: string, staffId: string) {
+  const response = await api.post<{ id: string; enquiryStatus: IncomingCall["enquiryStatus"]; resolvedStaff: NonNullable<IncomingCall["resolvedStaff"]>; resolvedAt: string }>(
+    `/incoming-calls/${encodeURIComponent(id)}/resolve`, { staffId },
+  );
   return response.data;
 }
 

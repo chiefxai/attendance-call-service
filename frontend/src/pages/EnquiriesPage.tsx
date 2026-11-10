@@ -8,7 +8,7 @@ import {
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
 import { AxiosError } from "axios";
-import { createPatient, fetchIncomingCalls, fetchPatients, incomingCallRecordingUrl, type CreatePatientPayload, type IncomingCall, type PatientRecord } from "../api/client";
+import { createPatient, fetchIncomingCalls, fetchPatients, fetchStaff, incomingCallRecordingUrl, resolveIncomingEnquiry, type CreatePatientPayload, type IncomingCall, type PatientRecord } from "../api/client";
 import { PageHeader } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
@@ -41,6 +41,9 @@ export function EnquiriesPage() {
   const [selectedPatient, setSelectedPatient] = useState<PatientRecord | null>(null);
   const [enquiryMessage, setEnquiryMessage] = useState("");
   const [selectedMessage, setSelectedMessage] = useState("");
+  const [resolveCall, setResolveCall] = useState<IncomingCall | null>(null);
+  const [resolveStaffId, setResolveStaffId] = useState("");
+  const [resolveError, setResolveError] = useState("");
   const queryClient = useQueryClient();
   const patients = useQuery({
     queryKey: ["patients"],
@@ -48,8 +51,19 @@ export function EnquiriesPage() {
   });
   const incomingCalls = useQuery({
     queryKey: ["incoming-calls"],
-    queryFn: () => fetchIncomingCalls(),
-    refetchInterval: (query) => query.state.data?.some((call) => call.enquiryAnalysisStatus === "pending" || call.enquiryAnalysisStatus === "processing") ? 4000 : 15000,
+    queryFn: fetchIncomingCalls,
+    refetchInterval: (query) => query.state.data?.some((call) => call.enquiryStatus === "processing") ? 4000 : 15000,
+  });
+  const staffDirectory = useQuery({ queryKey: ["staff", "enquiry-resolution"], queryFn: () => fetchStaff({ limit: 500 }) });
+  const resolveMutation = useMutation({
+    mutationFn: ({ callId, staffId }: { callId: string; staffId: string }) => resolveIncomingEnquiry(callId, staffId),
+    onSuccess: async () => {
+      setResolveCall(null);
+      setResolveStaffId("");
+      setResolveError("");
+      await queryClient.invalidateQueries({ queryKey: ["incoming-calls"] });
+    },
+    onError: (error) => setResolveError(errorMessage(error)),
   });
   const createMutation = useMutation({
     mutationFn: createPatient,
@@ -115,7 +129,12 @@ export function EnquiriesPage() {
       actions={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={openDialog}>Add enquiry</Button>}
     />
 
-    <IncomingPatientEnquiries calls={incomingCalls.data || []} loading={incomingCalls.isLoading} error={incomingCalls.isError} />
+    <IncomingPatientEnquiries
+      calls={incomingCalls.data || []}
+      loading={incomingCalls.isLoading}
+      error={incomingCalls.isError}
+      onResolve={(call) => { setResolveCall(call); setResolveStaffId(""); setResolveError(""); }}
+    />
 
     {selectedPatient ? (
       <Card>
@@ -267,20 +286,53 @@ export function EnquiriesPage() {
         )}
       </DialogActions>
     </Dialog>
+
+    <Dialog open={Boolean(resolveCall)} onClose={() => { if (!resolveMutation.isPending) setResolveCall(null); }} fullWidth maxWidth="sm">
+      <DialogTitle>Resolve patient enquiry</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <Typography variant="body2" color="text.secondary">Choose a staff member to assign for follow-up. Suggestions are listed first; you can choose any active staff member.</Typography>
+          {resolveCall?.staffSuggestions.length ? <Alert severity="info">Suggested staff are ordered by district and regional match. Confirm availability with the staff member before assigning.</Alert> : <Alert severity="warning">No staff matched the requested time and location. Select a staff member after your manual review.</Alert>}
+          {staffDirectory.isLoading ? <CircularProgress size={24} /> : <FormControl fullWidth>
+            <InputLabel id="resolve-staff-label">Staff member</InputLabel>
+            <Select labelId="resolve-staff-label" label="Staff member" value={resolveStaffId} onChange={(event) => setResolveStaffId(event.target.value)}>
+              {(() => {
+                const all = staffDirectory.data || [];
+                const suggestedIds = new Set(resolveCall?.staffSuggestions.map((staff) => staff.id) || []);
+                const suggested = resolveCall?.staffSuggestions || [];
+                const remaining = all.filter((staff) => !suggestedIds.has(staff.id));
+                return <>
+                  {suggested.length > 0 && <MenuItem disabled value=""><em>Suggested staff</em></MenuItem>}
+                  {suggested.map((staff) => <MenuItem key={staff.id} value={staff.id}>{staff.name} · {({ same_district: "Same district", same_region: "Same state", other_region: "Other area" }[staff.locationMatch])}{staff.phoneNumber ? ` · ${staff.phoneNumber}` : ""}</MenuItem>)}
+                  {remaining.length > 0 && <MenuItem disabled value=""><em>All active staff</em></MenuItem>}
+                  {remaining.map((staff) => <MenuItem key={staff.id} value={staff.id}>{staff.name}{staff.phoneNumber ? ` · ${staff.phoneNumber}` : ""}</MenuItem>)}
+                </>;
+              })()}
+            </Select>
+          </FormControl>}
+          {staffDirectory.isError && <Alert severity="error">Could not load the staff directory.</Alert>}
+          {resolveError && <Alert severity="error">{resolveError}</Alert>}
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={() => setResolveCall(null)} disabled={resolveMutation.isPending}>Cancel</Button>
+        <Button variant="contained" disabled={!resolveCall || !resolveStaffId || resolveMutation.isPending} onClick={() => resolveCall && resolveMutation.mutate({ callId: resolveCall.id, staffId: resolveStaffId })}>{resolveMutation.isPending ? "Resolving…" : "Resolve enquiry"}</Button>
+      </DialogActions>
+    </Dialog>
   </Stack>;
 }
 
-function IncomingPatientEnquiries({ calls, loading, error }: { calls: IncomingCall[]; loading: boolean; error: boolean }) {
+function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls: IncomingCall[]; loading: boolean; error: boolean; onResolve: (call: IncomingCall) => void }) {
   const formatTime = (value?: string | null) => value ? new Date(value).toLocaleString() : "Not captured";
   const locationLabel = (match: IncomingCall["staffSuggestions"][number]["locationMatch"]) => ({
     same_district: "Same district", same_region: "Same state", other_region: "Other area",
   }[match] || "Location not matched");
-  const statusLabel = (call: IncomingCall) => {
-    if (call.enquiryAnalysisStatus === "complete") return "Suggestions ready";
-    if (call.enquiryAnalysisStatus === "needs_details") return "Needs review";
-    if (call.enquiryAnalysisStatus === "failed") return "Processing failed";
-    return "Processing";
-  };
+  const statusLabel = (status: IncomingCall["enquiryStatus"]) => ({
+    processing: "Processing", need_review: "Need review", suggestion: "Suggestion", shortage: "Shortage", resolved: "Resolved",
+  }[status] || "Need review");
+  const statusColor = (status: IncomingCall["enquiryStatus"]) => ({
+    processing: "info", need_review: "warning", suggestion: "success", shortage: "warning", resolved: "default",
+  }[status] || "warning") as "info" | "warning" | "success" | "default";
   return <Stack spacing={1.5}>
     <Stack direction="row" spacing={1} alignItems="center"><Typography variant="h6" fontWeight={700}>Incoming patient calls</Typography><Chip size="small" label={calls.length} /></Stack>
     {error && <Alert severity="error">Could not load incoming patient enquiries.</Alert>}
@@ -293,20 +345,20 @@ function IncomingPatientEnquiries({ calls, loading, error }: { calls: IncomingCa
               <Typography fontWeight={700}>{call.patient?.name || "Incoming caller"}</Typography>
               <Typography variant="body2" color="text.secondary">{call.fromNumber} · {formatTime(call.startedAt)}</Typography>
             </Box>
-            <Chip size="small" color={call.enquiryAnalysisStatus === "complete" ? "success" : call.enquiryAnalysisStatus === "failed" ? "error" : "warning"} label={statusLabel(call)} />
+            <Chip size="small" color={statusColor(call.enquiryStatus)} label={statusLabel(call.enquiryStatus)} />
           </Stack>
           {(call.enquiryAnalysis?.activityName || call.enquiryAnalysis?.needsSummary) && <Box>
             {call.enquiryAnalysis.activityName && <Typography variant="body2"><strong>Activity:</strong> {call.enquiryAnalysis.activityName}{call.enquiryAnalysis.durationMinutes ? ` · ${call.enquiryAnalysis.durationMinutes} min` : ""}</Typography>}
             {call.enquiryAnalysis?.requestedStartAt && <Typography variant="body2"><strong>Requested start:</strong> {formatTime(call.enquiryAnalysis.requestedStartAt)}</Typography>}
             {call.enquiryAnalysis?.needsSummary && <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}><strong>Need:</strong> {call.enquiryAnalysis.needsSummary}</Typography>}
           </Box>}
-          {call.enquiryAnalysisStatus === "needs_details" && <Alert severity="info">{call.enquiryAnalysis?.missingDetails?.includes("patient_district")
+          {call.enquiryStatus === "need_review" && <Alert severity="info">{call.enquiryAnalysis?.missingDetails?.includes("patient_district")
             ? "The patient's district is missing from the saved address, so staff location cannot be matched yet."
             : call.enquiryAnalysis?.missingDetails?.includes("activity")
               ? "The caller's need did not match an active care activity. Add or update the activity catalog, then follow up with the caller."
-              : "The requested start date/time was unclear or is in the past, so staff availability cannot be checked."} Review the transcript and follow up with the caller.</Alert>}
-          {call.enquiryAnalysisStatus === "complete" && call.staffSuggestions.length === 0 && <Alert severity="warning">No staff without an overlapping duty were found for this time window.</Alert>}
-          {call.staffSuggestions.length > 0 && <>
+              : "The agent could not confidently extract the request. Review the transcript and contact the caller if needed."} Review this enquiry before assigning staff.</Alert>}
+          {call.enquiryStatus === "shortage" && <Alert severity="warning">No staff without an overlapping duty were found for this time window. A human can review and choose any active staff member.</Alert>}
+          {call.staffSuggestions.length > 0 && call.enquiryStatus !== "resolved" && <>
             <Alert severity="info">Up to 10 staff without an overlapping duty are shown by location match. Contact the suggested staff and confirm availability before making an assignment.</Alert>
             <TableContainer sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}>
             <Table size="small" aria-label="Suggested staff for patient enquiry">
@@ -318,6 +370,8 @@ function IncomingPatientEnquiries({ calls, loading, error }: { calls: IncomingCa
             </Table>
             </TableContainer>
           </>}
+          {call.enquiryStatus === "resolved" && call.resolvedStaff && <Alert severity="success">Resolved with {call.resolvedStaff.name}{call.resolvedStaff.phoneNumber ? ` · ${call.resolvedStaff.phoneNumber}` : ""}.</Alert>}
+          {(call.enquiryStatus === "suggestion" || call.enquiryStatus === "shortage") && <Box><Button variant="contained" size="small" onClick={() => onResolve(call)}>Resolve</Button></Box>}
           {call.transcript && <Box sx={{ p: 1.5, bgcolor: "action.hover", borderRadius: 1.5 }}><Typography variant="subtitle2">Transcript</Typography><Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}>{call.transcript}</Typography></Box>}
           {call.hasRecording && <audio controls preload="none" src={incomingCallRecordingUrl(call.id)} style={{ width: "100%" }} />}
         </Stack>

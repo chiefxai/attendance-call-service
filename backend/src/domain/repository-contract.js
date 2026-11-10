@@ -45,6 +45,7 @@ const repositoryMethods = Object.freeze([
   "saveInboundCallRecording(inboundCallId, objectKey, contentType)",
   "saveInboundCallTranscript(inboundCallId, transcript, organizationId)",
   "saveInboundEnquiryAnalysis(inboundCallId, resultWithOrganizationId)",
+  "resolveInboundEnquiry(inboundCallId, organizationId, staffId)",
   "listExpiredInboundCalls(limit)",
   "deleteExpiredInboundCall(inboundCallId)",
   "createCallAttempt(attempt)",

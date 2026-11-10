@@ -92,35 +92,35 @@ class PostgresRepository {
 
   async listCareActivities(organizationId, { includeInactive = false } = {}) {
     const { rows } = await this.pool.query(
-      `SELECT id,name,description,duration_minutes,active,created_at,updated_at
+      `SELECT id,name,aliases,description,duration_minutes,active,created_at,updated_at
        FROM care_activities WHERE organization_id=$1 AND ($2::boolean OR active=TRUE)
        ORDER BY active DESC, lower(name)`, [organizationId, includeInactive],
     );
-    return rows.map((row) => ({ id: row.id, name: row.name, description: row.description,
+    return rows.map((row) => ({ id: row.id, name: row.name, aliases: row.aliases || [], description: row.description,
       durationMinutes: row.duration_minutes, active: row.active,
       createdAt: row.created_at, updatedAt: row.updated_at }));
   }
 
   async createCareActivity(organizationId, activity) {
     const { rows } = await this.pool.query(
-      `INSERT INTO care_activities (organization_id,name,description,duration_minutes)
-       VALUES ($1,$2,$3,$4) RETURNING id,name,description,duration_minutes,active,created_at,updated_at`,
-      [organizationId, activity.name, activity.description || "", activity.durationMinutes],
+      `INSERT INTO care_activities (organization_id,name,aliases,description,duration_minutes)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id,name,aliases,description,duration_minutes,active,created_at,updated_at`,
+      [organizationId, activity.name, activity.aliases || [], activity.description || "", activity.durationMinutes],
     );
     const row = rows[0];
-    return { id: row.id, name: row.name, description: row.description, durationMinutes: row.duration_minutes,
+    return { id: row.id, name: row.name, aliases: row.aliases || [], description: row.description, durationMinutes: row.duration_minutes,
       active: row.active, createdAt: row.created_at, updatedAt: row.updated_at };
   }
 
   async updateCareActivity(organizationId, id, activity) {
     const { rows } = await this.pool.query(
-      `UPDATE care_activities SET name=$3,description=$4,duration_minutes=$5,active=$6,updated_at=NOW()
+      `UPDATE care_activities SET name=$3,aliases=$4,description=$5,duration_minutes=$6,active=$7,updated_at=NOW()
        WHERE organization_id=$1 AND id=$2
-       RETURNING id,name,description,duration_minutes,active,created_at,updated_at`,
-      [organizationId, id, activity.name, activity.description || "", activity.durationMinutes, activity.active !== false],
+       RETURNING id,name,aliases,description,duration_minutes,active,created_at,updated_at`,
+      [organizationId, id, activity.name, activity.aliases || [], activity.description || "", activity.durationMinutes, activity.active !== false],
     );
     const row = rows[0];
-    return row ? { id: row.id, name: row.name, description: row.description, durationMinutes: row.duration_minutes,
+    return row ? { id: row.id, name: row.name, aliases: row.aliases || [], description: row.description, durationMinutes: row.duration_minutes,
       active: row.active, createdAt: row.created_at, updatedAt: row.updated_at } : null;
   }
 
@@ -325,8 +325,8 @@ class PostgresRepository {
     const retentionDays = Math.min(Math.max(Number(process.env.DATA_RETENTION_DAYS) || 90, 1), 3650);
     const { rows } = await this.pool.query(
       `INSERT INTO inbound_calls
-       (organization_id,provider,provider_call_id,from_number,to_number,patient_id,patient_context,agent_id,language,status,retention_expires_at)
-       VALUES ($1,'vobiz',$2,$3,$4,$5,$6::jsonb,$7,$8,'ringing',NOW()+($9 * INTERVAL '1 day'))
+       (organization_id,provider,provider_call_id,from_number,to_number,patient_id,patient_context,agent_id,language,status,enquiry_status,retention_expires_at)
+       VALUES ($1,'vobiz',$2,$3,$4,$5,$6::jsonb,$7,$8,'ringing','processing',NOW()+($9 * INTERVAL '1 day'))
        ON CONFLICT (provider,provider_call_id) DO UPDATE SET provider_call_id=EXCLUDED.provider_call_id
        RETURNING *`, [call.organizationId, call.providerCallId, call.fromNumber, call.toNumber || null,
         call.patient?.id || null, JSON.stringify(call.patient || {}), call.agentId || null,
@@ -343,6 +343,7 @@ class PostgresRepository {
       status: row.status, recordingObjectKey: row.recording_object_key,
       recordingContentType: row.recording_content_type, transcript: row.transcript,
       transcriptLanguage: row.transcript_language, enquiryAnalysisStatus: row.enquiry_analysis_status || "pending",
+      enquiryStatus: row.enquiry_status || "processing", resolvedStaff: json(row.resolved_staff), resolvedAt: row.resolved_at,
       enquiryAnalysis: json(row.enquiry_analysis) || {}, staffSuggestions: json(row.staff_suggestions) || [],
       startedAt: row.started_at, answeredAt: row.answered_at, endedAt: row.ended_at,
       durationSeconds: row.duration_seconds };
@@ -388,17 +389,64 @@ class PostgresRepository {
 
   async saveInboundCallTranscript(id, transcript, organizationId) {
     await this.pool.query(
-      "UPDATE inbound_calls SET transcript=$2,transcript_language=$3,transcribed_at=NOW(),enquiry_analysis_status='processing',updated_at=NOW() WHERE id=$1 AND organization_id=$4",
+      "UPDATE inbound_calls SET transcript=$2,transcript_language=$3,transcribed_at=NOW(),enquiry_analysis_status='processing',enquiry_status='processing',updated_at=NOW() WHERE id=$1 AND organization_id=$4",
       [id, transcript.text, transcript.language || null, organizationId],
     );
   }
 
-  async saveInboundEnquiryAnalysis(id, { organizationId, status = "needs_details", analysis = {}, staffSuggestions = [] } = {}) {
+  async saveInboundEnquiryAnalysis(id, { organizationId, status = "processing", analysis = {}, staffSuggestions = [] } = {}) {
+    const allowedStatuses = new Set(["processing", "need_review", "suggestion", "shortage", "resolved"]);
+    if (!allowedStatuses.has(status)) throw new Error("Invalid enquiry status");
     await this.pool.query(
-      `UPDATE inbound_calls SET enquiry_analysis_status=$2,enquiry_analysis=$3::jsonb,
-       staff_suggestions=$4::jsonb,updated_at=NOW() WHERE id=$1 AND organization_id=$5`,
-      [id, status, JSON.stringify(analysis || {}), JSON.stringify(staffSuggestions || []), organizationId],
+      `UPDATE inbound_calls SET enquiry_status=$2,enquiry_analysis_status=$3,enquiry_analysis=$4::jsonb,
+       staff_suggestions=$5::jsonb,updated_at=NOW() WHERE id=$1 AND organization_id=$6 AND enquiry_status<>'resolved'`,
+      [id, status, status === "processing" ? "processing" : status === "need_review" ? "needs_details" : "complete",
+        JSON.stringify(analysis || {}), JSON.stringify(staffSuggestions || []), organizationId],
     );
+  }
+
+  async resolveInboundEnquiry(id, organizationId, staffId) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const enquiryResult = await client.query(
+        "SELECT enquiry_status FROM inbound_calls WHERE id=$1 AND organization_id=$2 AND retention_expires_at>NOW() FOR UPDATE",
+        [id, organizationId],
+      );
+      if (!enquiryResult.rowCount) {
+        await client.query("COMMIT");
+        return null;
+      }
+      if (!["suggestion", "shortage"].includes(enquiryResult.rows[0].enquiry_status)) {
+        const error = new Error("Only enquiries with a staff suggestion or shortage can be resolved");
+        error.status = 409;
+        throw error;
+      }
+      const staffResult = await client.query(
+        `SELECT external_id,name,phone_number,address,language FROM staff_directory
+         WHERE organization_id=$1 AND external_id=$2 AND active=TRUE FOR SHARE`, [organizationId, staffId],
+      );
+      if (!staffResult.rowCount) {
+        const error = new Error("Selected staff member is not active in this organization");
+        error.status = 400;
+        throw error;
+      }
+      const staff = staffResult.rows[0];
+      const result = await client.query(
+        `UPDATE inbound_calls SET enquiry_status='resolved',resolved_staff=$3::jsonb,resolved_at=NOW(),updated_at=NOW()
+         WHERE id=$1 AND organization_id=$2
+         RETURNING *`,
+        [id, organizationId, JSON.stringify({ id: staff.external_id, name: staff.name, phoneNumber: staff.phone_number,
+          address: staff.address || "", language: staff.language || "en" })],
+      );
+      await client.query("COMMIT");
+      return this.mapInboundCall(result.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async listExpiredInboundCalls(limit = 100) {

@@ -256,7 +256,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       && requestedStart.getTime() >= callStartedAt - 60_000);
     const patientAddressParts = String(call.patient?.address || "").split(" | ");
     const hasPatientDistrict = patientAddressParts.length === 4 && Boolean(patientAddressParts[1].trim());
-    const needsDetails = !activity || !hasValidStart || !hasPatientDistrict;
+    const needsDetails = Boolean(analysis.uncertain) || !activity || !hasValidStart || !hasPatientDistrict;
     let staffSuggestions = [];
     let requestedEndAt = null;
     if (activity && hasValidStart) {
@@ -269,15 +269,17 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
         patientAddress: call.patient?.address || "", limit: 10,
       });
     }
+    const enquiryStatus = needsDetails ? "need_review" : (staffSuggestions.length ? "suggestion" : "shortage");
     await repository.saveInboundEnquiryAnalysis(inboundCallId, {
       organizationId: call.organizationId,
-      status: needsDetails ? "needs_details" : "complete",
+      status: enquiryStatus,
       analysis: {
         activityId: activity?.id || null, activityName: activity?.name || analysis.requestedActivity || null,
         durationMinutes: activity?.durationMinutes || null,
         requestedStartAt: hasValidStart ? requestedStart.toISOString() : null,
         requestedEndAt: requestedEndAt?.toISOString() || null,
         needsSummary: String(analysis.needsSummary || "").slice(0, 2000), requiresHumanFollowUp: true,
+        uncertain: Boolean(analysis.uncertain),
         missingDetails: [!activity ? "activity" : null, !hasValidStart ? "start_time" : null, !hasPatientDistrict ? "patient_district" : null].filter(Boolean),
       },
       staffSuggestions,

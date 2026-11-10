@@ -9,11 +9,13 @@ import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
+import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { CareActivitiesPage } from "./pages/CareActivitiesPage";
 import { CallCenterPage } from "./pages/CallCenterPage";
 import { AssignmentStatusPage } from "./pages/AssignmentStatusPage";
 import { NewAssignmentPage } from "./pages/NewAssignmentPage";
@@ -32,6 +34,7 @@ const navigation = [
   { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Enquiries", path: "/enquiries", icon: <ContactSupportRoundedIcon /> },
+  { label: "Care activities", path: "/care-activities", icon: <MedicalServicesRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon /> },
@@ -110,6 +113,7 @@ function App() {
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
           <Route path="/enquiries" element={<EnquiriesPage />} />
+          <Route path="/care-activities" element={<CareActivitiesPage />} />
           <Route path="/assignments/new" element={<NewAssignmentPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/api-access" element={<ApiAccessPage section="docs" />} />

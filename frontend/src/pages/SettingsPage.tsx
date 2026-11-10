@@ -5,7 +5,7 @@ import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
 import SettingsPhoneRoundedIcon from "@mui/icons-material/SettingsPhoneRounded";
 import { AxiosError } from "axios";
-import { createCareActivity, fetchCareActivities, fetchCallingSettings, resetCallingSettings, saveCallingSettings, updateCareActivity, type CareActivity, type CallingSettings } from "../api/client";
+import { fetchCallingSettings, resetCallingSettings, saveCallingSettings, type CallingSettings } from "../api/client";
 import { ApiAccessPage } from "./ApiAccessPage";
 import { PageHeader } from "../components/OperationsUI";
 
@@ -18,7 +18,7 @@ const emptySettings: CallingForm = {
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<"calling" | "activities" | "api">("calling");
+  const [tab, setTab] = useState<"calling" | "api">("calling");
   const [form, setForm] = useState<CallingForm>(emptySettings);
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: ["calling-settings"], queryFn: fetchCallingSettings, retry: false });
@@ -46,9 +46,8 @@ export function SettingsPage() {
 
   return <Stack spacing={2.5}>
     <PageHeader title="Settings" />
-    <Tabs value={tab} onChange={(_event, value: "calling" | "activities" | "api") => setTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ borderBottom: 1, borderColor: "divider" }}>
+    <Tabs value={tab} onChange={(_event, value: "calling" | "api") => setTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ borderBottom: 1, borderColor: "divider" }}>
       <Tab value="calling" label="Calling settings" icon={<SettingsPhoneRoundedIcon />} iconPosition="start" />
-      <Tab value="activities" label="Care activities" />
       <Tab value="api" label="API configuration" />
     </Tabs>
     {tab === "calling" ? <Stack spacing={2.5}>
@@ -90,61 +89,6 @@ export function SettingsPage() {
           </Stack>
         </Stack>
       </CardContent></Card>}
-    </Stack> : tab === "activities" ? <CareActivitiesSettings /> : <ApiAccessPage section="settings" />}
-  </Stack>;
-}
-
-function CareActivitiesSettings() {
-  const queryClient = useQueryClient();
-  const activities = useQuery({ queryKey: ["care-activities"], queryFn: () => fetchCareActivities(true) });
-  const [form, setForm] = useState({ name: "", description: "", durationMinutes: 60 });
-  const [editing, setEditing] = useState<CareActivity | null>(null);
-  const create = useMutation({ mutationFn: createCareActivity, onSuccess: async () => {
-    setForm({ name: "", description: "", durationMinutes: 60 });
-    await queryClient.invalidateQueries({ queryKey: ["care-activities"] });
-  } });
-  const update = useMutation({ mutationFn: ({ id, ...value }: CareActivity) => updateCareActivity(id, value),
-    onSuccess: async () => { setEditing(null); setForm({ name: "", description: "", durationMinutes: 60 }); await queryClient.invalidateQueries({ queryKey: ["care-activities"] }); } });
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (editing) update.mutate({ ...editing, ...form });
-    else create.mutate(form);
-  };
-  const beginEdit = (activity: CareActivity) => {
-    setEditing(activity);
-    setForm({ name: activity.name, description: activity.description, durationMinutes: activity.durationMinutes });
-  };
-  const cancelEdit = () => { setEditing(null); setForm({ name: "", description: "", durationMinutes: 60 }); };
-
-  return <Stack spacing={2.5}>
-    <Alert severity="info">Set the default duration for each care activity. The patient voice agent identifies the activity and asks only for the requested start time; availability checks use this duration automatically.</Alert>
-    {activities.isError && <Alert severity="error">Could not load care activities.</Alert>}
-    {(create.isError || update.isError) && <Alert severity="error">{settingError(create.error || update.error)}</Alert>}
-    {(create.isSuccess || update.isSuccess) && <Alert severity="success">Care activity saved.</Alert>}
-    <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-      <Stack component="form" onSubmit={submit} spacing={2}>
-        <Typography variant="h6">{editing ? "Edit activity" : "Add activity"}</Typography>
-        <Grid container spacing={2}>
-          <Grid size={{ xs: 12, md: 5 }}><TextField required fullWidth label="Activity name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} inputProps={{ maxLength: 120 }} /></Grid>
-          <Grid size={{ xs: 12, md: 3 }}><TextField required fullWidth type="number" label="Default duration (minutes)" value={form.durationMinutes} onChange={(event) => setForm((current) => ({ ...current, durationMinutes: Number(event.target.value) }))} inputProps={{ min: 1, max: 10080, step: 1 }} /></Grid>
-          <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Description (optional)" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} inputProps={{ maxLength: 500 }} /></Grid>
-        </Grid>
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
-          {editing && <Button onClick={cancelEdit}>Cancel edit</Button>}
-          <Button type="submit" variant="contained" disabled={create.isPending || update.isPending}>{editing ? "Save activity" : "Add activity"}</Button>
-        </Stack>
-      </Stack>
-    </CardContent></Card>
-    <Stack spacing={1.25}>
-      {activities.isLoading && <Box sx={{ display: "grid", placeItems: "center", py: 4 }}><CircularProgress /></Box>}
-      {activities.data?.map((activity) => <Card key={activity.id}><CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }}>
-          <Box sx={{ flex: 1 }}><Typography fontWeight={700}>{activity.name}{!activity.active && <Typography component="span" color="text.secondary"> · Inactive</Typography>}</Typography><Typography variant="body2" color="text.secondary">{activity.durationMinutes} minutes{activity.description ? ` · ${activity.description}` : ""}</Typography></Box>
-          <Button onClick={() => beginEdit(activity)}>Edit</Button>
-          <FormControlLabel label={activity.active ? "Active" : "Inactive"} control={<Switch checked={activity.active} disabled={update.isPending} onChange={(_, checked) => update.mutate({ ...activity, active: checked })} />} />
-        </Stack>
-      </CardContent></Card>)}
-      {activities.isSuccess && activities.data.length === 0 && <Alert severity="info">Add activities with their expected duration before using automatic staff suggestions.</Alert>}
-    </Stack>
+    </Stack> : <ApiAccessPage section="settings" />}
   </Stack>;
 }

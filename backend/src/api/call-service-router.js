@@ -268,6 +268,9 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       endedAt: call.endedAt, durationSeconds: call.durationSeconds,
       hasRecording, hasTranscript, transcript: call.transcript || null,
       transcriptLanguage: call.transcriptLanguage || null,
+      enquiryStatus: call.enquiryStatus,
+      resolvedStaff: call.resolvedStaff || null,
+      resolvedAt: call.resolvedAt || null,
       enquiryAnalysisStatus: call.enquiryAnalysisStatus || "pending",
       enquiryAnalysis: call.enquiryAnalysis || {},
       staffSuggestions: call.staffSuggestions || [],
@@ -283,10 +286,13 @@ router.get("/activities", async (req, res) => {
     const name = String(req.body?.name || "").trim();
     const description = String(req.body?.description || "").trim();
     const durationMinutes = Number(req.body?.durationMinutes);
+    const rawAliases = req.body?.aliases ?? [];
+    if (!Array.isArray(rawAliases) || rawAliases.length > 30 || rawAliases.some((alias) => typeof alias !== "string" || !alias.trim() || alias.trim().length > 120)) return res.status(400).json({ error: "Aliases must be up to 30 non-empty names, each at most 120 characters." });
+    const aliases = [...new Map(rawAliases.map((alias) => [alias.trim().toLocaleLowerCase(), alias.trim()])).values()];
     if (!name || name.length > 120) return res.status(400).json({ error: "Activity name is required and must be at most 120 characters." });
     if (description.length > 500) return res.status(400).json({ error: "Description must be at most 500 characters." });
     if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
-    try { return res.status(201).json(await repository.createCareActivity(org(req), { name, description, durationMinutes })); }
+    try { return res.status(201).json(await repository.createCareActivity(org(req), { name, aliases, description, durationMinutes })); }
     catch (error) {
       if (error.code === "23505") return res.status(409).json({ error: "An activity with this name already exists." });
       return fail(res, error);
@@ -297,12 +303,15 @@ router.get("/activities", async (req, res) => {
     const name = String(req.body?.name || "").trim();
     const description = String(req.body?.description || "").trim();
     const durationMinutes = Number(req.body?.durationMinutes);
+    const rawAliases = req.body?.aliases ?? [];
+    if (!Array.isArray(rawAliases) || rawAliases.length > 30 || rawAliases.some((alias) => typeof alias !== "string" || !alias.trim() || alias.trim().length > 120)) return res.status(400).json({ error: "Aliases must be up to 30 non-empty names, each at most 120 characters." });
+    const aliases = [...new Map(rawAliases.map((alias) => [alias.trim().toLocaleLowerCase(), alias.trim()])).values()];
     if (!name || name.length > 120) return res.status(400).json({ error: "Activity name is required and must be at most 120 characters." });
     if (description.length > 500) return res.status(400).json({ error: "Description must be at most 500 characters." });
     if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
     if (req.body?.active !== undefined && typeof req.body.active !== "boolean") return res.status(400).json({ error: "active must be a boolean." });
     try {
-      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, description, durationMinutes, active: req.body?.active });
+      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, aliases, description, durationMinutes, active: req.body?.active });
       if (!activity) return res.status(404).json({ error: "Activity not found." });
       return res.json(activity);
     } catch (error) {
@@ -323,6 +332,20 @@ router.get("/activities", async (req, res) => {
       const call = await repository.getInboundCall(req.params.id, org(req));
       if (!call) return res.status(404).json({ error: "Incoming call not found" });
       res.json(serializeIncomingCall(call));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.post("/incoming-calls/:id/resolve", async (req, res) => {
+    try {
+      const body = req.body || {};
+      if (Object.keys(body).some((key) => key !== "staffId")) {
+        return res.status(400).json({ error: "Only staffId is accepted; enquiry status is controlled by the system." });
+      }
+      const staffId = String(body.staffId || "").trim();
+      if (!staffId) return res.status(400).json({ error: "Choose a staff member to resolve this enquiry." });
+      const call = await repository.resolveInboundEnquiry(req.params.id, org(req), staffId);
+      if (!call) return res.status(404).json({ error: "Incoming call not found" });
+      res.json({ id: call.id, enquiryStatus: call.enquiryStatus, resolvedStaff: call.resolvedStaff, resolvedAt: call.resolvedAt });
     } catch (error) { fail(res, error); }
   });
 
