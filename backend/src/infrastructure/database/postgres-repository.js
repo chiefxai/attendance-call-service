@@ -241,6 +241,106 @@ class PostgresRepository {
     }
   }
 
+  async findPatientContactByPhone(organizationId, phoneNumber) {
+    const digits = String(phoneNumber || "").replace(/\\D/g, "");
+    const national = digits.length > 10 && digits.startsWith("91") ? digits.slice(-10) : digits;
+    if (national.length !== 10) return null;
+    const { rows } = await this.pool.query(
+      `SELECT external_id,name,phone_number,address,language,care_category,hub
+       FROM patient_directory WHERE organization_id=$1 AND active=TRUE
+         AND RIGHT(regexp_replace(COALESCE(phone_number,''), '[^0-9]', '', 'g'),10)=$2
+       ORDER BY updated_at DESC LIMIT 2`, [organizationId, national],
+    );
+    if (rows.length !== 1) return null;
+    const row = rows[0];
+    return { id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+      address: row.address, language: row.language || "en", careCategory: row.care_category || "", hub: row.hub || "" };
+  }
+
+  async createInboundCall(call) {
+    const retentionDays = Math.min(Math.max(Number(process.env.DATA_RETENTION_DAYS) || 90, 1), 3650);
+    const { rows } = await this.pool.query(
+      `INSERT INTO inbound_calls
+       (organization_id,provider,provider_call_id,from_number,to_number,patient_id,patient_context,agent_id,language,status,retention_expires_at)
+       VALUES ($1,'vobiz',$2,$3,$4,$5,$6::jsonb,$7,$8,'ringing',NOW()+($9 * INTERVAL '1 day'))
+       ON CONFLICT (provider,provider_call_id) DO UPDATE SET provider_call_id=EXCLUDED.provider_call_id
+       RETURNING *`, [call.organizationId, call.providerCallId, call.fromNumber, call.toNumber || null,
+        call.patient?.id || null, JSON.stringify(call.patient || {}), call.agentId || null,
+        call.language || call.patient?.language || "en", retentionDays],
+    );
+    return this.mapInboundCall(rows[0]);
+  }
+
+  mapInboundCall(row) {
+    if (!row) return null;
+    return { id: row.id, organizationId: row.organization_id, providerCallId: row.provider_call_id,
+      fromNumber: row.from_number, toNumber: row.to_number, patientId: row.patient_id,
+      patient: json(row.patient_context), agentId: row.agent_id, language: row.language,
+      status: row.status, recordingObjectKey: row.recording_object_key,
+      recordingContentType: row.recording_content_type, transcript: row.transcript,
+      startedAt: row.started_at, answeredAt: row.answered_at, endedAt: row.ended_at,
+      durationSeconds: row.duration_seconds };
+  }
+
+  async getInboundCall(id, organizationId) {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM inbound_calls WHERE id=$1 AND organization_id=$2 AND retention_expires_at>NOW()", [id, organizationId],
+    );
+    return this.mapInboundCall(rows[0]);
+  }
+
+  async listInboundCalls(organizationId, limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const { rows } = await this.pool.query(
+      "SELECT * FROM inbound_calls WHERE organization_id=$1 AND retention_expires_at>NOW() ORDER BY started_at DESC LIMIT $2",
+      [organizationId, safeLimit],
+    );
+    return rows.map((row) => this.mapInboundCall(row));
+  }
+
+  async claimInboundCallStream(id) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE inbound_calls SET stream_claimed_at=NOW(),answered_at=COALESCE(answered_at,NOW()),status='in_progress'
+       WHERE id=$1 AND stream_claimed_at IS NULL AND status IN ('ringing','in_progress')`, [id],
+    );
+    return rowCount === 1;
+  }
+
+  async finishInboundCall(id, { status = "completed", endedAt = new Date(), durationSeconds = null } = {}) {
+    await this.pool.query(
+      `UPDATE inbound_calls SET status=$2,ended_at=COALESCE(ended_at,$3),duration_seconds=COALESCE($4,duration_seconds),updated_at=NOW() WHERE id=$1`,
+      [id, status, endedAt, durationSeconds],
+    );
+  }
+
+  async saveInboundCallRecording(id, objectKey, contentType) {
+    await this.pool.query(
+      "UPDATE inbound_calls SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1",
+      [id, objectKey, contentType || "audio/wav"],
+    );
+  }
+
+  async saveInboundCallTranscript(id, transcript) {
+    await this.pool.query(
+      "UPDATE inbound_calls SET transcript=$2,transcript_language=$3,transcribed_at=NOW(),updated_at=NOW() WHERE id=$1",
+      [id, transcript.text, transcript.language || null],
+    );
+  }
+
+  async listExpiredInboundCalls(limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const { rows } = await this.pool.query(
+      "SELECT id,recording_object_key FROM inbound_calls WHERE retention_expires_at<=NOW() ORDER BY retention_expires_at LIMIT $1",
+      [safeLimit],
+    );
+    return rows.map((row) => ({ id: row.id, recordingObjectKey: row.recording_object_key }));
+  }
+
+  async deleteExpiredInboundCall(id) {
+    const { rowCount } = await this.pool.query("DELETE FROM inbound_calls WHERE id=$1 AND retention_expires_at<=NOW()", [id]);
+    return rowCount === 1;
+  }
+
   async createAttendanceSession(assignment, client = this.pool) {
     const r = await client.query(
       `INSERT INTO attendance_sessions
@@ -782,7 +882,21 @@ class PostgresRepository {
         return this.getCallAttempt(row.id);
       }
       r = await client.query("SELECT * FROM call_records WHERE provider=$1 AND provider_call_id=$2 FOR UPDATE", [event.provider, event.providerCallId]);
-      if (!r.rows[0]) { await client.query("COMMIT"); return null; }
+      if (!r.rows[0]) {
+        const inbound = await client.query("SELECT * FROM inbound_calls WHERE provider=$1 AND provider_call_id=$2 FOR UPDATE", [event.provider, event.providerCallId]);
+        if (!inbound.rows[0]) { await client.query("COMMIT"); return null; }
+        const state = String(event.status || "").toLowerCase().replace(/[\\s_-]+/g, "");
+        const inboundStatus = ({ queued: "ringing", initiated: "ringing", ringing: "ringing", answered: "in_progress",
+          inprogress: "in_progress", completed: "completed", hangup: "completed", noanswer: "no_answer",
+          busy: "failed", failed: "failed", canceled: "canceled", cancelled: "cancelled" })[state] || "failed";
+        await client.query(
+          `UPDATE inbound_calls SET status=$3,ended_at=COALESCE($4,ended_at),duration_seconds=COALESCE($5,duration_seconds),
+           answered_at=COALESCE(answered_at,$6),updated_at=NOW() WHERE provider=$1 AND provider_call_id=$2`,
+          [event.provider, event.providerCallId, inboundStatus, event.endedAt || null, event.durationSeconds || null, event.rawEvent?.AnswerTime || null],
+        );
+        await client.query("COMMIT");
+        return { id: inbound.rows[0].id, status: inboundStatus, inboundCall: true };
+      }
       await client.query("UPDATE call_records SET status=$3,updated_at=NOW() WHERE provider=$1 AND provider_call_id=$2", [event.provider, event.providerCallId, event.status]);
       await client.query("COMMIT");
       return { id: r.rows[0].id, status: event.status, genericCall: true };
