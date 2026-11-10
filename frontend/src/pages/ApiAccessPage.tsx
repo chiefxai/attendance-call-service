@@ -114,6 +114,25 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
     </>}
 
     {section === "docs" && <>
+    <SectionCard title="Save staff and patient profiles" subtitle="Create directory records before scheduling assignments. Newly saved people appear in the New assignment dropdowns.">
+      <Stack spacing={1.5}>
+        <Typography variant="body2">Both endpoints require <Box component="code">Authorization: Bearer &lt;API_KEY&gt;</Box> and <Box component="code">Content-Type: application/json</Box>.</Typography>
+        <Grid container spacing={2}>
+          <Grid size={{ xs: 12, lg: 6 }}>
+            <Typography variant="subtitle2" fontWeight={700}>Save staff</Typography>
+            <Typography variant="body2" sx={{ mt: .5 }}>Endpoint: <Box component="code">POST /api/call-service/staff</Box></Typography>
+            <Paper variant="outlined" sx={{ mt: 1, p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{'{ "id": "STAFF-1001", "name": "Employee name", "phoneNumber": "+919876543210", "address": "Employee address", "language": "ta" }'}</Box></Paper>
+          </Grid>
+          <Grid size={{ xs: 12, lg: 6 }}>
+            <Typography variant="subtitle2" fontWeight={700}>Save patient</Typography>
+            <Typography variant="body2" sx={{ mt: .5 }}>Endpoint: <Box component="code">POST /api/call-service/patients</Box></Typography>
+            <Paper variant="outlined" sx={{ mt: 1, p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{'{ "id": "PATIENT-2001", "name": "Patient name", "phoneNumber": "+919876543210", "address": "Client service address", "language": "en", "careCategory": "Home care", "hub": "Chennai" }'}</Box></Paper>
+          </Grid>
+        </Grid>
+        <Typography variant="caption" color="text.secondary">Staff IDs and patient IDs must be unique within the organization. Phone numbers must use E.164 format; patient phone number is optional. Supported languages are English, Tamil, Malayalam, and Telugu.</Typography>
+      </Stack>
+    </SectionCard>
+
     <SectionCard title="Create an assignment from your platform" subtitle="POST an assignment payload. A 202 response returns the durable session ID; the service schedules both stages and retries asynchronously.">
       <Stack spacing={1.5}>
         <Typography variant="body2">Endpoint: <Box component="code">POST /api/call-service/assignments</Box></Typography>

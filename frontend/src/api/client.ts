@@ -181,6 +181,24 @@ export interface OperationsSummary {
   maxConcurrentCalls: number;
 }
 
+export interface CreateStaffPayload {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  address: string;
+  language: string;
+}
+
+export interface CreatePatientPayload {
+  id: string;
+  name: string;
+  phoneNumber?: string;
+  address: string;
+  language: string;
+  careCategory?: string;
+  hub?: string;
+}
+
 export interface StaffRecord {
   id: string;
   name: string;
@@ -279,8 +297,18 @@ export async function fetchAttendance(params: { search?: string; status?: string
   return response.data;
 }
 
+export async function createStaff(payload: CreateStaffPayload) {
+  const response = await api.post<StaffRecord>("/staff", payload);
+  return response.data;
+}
+
 export async function fetchStaff(params: { search?: string; status?: string; limit?: number } = {}) {
   const response = await api.get<StaffRecord[]>("/staff", { params });
+  return response.data;
+}
+
+export async function createPatient(payload: CreatePatientPayload) {
+  const response = await api.post<PatientRecord>("/patients", payload);
   return response.data;
 }
 
