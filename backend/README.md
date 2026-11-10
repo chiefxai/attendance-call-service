@@ -230,7 +230,7 @@ left for a future workflow extension.
 
 ## Inbound patient calls (Vobiz)
 
-Inbound calls are answered by the same Vertex AI Live audio runtime used for real-time speech, but they are kept separate from attendance sessions. The handler validates the Vobiz request signature, performs an exact organization-scoped patient phone lookup, supplies only the matched patient context to the agent, records the caller and agent audio, and queues transcription after the call. The background worker stores the transcript and applies the configured retention period.
+Inbound calls use the Vertex AI Live audio runtime but have a dedicated patient-support agent persona, independent from the outbound employee attendance prompt. The handler validates the Vobiz request signature, performs an exact organization-scoped patient phone lookup, supplies only the matched patient context to the agent, records the caller and agent audio, and queues transcription after the call. The agent introduces itself as Athulya patient support and never describes an incoming patient call as attendance verification. Configure its name, optional voice override, and additional patient-support instructions with `INBOUND_PATIENT_AGENT_NAME`, `INBOUND_PATIENT_AGENT_VOICE`, and `INBOUND_PATIENT_AGENT_PROMPT`. Without a voice override, it uses the voice associated with the patient's language profile. The background worker stores the transcript and applies the configured retention period.
 
 Configure a Vobiz Voice Application:
 

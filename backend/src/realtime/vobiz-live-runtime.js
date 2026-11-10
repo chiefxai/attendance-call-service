@@ -91,6 +91,25 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     return "en-IN";
   }
 
+  function inboundPatientAgentPrompt(language, dialect, patientContext, matchedByRegisteredPhone) {
+    const name = process.env.INBOUND_PATIENT_AGENT_NAME || "Athulya Patient Care Assistant";
+    const extraInstructions = process.env.INBOUND_PATIENT_AGENT_PROMPT?.trim();
+    return [
+      `You are ${name}, the incoming-call patient support voice assistant for Athulya Senior Care.`,
+      `Speak naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}. Be warm, calm, and concise. Ask one short question at a time, then wait for the caller to answer.`,
+      "You answer patients and their caregivers who called Athulya. You are not making an outbound call.",
+      "Never introduce yourself as an attendance-management agent. Never say that you are calling to verify attendance, check a staff shift, confirm employee arrival or departure, or discuss employee check-in/check-out.",
+      matchedByRegisteredPhone
+        ? "The caller number matches a registered patient contact. Caller ID alone does not prove identity: ask the caller to confirm their name before discussing private care details."
+        : "This call was permitted by the organization's non-patient inbound-call setting. The caller is not matched to a registered patient; ask for their name and reason for calling, and do not imply that they are a registered patient.",
+      "Help with patient care-service questions and capture a concise message or request for the care team. You may ask about the patient's needs, preferred callback time, and safe contact preferences.",
+      "Use only the patient context provided below. Never reveal phone numbers, another patient's information, staff records, or internal attendance data. Do not diagnose, recommend treatment, promise availability, or claim you changed a booking. For immediate danger in India, direct the caller to emergency services at 112.",
+      "When the caller is finished, summarize their request briefly, thank them, say goodbye, and call end_call.",
+      extraInstructions ? `Additional patient-support instructions:\n${extraInstructions}` : "",
+      "Patient context:", JSON.stringify({ patient: patientContext, matchedByRegisteredPhone }),
+    ].filter(Boolean).join("\n\n");
+  }
+
   function languageKey(language) {
     const value = String(language || "en").trim().toLowerCase();
     if (value.startsWith("ta") || value.includes("tamil")) return "ta";
@@ -328,7 +347,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
           ? "A patient record matches the caller's registered phone. Confirm the caller's name before discussing private care details."
           : "The caller phone does not match a registered patient. Ask who is calling and do not assume identity.";
         liveSession.sendClientContent({
-          turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Begin an incoming call in ${language}. ${identity} Ask one short question at a time, listen, and help with the caller's care-service request. Never reveal staff or other patients' details. Do not provide diagnosis or medical advice. For immediate danger direct them to 112 in India.` }] }],
+          turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Answer an incoming patient-support call in ${language}. Introduce yourself as ${process.env.INBOUND_PATIENT_AGENT_NAME || "Athulya Patient Care Assistant"} from Athulya patient support and ask how you can help. Do not mention attendance management or employee check-in/check-out. ${identity} Ask one short question at a time and wait for the caller. Never reveal staff or other patients' details. Do not provide diagnosis or medical advice. For immediate danger direct them to 112 in India.` }] }],
           turnComplete: true,
         });
         console.info(`[vobiz-live] inbound greeting requested call=${token.callId} language=${language} patientMatched=${patientMatched}`);
@@ -421,17 +440,12 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         const languageConfig = agent.languagePrompts?.[languageKey(callContext.language)] || {};
         const dialect = String(languageConfig.dialect || "").trim();
         const languageInstructions = String(languageConfig.systemPrompt || "").trim();
-        const systemPrompt = inboundCall ? [
-          "You are an incoming-call voice assistant for a home-care service.",
-          `Speak naturally in ${language}; ask one brief question at a time and wait for the caller to answer.`,
-          "A phone match is not proof of identity. Confirm the caller's name before discussing personal care details.",
-          "Help with care-service questions and take a concise message. Do not claim to have changed an assignment or schedule.",
-          "Use only the supplied patient context. Never reveal phone numbers, staff records, or other patients' information. If no patient matched, do not assume identity.",
-          "Do not diagnose or give emergency medical advice. For immediate danger direct the caller to 112 in India.",
-          "When the caller is finished, thank them, say goodbye, then call end_call.",
-          "Agent instructions:", agent.systemPrompt || "Listen carefully, be warm, and record the caller's request accurately.",
-          "Patient context:", JSON.stringify({ patient: { id: agentContext.patient?.id || null, name: agentContext.patient?.name || null, address: agentContext.patient?.address || null }, matchedByRegisteredPhone: Boolean(inboundCall.patient?.id) }),
-        ].join("\n\n") : [
+        const systemPrompt = inboundCall ? inboundPatientAgentPrompt(
+          language,
+          String(languageConfig.dialect || "").trim(),
+          { id: agentContext.patient?.id || null, name: agentContext.patient?.name || null, address: agentContext.patient?.address || null },
+          Boolean(inboundCall.patient?.id),
+        ) : [
           "You are an AI attendance caller for home care shifts. You are calling the employee only; never call or ask the patient to speak.",
           "Tell the employee this call is recorded for attendance verification before asking for attendance details.",
           `Speak unmistakably and naturally in ${language}${dialect ? ` using the ${dialect} dialect` : ""}.`,
@@ -455,7 +469,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             outputAudioTranscription: {},
             speechConfig: {
               languageCode: speechLanguageCode(callContext.language),
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice || "Achird" } },
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: (inboundCall ? process.env.INBOUND_PATIENT_AGENT_VOICE : "") || agent.voice || "Achird" } },
             },
             tools: [{ functionDeclarations: [{
               name: "end_call",
