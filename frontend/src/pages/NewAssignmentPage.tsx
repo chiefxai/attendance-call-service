@@ -316,7 +316,7 @@ export function NewAssignmentPage() {
               <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient ID" value={form.patientId} onChange={update("patientId")} required readOnly={Boolean(selectedPatient)} /></Grid>
               <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient name" value={form.patientName} onChange={update("patientName")} required readOnly={Boolean(selectedPatient)} /></Grid>
               <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient mobile number (optional)" value={form.patientPhone} readOnly={Boolean(selectedPatient)} helperText={patientPhoneError || (selectedPatient ? "Stored number is locked. Edit it in Patient records if needed." : "If provided, enter 10 digits; 91 or +91 is optional. The patient is not called.")} onChange={(value) => { setPatientPhoneError(""); update("patientPhone")(value); }} error={Boolean(patientPhoneError)}  onBlur={() => { const input = form.patientPhone.trim(); if (!input) { setPatientPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPatientPhoneError(INDIAN_MOBILE_ERROR); else { setPatientPhoneError(""); setForm((current) => ({ ...current, patientPhone: normalized })); } }} /></Grid>
-              <Grid size={12}><FormField label="Patient address" value={form.patientAddress} onChange={update("patientAddress")} required multiline rows={2} /></Grid>
+              <Grid size={12}><AddressFields required value={form.patientAddress} onChange={update("patientAddress")} /></Grid>
             </Grid>
           </CardContent></Card>
           <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={2}>
