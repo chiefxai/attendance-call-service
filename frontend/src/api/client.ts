@@ -99,6 +99,7 @@ export interface AssignmentPayload {
   language: string;
   scheduledStartAt: string;
   scheduledEndAt: string;
+  metadata?: { timeZone?: string; [key: string]: unknown };
   employee: { id: string; name: string; phoneNumber: string; address?: string };
   patient: { id: string; name: string; address: string; phoneNumber?: string };
 }
