@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { Link as RouterLink } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, Chip, CircularProgress, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
 import CallRoundedIcon from "@mui/icons-material/CallRounded";
@@ -9,10 +9,9 @@ import PhoneMissedRoundedIcon from "@mui/icons-material/PhoneMissedRounded";
 import TuneRoundedIcon from "@mui/icons-material/TuneRounded";
 import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
-import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import { AxiosError } from "axios";
-import { createAgent, createAssignment, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AgentLanguagePrompt, type AssignmentPayload } from "../api/client";
+import { createAgent, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AgentLanguagePrompt } from "../api/client";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 
 const languageOptions = [{ code: "ta", name: "Tamil" }, { code: "en", name: "English" }, { code: "ml", name: "Malayalam" }, { code: "te", name: "Telugu" }];
@@ -34,14 +33,10 @@ function makeLanguagePrompt(language: string, dialect: string) {
   return `Speak naturally in ${name} using the ${dialect || defaultLanguagePrompts[language]?.dialect || name} dialect. Use locally familiar expressions and colloquial phrasing suited to a respectful attendance call. Keep sentences short and phone-friendly, ask one clear question at a time, and avoid expressions that could confuse or offend.`;
 }
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const localInputValue = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const errorText = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 
 export function CallCenterPage() {
-  const navigate = useNavigate();
   const [agentId, setAgentId] = useState("");
-  const [testForm, setTestForm] = useState({ employeeName: "", employeePhone: "", patientName: "", patientAddress: "", language: "ta", checkoutAt: localInputValue(new Date(Date.now() + 60 * 60_000)) });
-  const [testSessionId, setTestSessionId] = useState("");
   const [agentName, setAgentName] = useState("");
   const [agentLanguage, setAgentLanguage] = useState("ta");
   const [agentVoice, setAgentVoice] = useState("Achird");
@@ -96,33 +91,6 @@ export function CallCenterPage() {
       });
     }
   };
-  const testMutation = useMutation({
-    mutationFn: createAssignment,
-    onSuccess: async (result) => {
-      setTestSessionId(result.sessionId);
-      await queryClient.invalidateQueries({ queryKey: ["attendance"] });
-      await queryClient.invalidateQueries({ queryKey: ["operations-summary"] });
-    },
-  });
-  const testError = testMutation.error instanceof AxiosError ? testMutation.error.response?.data?.error || testMutation.error.message : testMutation.error?.message;
-  const updateTest = (key: keyof typeof testForm) => (value: string) => setTestForm((current) => ({ ...current, [key]: value }));
-  const submitTestCall = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const now = new Date();
-    const checkout = new Date(testForm.checkoutAt);
-    if (!selectedAgent?.active || !Number.isFinite(checkout.getTime()) || checkout <= now) return;
-    const nonce = crypto.randomUUID();
-    const payload: AssignmentPayload = {
-      assignmentId: "TEST-" + nonce,
-      agentId: selectedAgent.id,
-      language: testForm.language,
-      scheduledStartAt: new Date(Date.now() + 2_000).toISOString(),
-      scheduledEndAt: checkout.toISOString(),
-      employee: { id: "TEST-STAFF-" + nonce, name: testForm.employeeName.trim(), phoneNumber: testForm.employeePhone.trim() },
-      patient: { id: "TEST-PATIENT-" + nonce, name: testForm.patientName.trim(), address: testForm.patientAddress.trim() },
-    };
-    testMutation.mutate(payload);
-  };
   const errorMessage = mutation.error instanceof AxiosError ? mutation.error.response?.data?.error || mutation.error.message : mutation.error?.message;
 
   const activeCalls = calls.data?.activeCalls || [];
@@ -137,24 +105,6 @@ export function CallCenterPage() {
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Completed calls" value={summary.data?.completedCalls.toLocaleString() ?? "—"} detail="Terminal provider status" icon={<CheckCircleRoundedIcon />} tint="#e9efff" accent="#1557c0" /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Calls waiting" value={summary.data?.callsWaiting.toLocaleString() ?? "—"} detail="Durable retry and schedule queue" icon={<PhoneMissedRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
     </Grid>
-    <SectionCard title="Test a live call" subtitle="Start a real check-in call to the employee and schedule the paired check-out call in this same session.">
-      <Stack spacing={1.5}>
-        <Alert severity="warning">This places a real outbound Vobiz call and may incur telephony charges. Use a number you control. The test assignment remains open until check-out is completed or reaches its retry limit.</Alert>
-        {testMutation.isError && <Alert severity="error">Could not start test calls: {testError}</Alert>}
-        {testSessionId && <Alert severity="success" action={<Button color="inherit" size="small" onClick={() => navigate("/sessions/" + testSessionId)}>View session</Button>}>Test session created. The check-in call is queued now and the check-out call is set for the selected time.</Alert>}
-        <Box component="form" onSubmit={submitTestCall}>
-          <Grid container spacing={1.5}>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField size="small" fullWidth required label="Employee name" value={testForm.employeeName} onChange={(event) => updateTest("employeeName")(event.target.value)} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField size="small" fullWidth required label="Employee phone (E.164)" placeholder="+919876543210" value={testForm.employeePhone} onChange={(event) => updateTest("employeePhone")(event.target.value)} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField size="small" fullWidth required label="Patient name for verification" value={testForm.patientName} onChange={(event) => updateTest("patientName")(event.target.value)} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField size="small" fullWidth required label="Patient service address" value={testForm.patientAddress} onChange={(event) => updateTest("patientAddress")(event.target.value)} /></Grid>
-            <Grid size={{ xs: 12, sm: 4 }}><TextField select size="small" fullWidth label="Call language" value={testForm.language} onChange={(event) => updateTest("language")(event.target.value)}>{languageOptions.map((option) => <MenuItem key={option.code} value={option.code}>{option.name}</MenuItem>)}</TextField></Grid>
-            <Grid size={{ xs: 12, sm: 4 }}><TextField type="datetime-local" size="small" fullWidth required label="Check-out call time" value={testForm.checkoutAt} onChange={(event) => updateTest("checkoutAt")(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 4 }}><Button fullWidth type="submit" variant="contained" startIcon={testMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <PlayArrowRoundedIcon />} disabled={testMutation.isPending || !selectedAgent?.active || !testForm.employeeName.trim() || !testForm.employeePhone.trim() || !testForm.patientName.trim() || !testForm.patientAddress.trim() || new Date(testForm.checkoutAt) <= new Date()} sx={{ height: 40 }}>{testMutation.isPending ? "Scheduling…" : "Start test call"}</Button></Grid>
-          </Grid>
-        </Box>
-      </Stack>
-    </SectionCard>
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, lg: 7 }}><SectionCard title="Active outbound calls" subtitle="Live provider attempts currently ringing or connected." action={<Chip size="small" label={`${activeCalls.length} active`} color={activeCalls.length ? "success" : "default"} variant="outlined" />}>
         {calls.isLoading && <LinearProgress />}
