@@ -1,6 +1,7 @@
 "use strict";
 
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
+const { createPostCallTools } = require("../../agents/post-call-tools");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -336,7 +337,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     }
   }
 
-  return {
+  const { handlers: postCallToolHandlers } = createPostCallTools({
     place_call: placeCall,
     process_call_result: processCallResult,
     wait_for_recording: waitForRecording,
@@ -345,7 +346,12 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     evaluate_attendance: evaluateAttendance,
     evaluate_session: evaluateSession,
     deliver_attendance: deliverAttendance,
-  };
+  });
+
+  // The async job queue dispatches these LangChain tools in its fixed,
+  // deterministic order. The model only extracts transcript facts; it does
+  // not receive authority to schedule, complete, or deliver sessions.
+  return postCallToolHandlers;
 }
 
 module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime, inferRequestedCallbackAt };
