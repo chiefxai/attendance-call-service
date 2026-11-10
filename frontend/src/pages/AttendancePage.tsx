@@ -33,7 +33,12 @@ function delayDetail(row: AttendanceRecord) {
     check_out_not_confirmed: "Departure not confirmed", callback_time_unclear: "Callback time unclear",
   };
   const reason = delayed.reason ? reasonLabels[delayed.reason] || delayed.reason.replaceAll("_", " ") : delayed.data.status.replaceAll("_", " ");
-  const nextCall = delayed.data.nextCallAt ? ` · Next call ${dateTime(delayed.data.nextCallAt)}` : "";
+  const callAt = delayed.data.nextCallAt ? new Date(delayed.data.nextCallAt) : null;
+  const nextCall = callAt
+    ? callAt.getTime() <= Date.now()
+      ? ` · Retry overdue since ${dateTime(callAt.toISOString())}; being rescheduled`
+      : ` · Next call ${dateTime(callAt.toISOString())}`
+    : "";
   return `${delayed.label} · ${reason}${nextCall}`;
 }
 

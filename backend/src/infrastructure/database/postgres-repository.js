@@ -334,6 +334,44 @@ class PostgresRepository {
     }
     return items.slice(0, Math.min(Number(limit) || 100, 500));
   }
+  async listDueFollowUpCalls(limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const sql = [
+      "WITH followups AS (",
+      "SELECT id AS session_id, organization_id, 'check_in' AS stage, active_context->'checkIn' AS stage_context FROM attendance_sessions WHERE check_in_status='follow_up' AND session_status <> 'completed'",
+      "UNION ALL",
+      "SELECT id AS session_id, organization_id, 'check_out' AS stage, active_context->'checkOut' AS stage_context FROM attendance_sessions WHERE check_out_status='follow_up' AND session_status <> 'completed'",
+      ")",
+      "SELECT f.session_id, f.organization_id, f.stage, f.stage_context->>'reason' AS reason, f.stage_context->>'nextCallAt' AS due_at,",
+      "COALESCE((SELECT MAX(a.attempt_number) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage),0)::int AS max_call_attempt,",
+      "COALESCE((SELECT MAX((j.payload->>'attemptNumber')::int) FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage),0)::int AS max_job_attempt,",
+      "(SELECT j.id FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_job_id,",
+      "(SELECT (j.payload->>'attemptNumber')::int FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_attempt_number,",
+      "EXISTS(SELECT 1 FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='running') AS has_running_job,",
+      "(SELECT COALESCE(a.consecutive_no_answer_before,0)::int FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_no_answer_before,",
+      "(SELECT LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_attempt_status",
+      "FROM followups f",
+      "WHERE NULLIF(f.stage_context->>'nextCallAt','') IS NOT NULL AND (f.stage_context->>'nextCallAt')::timestamptz <= NOW()",
+      "AND NOT EXISTS(SELECT 1 FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage AND a.ended_at IS NULL AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('placing','ringing','answered','inprogress'))",
+      "ORDER BY (f.stage_context->>'nextCallAt')::timestamptz LIMIT $1",
+    ].join(" ");
+    const { rows } = await this.pool.query(sql, [safeLimit]);
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      organizationId: row.organization_id,
+      stage: row.stage,
+      reason: row.reason,
+      dueAt: row.due_at,
+      maxCallAttempt: Number(row.max_call_attempt) || 0,
+      maxJobAttempt: Number(row.max_job_attempt) || 0,
+      queuedJobId: row.queued_job_id || null,
+      queuedAttemptNumber: row.queued_attempt_number == null ? null : Number(row.queued_attempt_number),
+      hasRunningJob: row.has_running_job === true,
+      lastNoAnswerBefore: Number(row.last_no_answer_before) || 0,
+      lastAttemptStatus: row.last_attempt_status || null,
+    }));
+  }
+
   async listAttendanceLedger(organizationId, { search = "", limit = 100 } = {}) {
     const sessions = await this.listAttendanceSessions(organizationId, { search, status: "completed", limit });
     return sessions.filter((session) => session.checkIn.status === "confirmed" && session.checkOut.status === "confirmed");

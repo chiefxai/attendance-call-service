@@ -42,6 +42,15 @@ class PostgresJobQueue {
     return result.rows[0];
   }
 
+  async reschedule(jobId, runAt = new Date()) {
+    const result = await this.pool.query(
+      `UPDATE attendance_jobs SET run_at=LEAST(run_at,$2), updated_at=NOW()
+       WHERE id=$1 AND status='queued' RETURNING id`,
+      [jobId, runAt],
+    );
+    return result.rowCount === 1;
+  }
+
   async claim(workerId) {
     const client = await this.pool.connect();
     try {
