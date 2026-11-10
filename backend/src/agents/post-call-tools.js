@@ -41,6 +41,18 @@ const operationSchemas = [
     schema: z.object({ inboundCallId: z.string(), organizationId: z.string().optional() }),
   },
   {
+    key: "call_next_appointment_staff",
+    name: "call_next_appointment_staff",
+    description: "Call the next suggested staff member to confirm availability for a patient-requested activity.",
+    schema: z.object({ inboundCallId: z.string(), organizationId: z.string().optional(), candidateIndex: z.number().int().nonnegative().optional() }),
+  },
+  {
+    key: "process_appointment_call",
+    name: "process_appointment_call",
+    description: "Transcribe and classify a staff availability call, continue to the next candidate when appropriate, or create the confirmed attendance schedule.",
+    schema: z.object({ appointmentCallId: z.string() }),
+  },
+  {
     key: "extract_intent",
     name: "extract_attendance_details",
     description: "Extract employee intent, verification facts, and reported attendance time from the saved transcript.",

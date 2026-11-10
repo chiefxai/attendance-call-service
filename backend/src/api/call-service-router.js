@@ -256,7 +256,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     try { res.json(await repository.getCallCenterData(org(req))); } catch (error) { fail(res, error); }
   });
 
-  function serializeIncomingCall(call) {
+  function serializeIncomingCall(call, appointmentCalls = []) {
     const hasRecording = Boolean(call.recordingObjectKey);
     const hasTranscript = Boolean(call.transcript?.trim());
     const terminalStatus = ["failed", "no_answer", "canceled", "cancelled"].includes(call.status);
@@ -274,6 +274,10 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       enquiryAnalysisStatus: call.enquiryAnalysisStatus || "pending",
       enquiryAnalysis: call.enquiryAnalysis || {},
       staffSuggestions: call.staffSuggestions || [],
+      bookingStatus: call.bookingStatus || "not_started",
+      bookingStaff: call.bookingStaff || null,
+      bookingScheduleSessionId: call.bookingScheduleSessionId || null,
+      appointmentCalls,
     };
   }
 
@@ -323,7 +327,9 @@ router.get("/activities", async (req, res) => {
     router.get("/incoming-calls", async (req, res) => {
     try {
       const calls = await repository.listInboundCalls(org(req), req.query.limit || 100);
-      res.json(calls.map(serializeIncomingCall));
+      res.json(await Promise.all(calls.map(async (call) => serializeIncomingCall(
+        call, await repository.listAppointmentCallAttempts(call.id, org(req)),
+      ))));
     } catch (error) { fail(res, error); }
   });
 
@@ -331,7 +337,7 @@ router.get("/activities", async (req, res) => {
     try {
       const call = await repository.getInboundCall(req.params.id, org(req));
       if (!call) return res.status(404).json({ error: "Incoming call not found" });
-      res.json(serializeIncomingCall(call));
+      res.json(serializeIncomingCall(call, await repository.listAppointmentCallAttempts(call.id, org(req))));
     } catch (error) { fail(res, error); }
   });
 
@@ -356,6 +362,21 @@ router.get("/activities", async (req, res) => {
       const audio = await recordings.getObjectBuffer(call.recordingObjectKey);
       res.set("Content-Type", call.recordingContentType || "audio/wav");
       res.set("Content-Disposition", `inline; filename="${call.id}.wav"`);
+      res.set("Cache-Control", "private, no-store");
+      res.send(audio);
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/incoming-calls/:id/appointment-attempts/:attemptId/recording", async (req, res) => {
+    try {
+      const call = await repository.getInboundCall(req.params.id, org(req));
+      const attempt = await repository.getAppointmentCallAttempt(req.params.attemptId);
+      if (!call || !attempt || attempt.inboundCallId !== call.id || attempt.organizationId !== org(req) || !attempt.recordingObjectKey) {
+        return res.status(404).json({ error: "Appointment call recording not found" });
+      }
+      const audio = await recordings.getObjectBuffer(attempt.recordingObjectKey);
+      res.set("Content-Type", attempt.recordingContentType || "audio/wav");
+      res.set("Content-Disposition", `inline; filename="appointment-${attempt.id}.wav"`);
       res.set("Cache-Control", "private, no-store");
       res.send(audio);
     } catch (error) { fail(res, error); }
@@ -630,7 +651,7 @@ router.get("/activities", async (req, res) => {
         rawEvent: req.body || {},
       });
       const status = String(req.body?.CallStatus || req.body?.status || "").toLowerCase().replace(/[\s_-]+/g, "");
-      const terminal = Boolean(req.body?.EndTime || ["completed", "noanswer", "busy", "failed", "canceled", "cancelled"].includes(status));
+      const terminal = Boolean(req.body?.EndTime || ["completed", "noanswer", "busy", "failed", "timeout", "canceled", "cancelled"].includes(status));
       if (result?.sessionId && terminal) {
         if (["completed", "answered"].includes(status)) {
           const session = await repository.getAttendanceSession(result.sessionId);
@@ -646,6 +667,9 @@ router.get("/activities", async (req, res) => {
         if (result.recordingUrl || result.recordingObjectKey) {
           await queue.enqueue("transcribe_call", { callAttemptId: result.id }, { idempotencyKey: `transcribe:${result.id}` });
         }
+      }
+      if (result?.appointmentCall && terminal && ["noanswer", "busy", "failed", "timeout", "canceled", "cancelled"].includes(status)) {
+        await queue.enqueue("process_appointment_call", { appointmentCallId: result.id }, { idempotencyKey: `appointment-result:${result.id}` });
       }
       res.status(result ? 200 : 404).json({ received: Boolean(result) });
     } catch (error) { fail(res, error); }

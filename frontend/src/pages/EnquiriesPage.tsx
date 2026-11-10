@@ -8,7 +8,7 @@ import {
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
 import { AxiosError } from "axios";
-import { createPatient, fetchIncomingCalls, fetchPatients, fetchStaff, incomingCallRecordingUrl, resolveIncomingEnquiry, type CreatePatientPayload, type IncomingCall, type PatientRecord } from "../api/client";
+import { appointmentCallRecordingUrl, createPatient, fetchIncomingCalls, fetchPatients, fetchStaff, incomingCallRecordingUrl, resolveIncomingEnquiry, type CreatePatientPayload, type IncomingCall, type PatientRecord } from "../api/client";
 import { PageHeader } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
@@ -52,7 +52,7 @@ export function EnquiriesPage() {
   const incomingCalls = useQuery({
     queryKey: ["incoming-calls"],
     queryFn: () => fetchIncomingCalls(),
-    refetchInterval: (query) => query.state.data?.some((call) => call.enquiryStatus === "processing") ? 4000 : 15000,
+    refetchInterval: (query) => query.state.data?.some((call) => call.enquiryStatus === "processing" || call.bookingStatus === "calling") ? 4000 : 15000,
   });
   const staffDirectory = useQuery({ queryKey: ["staff", "enquiry-resolution"], queryFn: () => fetchStaff({ limit: 500 }) });
   const resolveMutation = useMutation({
@@ -360,8 +360,9 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
           <TableCell sx={{ minWidth: 240 }}>
             <Stack spacing={1} alignItems="flex-start">
               <Chip size="small" color={statusColor(call.enquiryStatus)} label={statusLabel(call.enquiryStatus)} />
+              {call.bookingStatus !== "not_started" && <Chip size="small" variant="outlined" label={`Staff booking · ${call.bookingStatus.replaceAll("_", " ")}`} />}
               {call.enquiryStatus === "suggestion" && call.staffSuggestions.length > 0 && <Stack spacing={.5} sx={{ width: "100%" }}>
-                <Typography variant="caption" color="text.secondary">Suggested staff · contact to confirm</Typography>
+                <Typography variant="caption" color="text.secondary">Staff availability calls run in suggestion order</Typography>
                 {call.staffSuggestions.slice(0, 10).map((staff, index) => <Stack key={staff.id} direction="row" spacing={.75} alignItems="center" flexWrap="wrap">
                   <Typography variant="body2">{index + 1}. {staff.name}</Typography>
                   {staff.phoneNumber && <Button size="small" component="a" href={`tel:${staff.phoneNumber}`} sx={{ minWidth: 0, py: 0, px: .5 }}>{staff.phoneNumber}</Button>}
@@ -371,10 +372,12 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
               {call.enquiryStatus === "resolved" && call.resolvedStaff && <Typography variant="body2">Assigned: {call.resolvedStaff.name}</Typography>}
               {call.enquiryStatus === "need_review" && <Typography variant="caption" color="text.secondary">Human review required</Typography>}
               {call.enquiryStatus === "shortage" && <Typography variant="caption" color="text.secondary">Staff shortage · human review and manual assignment required</Typography>}
-              {call.enquiryStatus === "suggestion" && <Typography variant="caption" color="text.secondary">Human to call and confirm before assignment</Typography>}
+              {call.bookingStatus === "not_answered" && <Typography variant="caption" color="warning.main">All suggested staff calls were unanswered or unavailable · human follow-up required</Typography>}
+              {call.bookingStatus === "scheduled" && call.bookingStaff && <Typography variant="caption" color="success.main">Confirmed with {call.bookingStaff.name}</Typography>}
+              {call.bookingStatus === "calling" && <Typography variant="caption" color="text.secondary">Calling suggested staff to confirm availability…</Typography>}
               {call.enquiryStatus === "resolved" && <Typography variant="caption" color="text.secondary">{call.resolvedStaff?.phoneNumber || ""}</Typography>}
               <Button variant="text" size="small" onClick={() => setDetailCall(call)}>Details</Button>
-              {!["processing", "resolved"].includes(call.enquiryStatus) && <Button variant="outlined" size="small" onClick={() => onResolve(call)}>{call.enquiryStatus === "suggestion" ? "Confirm & assign" : call.enquiryStatus === "shortage" ? "Review shortage & assign" : "Review & assign"}</Button>}
+              {!["processing", "resolved"].includes(call.enquiryStatus) && call.bookingStatus !== "calling" && <Button variant="outlined" size="small" onClick={() => onResolve(call)}>{call.bookingStatus === "not_answered" || call.bookingStatus === "needs_review" ? "Review & assign" : call.enquiryStatus === "suggestion" ? "Confirm & assign" : call.enquiryStatus === "shortage" ? "Review shortage & assign" : "Review & assign"}</Button>}
             </Stack>
           </TableCell>
         </TableRow>)}</TableBody>
@@ -391,6 +394,7 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
               <Typography variant="body2" color="text.secondary">{detailCall.fromNumber} · {formatTime(detailCall.startedAt)}</Typography>
             </Box>
             <Chip size="small" color={statusColor(detailCall.enquiryStatus)} label={statusLabel(detailCall.enquiryStatus)} />
+            {detailCall.bookingStatus !== "not_started" && <Chip size="small" variant="outlined" label={`Staff booking · ${detailCall.bookingStatus.replaceAll("_", " ")}`} />}
           </Stack>
         </DialogTitle>
         <DialogContent dividers>
@@ -429,6 +433,21 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
                 <Typography variant="body2" sx={{ flex: 1 }}>{staff.name} · {locationLabel(staff.locationMatch)}{staff.address ? ` · ${staff.address}` : ""}</Typography>
                 {staff.phoneNumber && <Button component="a" href={`tel:${staff.phoneNumber}`} size="small">Call {staff.phoneNumber}</Button>}
               </Stack>)}</Stack> : <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>No staff suggestions available.</Typography>}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Appointment availability calls</Typography>
+              {detailCall.appointmentCalls.length ? <Stack spacing={1} sx={{ mt: .75 }}>
+                {detailCall.appointmentCalls.map((attempt, index) => <Card key={attempt.id} variant="outlined"><CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }}>
+                    <Typography variant="body2" fontWeight={700}>{index + 1}. {attempt.staff?.name || "Suggested staff"} · {attempt.status.replaceAll("_", " ")}</Typography>
+                    <Typography variant="caption" color="text.secondary">{attempt.durationSeconds != null ? `${attempt.durationSeconds}s` : "Duration unavailable"}</Typography>
+                  </Stack>
+                  {attempt.transcript && <Typography variant="body2" sx={{ mt: 1, whiteSpace: "pre-wrap" }}>{attempt.transcript}</Typography>}
+                  {attempt.recordingObjectKey && <audio controls preload="none" src={appointmentCallRecordingUrl(detailCall.id, attempt.id)} style={{ width: "100%", marginTop: 8 }} />}
+                </CardContent></Card>)}
+              </Stack> : <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>No staff availability calls have been placed.</Typography>}
+              {detailCall.bookingStatus === "not_answered" && <Alert severity="warning" sx={{ mt: 1 }}>No suggested staff member confirmed the appointment. Operations must review and contact the patient.</Alert>}
+              {detailCall.bookingScheduleSessionId && <Alert severity="success" sx={{ mt: 1 }}>Attendance session created: {detailCall.bookingScheduleSessionId}. Check-in and check-out calls are scheduled by the attendance workflow.</Alert>}
             </Box>
             <Box>
               <Typography variant="subtitle2" fontWeight={700}>Recording</Typography>

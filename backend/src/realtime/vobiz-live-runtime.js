@@ -41,9 +41,9 @@ function xmlEscape(value) {
   return String(value).replace(/[<>&"']/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[char]);
 }
 
-function createToken({ callId, sessionId, callAttemptId, stage, direction, inboundCallId, organizationId }, secret, ttlSeconds = 600) {
+function createToken({ callId, sessionId, callAttemptId, stage, direction, inboundCallId, appointmentCallId, organizationId }, secret, ttlSeconds = 600) {
   if (!secret) throw new Error("VOBIZ_STREAM_SECRET or VOBIZ_AUTH_TOKEN must be configured");
-  const payload = Buffer.from(JSON.stringify({ callId, sessionId, callAttemptId, stage, direction, inboundCallId, organizationId, exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ callId, sessionId, callAttemptId, stage, direction, inboundCallId, appointmentCallId, organizationId, exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString("base64url");
   const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
@@ -57,8 +57,9 @@ function verifyToken(token, secret) {
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     const validInbound = parsed.direction === "inbound" && parsed.inboundCallId && parsed.organizationId;
+    const validAppointment = parsed.appointmentCallId;
     const validOutbound = parsed.sessionId && parsed.callAttemptId && parsed.stage;
-    if (!parsed.callId || (!validInbound && !validOutbound) || parsed.exp < Date.now() / 1000) return null;
+    if (!parsed.callId || (!validInbound && !validOutbound && !validAppointment) || parsed.exp < Date.now() / 1000) return null;
     return parsed;
   } catch { return null; }
 }
@@ -89,6 +90,14 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     if (value.startsWith("ml")) return "ml-IN";
     if (value.startsWith("te")) return "te-IN";
     return "en-IN";
+  }
+
+  function formatLocalAppointmentTime(value) {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return String(value || "the requested time");
+    return new Intl.DateTimeFormat("en-IN", {
+      timeZone: process.env.APP_TIMEZONE || "Asia/Kolkata", dateStyle: "full", timeStyle: "short",
+    }).format(date);
   }
 
   function inboundGreetingPeriod() {
@@ -139,6 +148,22 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       }
       console.info("[vobiz-inbound] Answer URL request signature verified");
       const callId = req.body?.CallUUID || req.query?.CallUUID || req.body?.call_uuid || req.query?.call_uuid;
+      const appointmentCallId = req.query?.appointmentCallId || req.body?.appointmentCallId;
+      if (callId && appointmentCallId) {
+        const appointmentCall = await repository.getAppointmentCallContext(appointmentCallId);
+        if (!appointmentCall || (appointmentCall.providerCallId && appointmentCall.providerCallId !== String(callId))) {
+          return res.status(403).send("Call context does not match the appointment booking");
+        }
+        if (!appointmentCall.providerCallId) await repository.attachAppointmentProviderCallId(appointmentCallId, String(callId));
+        const token = createToken({ callId: String(callId), appointmentCallId }, getSecret());
+        const publicBase = process.env.PUBLIC_BASE_URL ? new URL(process.env.PUBLIC_BASE_URL)
+          : new URL(`${req.get("x-forwarded-proto") || req.protocol}://${req.get("x-forwarded-host") || req.get("host")}`);
+        const streamUrl = new URL(mediaPath, publicBase);
+        streamUrl.protocol = publicBase.protocol === "https:" ? "wss:" : "ws:";
+        streamUrl.searchParams.set("token", token);
+        res.set("Content-Type", "text/xml; charset=utf-8");
+        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response><Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-l16;rate=16000">${xmlEscape(streamUrl.toString())}</Stream></Response>`);
+      }
       const sessionId = req.query?.sessionId || req.body?.sessionId;
       const callAttemptId = req.query?.callAttemptId || req.body?.callAttemptId;
       const stage = req.query?.stage || req.body?.stage;
@@ -248,6 +273,21 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       });
       return true;
     }
+    if (token.appointmentCallId) {
+      repository.getAppointmentCallContext(token.appointmentCallId).then(async (appointmentCall) => {
+        if (!appointmentCall || appointmentCall.providerCallId !== token.callId) {
+          socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); socket.destroy(); return;
+        }
+        const claimed = await repository.claimAppointmentCallStream(token.appointmentCallId);
+        if (!claimed) { socket.write("HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n"); socket.destroy(); return; }
+        activeCalls.add(token.callId);
+        wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request, { token, appointmentCall }));
+      }).catch((error) => {
+        console.error("[appointment-booking] media context lookup failed", error.message);
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n"); socket.destroy();
+      });
+      return true;
+    }
     Promise.all([
       repository.getAttendanceSession(token.sessionId),
       repository.getCallAttempt(token.callAttemptId),
@@ -280,8 +320,8 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
   }
 
   wss.on("connection", (vobizWs, _request, context) => {
-    const { token, session, attempt, inboundCall } = context;
-    const callContext = inboundCall || session;
+    const { token, session, attempt, inboundCall, appointmentCall } = context;
+    const callContext = inboundCall || session || appointmentCall;
     const inboundRecorderPromise = inboundCall ? createInboundPcmRecorder() : Promise.resolve(null);
     let inboundRecorder = null;
     const pendingInboundAudio = [];
@@ -308,6 +348,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     let pendingHangupCheckpoint = null;
     let hangupRequested = false;
     let hangupScheduled = false;
+    let appointmentNoResponseTimer;
     let callerResponseObserved = false;
     const playedCheckpoints = new Set();
     const pendingAudio = [];
@@ -353,7 +394,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     function sendGreeting() {
       if (greetingSent || !setupComplete || !liveSession || !active) return;
       greetingSent = true;
-      const language = displayLanguage(callContext.language);
+      const language = displayLanguage(appointmentCall?.staff?.language || callContext.language);
       if (inboundCall) {
         const patientMatched = Boolean(inboundCall.patient?.id);
         const greetingPeriod = inboundGreetingPeriod();
@@ -365,6 +406,25 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
           turnComplete: true,
         });
         console.info(`[vobiz-live] inbound greeting requested call=${token.callId} language=${language} patientMatched=${patientMatched}`);
+        return;
+      }
+      if (appointmentCall) {
+        const startAt = appointmentCall.analysis?.requestedStartAt;
+        const localStart = formatLocalAppointmentTime(startAt);
+        const language = displayLanguage(appointmentCall.staff?.language || appointmentCall.language);
+        liveSession.sendClientContent({
+          turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] You are Athulya Senior Care's appointment coordination caller speaking to the care staff member ${appointmentCall.staff?.name || ""}. Speak in ${language}, naturally and briefly. Explain that a patient requested ${appointmentCall.analysis?.activityName || "care service"} at ${localStart}. Ask if they are available and willing to take this assignment at that exact time. Wait for the staff response. If unavailable, acknowledge and end politely. If available, repeat the activity and exact local date/time and ask for explicit final confirmation. Do not imply it is booked until the staff member explicitly confirms. Never ask attendance check-in/check-out questions. After a clear confirmation or decline, thank them, say goodbye, and call end_call.` }] }],
+          turnComplete: true,
+        });
+        console.info(`[vobiz-live] appointment availability greeting requested call=${token.callId} language=${language}`);
+        appointmentNoResponseTimer = setTimeout(async () => {
+          if (!active || callerResponseObserved) return;
+          console.warn(`[appointment-booking] staff did not respond after answer call=${token.callId}`);
+          await repository.markAppointmentCallNoAnswer(appointmentCall.id).catch(() => {});
+          await queue.enqueue("process_appointment_call", { appointmentCallId: appointmentCall.id }, { idempotencyKey: `appointment-result:${appointmentCall.id}` }).catch((error) => console.error("[appointment-booking] no-response continuation failed", error.message));
+          await vobiz.hangupCall(token.callId).catch((error) => console.error(`[appointment-booking] no-response hangup failed call=${token.callId}`, error.message));
+        }, Math.max(10_000, Number(process.env.APPOINTMENT_STAFF_RESPONSE_TIMEOUT_MS) || 25_000));
+        appointmentNoResponseTimer.unref?.();
         return;
       }
       const greeting = token.stage === "check_in"
@@ -417,7 +477,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         return;
       }
       const minimumResponses = token.stage === "check_in" ? 5 : 3;
-      if (!inboundCall && employeeResponseTurns < minimumResponses) {
+      if (!inboundCall && !appointmentCall && employeeResponseTurns < minimumResponses) {
         console.warn(`[vobiz-live] rejected incomplete end_call call=${token.callId} stage=${token.stage} employeeResponseTurns=${employeeResponseTurns}/${minimumResponses} transcriptChars=${employeeTranscriptChars}`);
         try {
           await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: false, reason: "The verification checklist is incomplete. Continue asking one question at a time and wait for the employee answer." } } }] });
@@ -444,18 +504,25 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       (async () => {
         const [agent, agentContext, careActivities] = await Promise.all([
           repository.getAgent(callContext.organizationId, callContext.agentId),
-          inboundCall
-            ? Promise.resolve({ patient: inboundCall.patient || {}, caller: { matchedPatient: Boolean(inboundCall.patient?.id) } })
+          inboundCall || appointmentCall
+            ? Promise.resolve({ patient: inboundCall?.patient || appointmentCall?.patient || {}, caller: { matchedPatient: Boolean(inboundCall?.patient?.id) } })
             : repository.getAgentSessionContext(session.id, token.stage),
           inboundCall ? repository.listCareActivities(callContext.organizationId) : Promise.resolve([]),
         ]);
         if (!agent?.active) throw new Error("Agent is missing or inactive");
         const client = await clientForOrg(callContext.organizationId);
-        const language = displayLanguage(callContext.language);
-        const languageConfig = agent.languagePrompts?.[languageKey(callContext.language)] || {};
+        const activeLanguage = appointmentCall?.staff?.language || callContext.language;
+        const language = displayLanguage(activeLanguage);
+        const languageConfig = agent.languagePrompts?.[languageKey(activeLanguage)] || {};
         const dialect = String(languageConfig.dialect || "").trim();
         const languageInstructions = String(languageConfig.systemPrompt || "").trim();
-        const systemPrompt = inboundCall ? inboundPatientAgentPrompt(
+        const systemPrompt = appointmentCall ? [
+          `You are ${process.env.APPOINTMENT_BOOKING_AGENT_NAME || "Athulya Appointment Coordinator"}, a separate appointment coordination voice agent calling staff to confirm a requested care duty.`,
+          `Speak naturally in ${language}${dialect ? ` using ${dialect}` : ""}. The schedule uses UTC timestamps; convert and speak them in ${process.env.APP_TIMEZONE || "Asia/Kolkata"} local time. Ask whether the staff member is available and willing to take the assignment at the stated exact time. If yes, explicitly confirm the activity and time once more and obtain a clear final yes. If no, acknowledge the decline. Never claim availability or booking without the staff member's explicit confirmation. Do not ask attendance check-in/check-out questions. Ask one short question at a time and wait for the answer. End only after the staff member has responded and the availability outcome is clear.`,
+          "Additional appointment agent instructions:", process.env.APPOINTMENT_BOOKING_AGENT_PROMPT?.trim() || "",
+          `Language instructions (${language}${dialect ? `, ${dialect}` : ""}):`, languageInstructions,
+          "Appointment context:", JSON.stringify({ staff: appointmentCall.staff?.name, activity: appointmentCall.analysis?.activityName, requestedStartAt: appointmentCall.analysis?.requestedStartAt, durationMinutes: appointmentCall.analysis?.durationMinutes, patientDistrict: String(appointmentCall.patient?.address || "").split(" | ")[1] || "" }),
+        ].join("\n\n") : inboundCall ? inboundPatientAgentPrompt(
           language,
           String(languageConfig.dialect || "").trim(),
           { id: agentContext.patient?.id || null, name: agentContext.patient?.name || null, address: agentContext.patient?.address || null },
@@ -484,8 +551,8 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             inputAudioTranscription: {},
             outputAudioTranscription: {},
             speechConfig: {
-              languageCode: speechLanguageCode(callContext.language),
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: (inboundCall ? process.env.INBOUND_PATIENT_AGENT_VOICE : "") || agent.voice || "Achird" } },
+              languageCode: speechLanguageCode(appointmentCall?.staff?.language || callContext.language),
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: (inboundCall ? process.env.INBOUND_PATIENT_AGENT_VOICE : appointmentCall ? process.env.APPOINTMENT_BOOKING_AGENT_VOICE : "") || agent.voice || "Achird" } },
             },
             tools: [{ functionDeclarations: [{
               name: "end_call",
@@ -513,14 +580,15 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
                 || response.serverContent?.inputTranscription?.text?.trim();
               if (callerText && !callerResponseObserved) {
                 callerResponseObserved = true;
-                console.info(`[vobiz-live] employee response detected call=${token.callId} transcriptChars=${callerText.length}`);
+                console.info(`[vobiz-live] ${appointmentCall ? "staff" : "employee"} response detected call=${token.callId} transcriptChars=${callerText.length}`);
               }
               if (response.serverContent?.interrupted) safeSend({ event: "clearAudio" });
               const inputText = String(response.inputTranscription?.text || response.serverContent?.inputTranscription?.text || response.serverContent?.inputAudioTranscription?.text || "").trim();
               if (inputText) {
+                if (appointmentCall) clearTimeout(appointmentNoResponseTimer);
                 employeeTranscriptChars += inputText.length;
                 employeeResponseTurns += 1;
-                console.info(`[vobiz-live] employee response detected call=${token.callId} transcriptChars=${inputText.length} totalResponses=${employeeResponseTurns}`);
+                console.info(`[vobiz-live] ${appointmentCall ? "staff" : "employee"} response detected call=${token.callId} transcriptChars=${inputText.length} totalResponses=${employeeResponseTurns}`);
               }
               for (const part of response.serverContent?.modelTurn?.parts || []) {
                 if (part.inlineData?.mimeType?.startsWith("audio/")) {
@@ -589,24 +657,28 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         }
         recorder = createCallRecorder({
           provider: "vobiz",
-          callId: attempt.id,
-          orgId: session.organizationId,
+          callId: appointmentCall?.id || attempt.id,
+          orgId: appointmentCall?.organizationId || session.organizationId,
           mode: process.env.RECORDING_MODE || "platform",
           tempDir: process.env.RECORDING_TEMP_DIR || "/tmp/attendance-recordings",
           uploadPlatformRecording: async (wavBuffer) => {
-            const object = await recordings.storeCallRecordingBuffer(wavBuffer, {
-              organizationId: session.organizationId,
-              sessionId: session.id,
-              callAttemptId: attempt.id,
-            });
-            await repository.setRecordingObjectKey(attempt.id, object.key, object.contentType);
-            console.info(`[vobiz-recording] platform recording stored attempt=${attempt.id} bytes=${object.sizeBytes} key=${object.key}`);
-            await queue.enqueue("transcribe_call", { callAttemptId: attempt.id }, { idempotencyKey: `transcribe:${attempt.id}` });
+            const object = appointmentCall
+              ? await recordings.storeAppointmentCallRecordingBuffer(wavBuffer, { organizationId: appointmentCall.organizationId, appointmentCallId: appointmentCall.id })
+              : await recordings.storeCallRecordingBuffer(wavBuffer, { organizationId: session.organizationId, sessionId: session.id, callAttemptId: attempt.id });
+            if (appointmentCall) {
+              await repository.saveAppointmentCallRecording(appointmentCall.id, object.key, object.contentType);
+              await queue.enqueue("process_appointment_call", { appointmentCallId: appointmentCall.id }, { idempotencyKey: `appointment-result:${appointmentCall.id}` });
+              console.info(`[appointment-booking] call recording stored attempt=${appointmentCall.id} bytes=${object.sizeBytes}`);
+            } else {
+              await repository.setRecordingObjectKey(attempt.id, object.key, object.contentType);
+              console.info(`[vobiz-recording] platform recording stored attempt=${attempt.id} bytes=${object.sizeBytes} key=${object.key}`);
+              await queue.enqueue("transcribe_call", { callAttemptId: attempt.id }, { idempotencyKey: `transcribe:${attempt.id}` });
+            }
             return object.key;
           },
         });
         recorder.start().then(startLiveSession).catch((error) => {
-          console.error(`[vobiz-recording] recorder start failed attempt=${attempt.id}`, error?.message || error);
+          console.error(`[vobiz-recording] recorder start failed attempt=${appointmentCall?.id || attempt?.id || "unknown"}`, error?.message || error);
           try { vobizWs.close(1011, "Recording initialization failed"); } catch {}
         });
       } else if (message.event === "playedStream") {
@@ -632,23 +704,25 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     vobizWs.on("close", (code, reason) => {
       active = false;
       clearTimeout(startTimer);
+      clearTimeout(appointmentNoResponseTimer);
       activeCalls.delete(token.callId);
       console.info(`[vobiz-live] stream closed call=${token.callId} code=${code} reason=${reason?.toString() || ""} inboundFrames=${inboundFrames} outboundFrames=${outboundFrames} generatedAudioParts=${generatedAudioParts}`);
       if (inboundCall) void finalizeInboundCall(code === 1000 ? "completed" : "failed");
       recorderFinalizePromise ||= Promise.resolve(recorder?.finalize()).catch((error) => {
-        console.error(`[vobiz-recording] finalize failed attempt=${attempt.id}`, error?.message || error);
+        console.error(`[vobiz-recording] finalize failed attempt=${appointmentCall?.id || attempt?.id || "unknown"}`, error?.message || error);
       });
-      if (!inboundCall) repository.endCallStream(attempt.id).catch(() => {});
+      if (!appointmentCall && !inboundCall) repository.endCallStream(attempt.id).catch(() => {});
       try { liveSession?.close(); } catch {}
     });
     vobizWs.on("error", () => {
       active = false;
       clearTimeout(startTimer);
+      clearTimeout(appointmentNoResponseTimer);
       activeCalls.delete(token.callId);
       recorderFinalizePromise ||= Promise.resolve(recorder?.finalize()).catch((error) => {
-        console.error(`[vobiz-recording] finalize failed attempt=${attempt.id}`, error?.message || error);
+        console.error(`[vobiz-recording] finalize failed attempt=${appointmentCall?.id || attempt?.id || "unknown"}`, error?.message || error);
       });
-      repository.endCallStream(attempt.id).catch(() => {});
+      if (!appointmentCall && !inboundCall) repository.endCallStream(attempt.id).catch(() => {});
       try { liveSession?.close(); } catch {}
     });
   });

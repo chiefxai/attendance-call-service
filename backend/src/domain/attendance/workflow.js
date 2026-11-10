@@ -2,6 +2,7 @@
 
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
 const { createPostCallTools } = require("../../agents/post-call-tools");
+const { createAppointmentBookingTools } = require("../../agents/appointment-booking-tools");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -284,8 +285,122 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       },
       staffSuggestions,
     });
+    if (!needsDetails && staffSuggestions.length) {
+      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "calling");
+      await queue.enqueue("call_next_appointment_staff", { inboundCallId, organizationId: call.organizationId, candidateIndex: 0 }, {
+        idempotencyKey: `appointment:${inboundCallId}:candidate:0`,
+      });
+    } else if (!needsDetails) {
+      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "no_staff_available");
+    }
     console.info(`[attendance-worker] inbound transcript saved call=${inboundCallId} characters=${transcript.text.length} language=${transcript.language || call.language}`);
   }
+
+  async function callNextAppointmentStaff({ inboundCallId, organizationId, candidateIndex = 0 }) {
+    const call = await repository.getInboundCall(inboundCallId, organizationId || process.env.DEFAULT_ORGANIZATION_ID);
+    if (!call || call.bookingScheduleSessionId || call.bookingStatus === "scheduled") return;
+    const candidates = call.staffSuggestions || [];
+    if (candidateIndex >= candidates.length) {
+      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "not_answered");
+      return;
+    }
+    const staff = candidates[candidateIndex];
+    const agents = await repository.listAgents(call.organizationId);
+    const language = staff.language || call.language || "en";
+    const agent = agents.find((item) => item.active && String(item.language).toLowerCase().startsWith(String(language).slice(0, 2).toLowerCase()))
+      || agents.find((item) => item.active);
+    if (!staff?.phoneNumber || !agent) {
+      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review");
+      return;
+    }
+    const settings = await repository.getOrganizationCallSettings(call.organizationId);
+    const from = settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER;
+    if (!from) {
+      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review", { staff });
+      return;
+    }
+    const attempt = await repository.createAppointmentCallAttempt({
+      inboundCallId, organizationId: call.organizationId, candidateIndex, staff, agentId: agent.id,
+    });
+    if (!attempt || attempt.providerCallId) return;
+    await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "calling", { staff });
+    try {
+      const result = await vobiz.createCall({ to: staff.phoneNumber, from, agentId: agent.id, appointmentCallId: attempt.id });
+      const providerCallId = result.call_uuid || result.request_uuid;
+      if (!providerCallId) throw new Error("Vobiz did not return a call ID for the appointment call");
+      await repository.attachAppointmentProviderCallId(attempt.id, providerCallId);
+      console.info(`[appointment-booking] placed call enquiry=${inboundCallId} candidate=${candidateIndex} attempt=${attempt.id}`);
+    } catch (error) {
+      await repository.markAppointmentCallFailed(attempt.id, error.message);
+      await queue.enqueue("process_appointment_call", { appointmentCallId: attempt.id }, { idempotencyKey: `appointment-result:${attempt.id}` });
+      throw error;
+    }
+  }
+
+  async function processAppointmentCall({ appointmentCallId }) {
+    const appointment = await repository.getAppointmentCallContext(appointmentCallId);
+    if (!appointment || appointment.status === "scheduled") return;
+    const call = await repository.getInboundCall(appointment.inboundCallId, appointment.organizationId);
+    if (!call || call.bookingScheduleSessionId) return;
+    const normalized = String(appointment.status || "").toLowerCase().replace(/[\s_-]+/g, "");
+    if (["noanswer", "failed", "busy", "timeout", "canceled", "cancelled"].includes(normalized)) {
+      await queue.enqueue("call_next_appointment_staff", { inboundCallId: appointment.inboundCallId, organizationId: appointment.organizationId, candidateIndex: appointment.candidateIndex + 1 }, {
+        idempotencyKey: `appointment:${appointment.inboundCallId}:candidate:${appointment.candidateIndex + 1}`,
+      });
+      return;
+    }
+    if (!appointment.recordingObjectKey) throw new Error("Staff call recording is not available yet");
+    const transcript = await transcriber.transcribe(
+      { key: appointment.recordingObjectKey, contentType: appointment.recordingContentType || "audio/wav" },
+      { organizationId: appointment.organizationId, language: appointment.language, speakerLabels: "calling agent and staff member" },
+    );
+    const analysis = call.enquiryAnalysis || {};
+    const activity = (await repository.listCareActivities(appointment.organizationId)).find((item) => item.id === analysis.activityId);
+    const outcome = await postCallAgent.extractStaffAvailability({
+      staff: appointment.staff, activity: { id: analysis.activityId, name: analysis.activityName || activity?.name, description: activity?.description },
+      requestedStartAt: analysis.requestedStartAt, transcript: transcript.text,
+    });
+    await repository.saveAppointmentCallTranscript(appointmentCallId, transcript.text, outcome);
+    if (outcome.outcome === "unavailable") {
+      await queue.enqueue("call_next_appointment_staff", { inboundCallId: appointment.inboundCallId, organizationId: appointment.organizationId, candidateIndex: appointment.candidateIndex + 1 }, {
+        idempotencyKey: `appointment:${appointment.inboundCallId}:candidate:${appointment.candidateIndex + 1}`,
+      });
+      return;
+    }
+    if (outcome.outcome !== "available_confirmed" || !outcome.confirmedByStaff || !outcome.confirmedActivity || !outcome.confirmedStartTime) {
+      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
+      return;
+    }
+    const agents = await repository.listAgents(appointment.organizationId);
+    const attendanceAgent = agents.find((item) => item.active && String(item.language).toLowerCase().startsWith(String(appointment.language).slice(0, 2).toLowerCase()))
+      || agents.find((item) => item.active);
+    if (!attendanceAgent) {
+      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
+      return;
+    }
+    const settings = await repository.getOrganizationCallSettings(appointment.organizationId);
+    let session;
+    try {
+      session = await appointmentTools.createAttendanceSchedule.invoke({
+        inboundCallId: appointment.inboundCallId, organizationId: appointment.organizationId,
+        staff: { ...appointment.staff, phoneNumber: appointment.staff.phoneNumber, language: appointment.staff.language || appointment.language },
+        attendanceAgentId: attendanceAgent.id, fromNumber: settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER,
+      }).then((value) => JSON.parse(value));
+    } catch (error) {
+      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
+      console.warn(`[appointment-booking] confirmed staff needs schedule review enquiry=${appointment.inboundCallId} message=${String(error.message || error).slice(0, 200)}`);
+      return;
+    }
+    if (!session) throw new Error("Could not create attendance schedule from confirmed staff acceptance");
+    await queue.enqueue("place_call", { sessionId: session.id, stage: "check_in", attemptNumber: 1 }, {
+      idempotencyKey: `call:${session.id}:check_in:1`, runAt: new Date(session.scheduledStartAt),
+    });
+    await queue.enqueue("place_call", { sessionId: session.id, stage: "check_out", attemptNumber: 1 }, {
+      idempotencyKey: `call:${session.id}:check_out:1`, runAt: new Date(session.scheduledEndAt),
+    });
+  }
+
+  const appointmentTools = createAppointmentBookingTools({ repository });
 
   async function extractIntent({ callAttemptId }) {
     const attempt = await repository.getCallAttempt(callAttemptId);
@@ -398,6 +513,8 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     wait_for_recording: waitForRecording,
     transcribe_call: transcribeCall,
     transcribe_inbound_call: transcribeInboundCall,
+    call_next_appointment_staff: callNextAppointmentStaff,
+    process_appointment_call: processAppointmentCall,
     extract_intent: extractIntent,
     evaluate_attendance: evaluateAttendance,
     evaluate_session: evaluateSession,

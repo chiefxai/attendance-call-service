@@ -144,6 +144,14 @@ export interface IncomingPatientCall {
     language: string;
     locationMatch: "same_district" | "same_region" | "other_region";
   }>;
+  bookingStatus: "not_started" | "calling" | "scheduled" | "not_answered" | "no_staff_available" | "needs_review";
+  bookingStaff: { id: string; name: string; phoneNumber: string; address?: string; language?: string } | null;
+  bookingScheduleSessionId: string | null;
+  appointmentCalls: Array<{
+    id: string; candidateIndex: number; staff: { id: string; name: string; phoneNumber: string | null; address?: string };
+    providerCallId: string | null; status: string; answeredAt: string | null; endedAt: string | null;
+    durationSeconds: number | null; transcript: string | null; outcome: Record<string, unknown>; recordingObjectKey: string | null;
+  }>;
 }
 export type IncomingCall = IncomingPatientCall;
 
@@ -423,6 +431,10 @@ export async function resolveIncomingEnquiry(id: string, staffId: string) {
 
 export function incomingCallRecordingUrl(id: string) {
   return `${api.defaults.baseURL || "/api/call-service"}/incoming-calls/${encodeURIComponent(id)}/recording`;
+}
+
+export function appointmentCallRecordingUrl(id: string, attemptId: string) {
+  return `${api.defaults.baseURL || "/api/call-service"}/incoming-calls/${encodeURIComponent(id)}/appointment-attempts/${encodeURIComponent(attemptId)}/recording`;
 }
 
 export async function fetchAgents() {

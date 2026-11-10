@@ -20,5 +20,6 @@ module.exports = {
   ...require("./infrastructure/telephony/vobiz-client"),
   ...require("./infrastructure/telephony/vobiz-signature"),
   ...require("./agents/vertex-agent"),
+  ...require("./agents/appointment-booking-tools"),
   ...require("./config"),
 };

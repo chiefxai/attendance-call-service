@@ -56,6 +56,7 @@ async function main() {
     for (const call of expired) {
       try {
         if (call.recordingObjectKey) await recordings.deleteObject(call.recordingObjectKey);
+        for (const key of call.appointmentRecordingKeys || []) await recordings.deleteObject(key);
         await repository.deleteExpiredInboundCall(call.id);
         console.info(`[attendance-worker] purged expired inbound call ${call.id}`);
       } catch (error) {

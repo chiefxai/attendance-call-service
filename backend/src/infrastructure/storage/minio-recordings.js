@@ -107,6 +107,19 @@ function createMinioRecordingStore({
     return { key, bucket, contentType: "audio/wav", sizeBytes: buffer.length };
   }
 
+  async function storeAppointmentCallRecordingBuffer(buffer, { organizationId, appointmentCallId } = {}) {
+    if (!Buffer.isBuffer(buffer) || !buffer.length || !organizationId || !appointmentCallId) {
+      throw new Error("WAV recording buffer and appointment-call ownership IDs are required");
+    }
+    const key = `appointment-bookings/${encodeURIComponent(organizationId)}/${appointmentCallId}/recording.wav`;
+    await s3.send(new PutObjectCommand({
+      Bucket: bucket, Key: key, Body: buffer, ContentType: "audio/wav",
+      ServerSideEncryption: process.env.MINIO_SERVER_SIDE_ENCRYPTION || undefined,
+      Metadata: { organizationid: String(organizationId), appointmentcallid: String(appointmentCallId) },
+    }));
+    return { key, bucket, contentType: "audio/wav", sizeBytes: buffer.length };
+  }
+
   async function storeInboundCallRecordingFile(filePath, { organizationId, inboundCallId, contentType = "audio/wav" } = {}) {
     if (!filePath || !organizationId || !inboundCallId) throw new Error("Recording file and inbound call ownership IDs are required");
     const stat = await fsp.stat(filePath);
@@ -130,7 +143,7 @@ function createMinioRecordingStore({
     await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   }
 
-  return { importProviderRecording, storeCallRecordingBuffer, storeInboundCallRecordingBuffer, storeInboundCallRecordingFile, getObjectBuffer, deleteObject, bucket };
+  return { importProviderRecording, storeCallRecordingBuffer, storeInboundCallRecordingBuffer, storeInboundCallRecordingFile, storeAppointmentCallRecordingBuffer, getObjectBuffer, deleteObject, bucket };
 }
 
 module.exports = { createMinioRecordingStore };
