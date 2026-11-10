@@ -7,6 +7,7 @@ import { AxiosError } from "axios";
 import { createAssignment, fetchAgents, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/OperationsUI";
+import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
 interface FormValues {
   assignmentId: string;
@@ -114,6 +115,10 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
     const startAt = Date.parse(startValue);
     const endAt = Date.parse(endValue);
     const errors: string[] = [];
+    const employeePhoneInput = get("employeePhone");
+    const employeePhone = normalizeIndianMobile(employeePhoneInput);
+    const patientPhoneInput = get("patientPhone");
+    const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
     try { new Intl.DateTimeFormat("en-US", { timeZone: assignmentTimeZone }).format(); }
     catch { errors.push("timeZone must be a valid IANA timezone"); }
     if (!assignmentId) errors.push("assignmentId is required");
@@ -124,6 +129,8 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
     if (!startValue || !hasTimezone(startValue) || !Number.isFinite(startAt)) errors.push("scheduledStartAt must be ISO 8601 with a timezone");
     if (!endValue || !hasTimezone(endValue) || !Number.isFinite(endAt)) errors.push("scheduledEndAt must be ISO 8601 with a timezone");
     if (Number.isFinite(startAt) && Number.isFinite(endAt) && endAt <= startAt) errors.push("scheduledEndAt must be after scheduledStartAt");
+    if (employeePhoneInput && !employeePhone) errors.push("employeePhone must be a valid Indian mobile number (10 digits, optionally prefixed with 91 or +91)");
+    if (patientPhoneInput && !patientPhone) errors.push("patientPhone must be a valid Indian mobile number (10 digits, optionally prefixed with 91 or +91)");
     for (const field of ["employeeId", "employeeName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientAddress"]) {
       if (!get(field)) errors.push(field + " is required");
     }
@@ -132,8 +139,8 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
       scheduledStartAt: Number.isFinite(startAt) ? new Date(startAt).toISOString() : "",
       scheduledEndAt: Number.isFinite(endAt) ? new Date(endAt).toISOString() : "",
       metadata: { timeZone: assignmentTimeZone },
-      employee: { id: get("employeeId"), name: get("employeeName"), phoneNumber: get("employeePhone"), address: get("employeeAddress") },
-      patient: { id: get("patientId"), name: get("patientName"), address: get("patientAddress"), phoneNumber: get("patientPhone") },
+      employee: { id: get("employeeId"), name: get("employeeName"), phoneNumber: employeePhone || employeePhoneInput, address: get("employeeAddress") },
+      patient: { id: get("patientId"), name: get("patientName"), address: get("patientAddress"), phoneNumber: patientPhone || undefined },
     };
     return { line, payload: errors.length ? undefined : payload, errors };
   });
@@ -163,6 +170,8 @@ function FormField({ label, value, onChange, required = false, type = "text", he
 export function NewAssignmentPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState(initialValues);
+  const [phoneError, setPhoneError] = useState("");
+  const [patientPhoneError, setPatientPhoneError] = useState("");
   const [mode, setMode] = useState<"single" | "bulk">("single");
   const [bulkRows, setBulkRows] = useState<BulkAssignmentRow[]>([]);
   const [bulkFileError, setBulkFileError] = useState("");
