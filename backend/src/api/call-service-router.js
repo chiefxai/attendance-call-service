@@ -157,16 +157,18 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.post("/staff", async (req, res) => {
     const id = String(req.body?.id || "").trim();
     const name = String(req.body?.name || "").trim();
+    const companyName = String(req.body?.companyName || "").trim();
     const phoneNumber = normalizeIndianMobile(req.body?.phoneNumber);
     const address = String(req.body?.address || "").trim();
     const language = String(req.body?.language || "en").trim().toLowerCase();
     if (!id || id.length > 120) return res.status(400).json({ error: "Staff ID is required and must be at most 120 characters." });
     if (!name || name.length > 120) return res.status(400).json({ error: "Staff name is required and must be at most 120 characters." });
+    if (companyName.length > 200) return res.status(400).json({ error: "Company name must be at most 200 characters." });
     if (!phoneNumber) return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." });
     if (!address || address.length > 1000) return res.status(400).json({ error: "Staff address is required and must be at most 1000 characters." });
     if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
     try {
-      const record = await repository.createStaffDirectoryRecord(org(req), { id, name, phoneNumber, address, language });
+      const record = await repository.createStaffDirectoryRecord(org(req), { id, name, companyName, phoneNumber, address, language });
       if (!record) return res.status(409).json({ error: "A staff record with this ID already exists." });
       return res.status(201).json(record);
     } catch (error) { return fail(res, error); }
@@ -175,16 +177,18 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.put("/staff/:id", async (req, res) => {
     const id = String(req.params.id || "").trim();
     const name = String(req.body?.name || "").trim();
+    const companyName = String(req.body?.companyName || "").trim();
     const phoneNumber = normalizeIndianMobile(req.body?.phoneNumber);
     const address = String(req.body?.address || "").trim();
     const language = String(req.body?.language || "en").trim().toLowerCase();
     if (!id || id.length > 120) return res.status(400).json({ error: "Staff ID is invalid." });
     if (!name || name.length > 120) return res.status(400).json({ error: "Staff name is required and must be at most 120 characters." });
+    if (companyName.length > 200) return res.status(400).json({ error: "Company name must be at most 200 characters." });
     if (!phoneNumber) return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." });
     if (!address || address.length > 1000) return res.status(400).json({ error: "Staff address is required and must be at most 1000 characters." });
     if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
     try {
-      const record = await repository.updateStaffDirectoryRecord(org(req), { id, name, phoneNumber, address, language });
+      const record = await repository.updateStaffDirectoryRecord(org(req), { id, name, companyName, phoneNumber, address, language });
       return res.json(record);
     } catch (error) { return fail(res, error); }
   });
@@ -436,6 +440,8 @@ router.get("/activities", async (req, res) => {
       const missing = required.filter((key) => !body[key]);
       const callingSettings = await getEffectiveCallingSettings(organizationId);
       const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
+      const companyName = String(body.employee?.companyName || "").trim();
+      if (companyName.length > 200) return res.status(400).json({ error: "Employee company name must be at most 200 characters." });
       const employeePhone = normalizeIndianMobile(body.employee?.phoneNumber);
       const patientPhoneInput = String(body.patient?.phoneNumber || "").trim();
       const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
@@ -460,7 +466,7 @@ router.get("/activities", async (req, res) => {
           scheduledEndAt: endAt,
         }, client);
         await repository.createStaffDirectoryRecord(organizationId, {
-          id: body.employee.id, name: body.employee.name, phoneNumber: employeePhone,
+          id: body.employee.id, name: body.employee.name, companyName, phoneNumber: employeePhone,
           address: String(body.employee.address || "").trim(), language: body.language,
         }, client);
         await repository.createPatientDirectoryRecord(organizationId, {
@@ -471,7 +477,7 @@ router.get("/activities", async (req, res) => {
         const created = await repository.createAttendanceSession({
           organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
           agentId: body.agentId, fromNumber, language: body.language,
-          employee: { ...body.employee, phoneNumber: employeePhone },
+          employee: { ...body.employee, companyName, phoneNumber: employeePhone },
           patient: { ...body.patient, phoneNumber: patientPhone || undefined }, scheduledStartAt: startAt,
           scheduledEndAt: endAt, metadata: body.metadata || {},
         }, client);
