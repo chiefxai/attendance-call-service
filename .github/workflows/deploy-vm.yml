@@ -3,7 +3,6 @@ name: Deploy to GCP VM
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: attendance-production-deploy
