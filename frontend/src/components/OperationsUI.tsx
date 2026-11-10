@@ -16,7 +16,10 @@ export function PageHeader({ title, actions }: { eyebrow?: string; title: string
   return createPortal(
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} spacing={{ xs: 1, sm: 2 }} sx={{ width: "100%", minWidth: 0 }}>
       <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography variant="h5" sx={{ fontWeight: 750 }} noWrap>{title}</Typography>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, flexWrap: "wrap" }}>
+          <Typography variant="h5" sx={{ fontWeight: 750 }} noWrap>{title}</Typography>
+          <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650 }} />
+        </Stack>
       </Box>
       {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "flex-start", sm: "flex-end" }, flexShrink: 0 }}>{actions}</Stack>}
     </Stack>,

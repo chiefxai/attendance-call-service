@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, Chip, CircularProgress, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
 import CallRoundedIcon from "@mui/icons-material/CallRounded";
@@ -10,6 +10,7 @@ import TuneRoundedIcon from "@mui/icons-material/TuneRounded";
 import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import { AxiosError } from "axios";
 import { createAgent, createAssignment, fetchAgents, fetchCallCenterData, fetchOperationsSummary, updateAgent, type Agent, type AgentLanguagePrompt, type AssignmentPayload } from "../api/client";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
@@ -128,7 +129,7 @@ export function CallCenterPage() {
   const retryQueue = calls.data?.retryQueue || [];
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="VOBIZ OUTBOUND / VERTEX LIVE AUDIO" title="AI call center" description="Monitor currently connected employee calls and configure the live voice agent." actions={<Chip label="Outbound only" color="primary" variant="outlined" />} />
+    <PageHeader eyebrow="VOBIZ OUTBOUND / VERTEX LIVE AUDIO" title="AI call center" description="Monitor currently connected employee calls and configure the live voice agent." actions={<Button component={RouterLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />}>New assignment</Button>} />
     {(calls.isError || summary.isError) && <Alert severity="error">Could not load the call center feed. Check backend connectivity and workspace access.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Calls today" value={summary.data?.callsToday.toLocaleString() ?? "—"} detail="Outbound call attempts" icon={<CallRoundedIcon />} /></Grid>

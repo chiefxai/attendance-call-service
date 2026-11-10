@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
-import { AppBar, Avatar, Box, Chip, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
+import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
@@ -68,7 +68,6 @@ function App() {
         <Toolbar sx={{ minHeight: "72px !important", px: { xs: 2, md: 4 } }}>
           <IconButton onClick={() => setMobileOpen(true)} sx={{ display: { md: "none" }, mr: 1 }} aria-label="Open navigation"><MenuRoundedIcon /></IconButton>
           <Box ref={setHeaderTarget} sx={{ flex: 1, minWidth: 0 }} />
-          <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650, display: { xs: "none", sm: "inline-flex" } }} />
         </Toolbar>
       </AppBar>
       <Box component="nav" sx={{ width: { xs: 0, md: drawerWidth }, flex: { xs: "0 0 0px", md: `0 0 ${drawerWidth}px` }, minWidth: 0 }} aria-label="Primary navigation">
