@@ -22,7 +22,7 @@ export function AttendanceSchedulesPage({ defaultSection = "attendance" }: { def
       <Card sx={{ px: 1, pt: 0.5 }}>
         <Tabs
           value={section}
-          onChange={(_event, value: Section) => setSection(value)}
+          onChange={(_event, value: string) => setSection(value as Section)}
           aria-label="Attendance and duty schedules"
           variant="scrollable"
           allowScrollButtonsMobile
