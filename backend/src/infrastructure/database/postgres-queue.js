@@ -30,16 +30,32 @@ class PostgresJobQueue {
     }
   }
 
-  async enqueue(jobType, payload, { idempotencyKey, runAt = new Date(), maxAttempts = this.defaultMaxAttempts, client } = {}) {
+  async enqueue(jobType, payload, { idempotencyKey, runAt = new Date(), maxAttempts = this.defaultMaxAttempts, client, rescheduleIfEarlier = false } = {}) {
     if (!jobType || !idempotencyKey) throw new Error("jobType and idempotencyKey are required");
-    const result = await (client || this.pool).query(
-      `INSERT INTO attendance_jobs (job_type, payload, idempotency_key, run_at, max_attempts)
-       VALUES ($1, $2::jsonb, $3, $4, $5)
-       ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
-       RETURNING *`,
-      [jobType, JSON.stringify(payload || {}), idempotencyKey, runAt, maxAttempts],
+    const sql = rescheduleIfEarlier
+      ? `INSERT INTO attendance_jobs (job_type, payload, idempotency_key, run_at, max_attempts)
+         VALUES ($1, $2::jsonb, $3, $4, $5)
+         ON CONFLICT (idempotency_key) DO UPDATE
+         SET run_at=LEAST(attendance_jobs.run_at, EXCLUDED.run_at), updated_at=NOW()
+         WHERE attendance_jobs.status='queued'
+         RETURNING *`
+      : `INSERT INTO attendance_jobs (job_type, payload, idempotency_key, run_at, max_attempts)
+         VALUES ($1, $2::jsonb, $3, $4, $5)
+         ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+         RETURNING *`;
+    const result = await (client || this.pool).query(sql, [
+      jobType, JSON.stringify(payload || {}), idempotencyKey, runAt, maxAttempts,
+    ]);
+    return result.rows[0] || null;
+  }
+
+  async reschedule(jobId, runAt = new Date()) {
+    const result = await this.pool.query(
+      `UPDATE attendance_jobs SET run_at=LEAST(run_at,$2), updated_at=NOW()
+       WHERE id=$1 AND status='queued' RETURNING id`,
+      [jobId, runAt],
     );
-    return result.rows[0];
+    return result.rowCount === 1;
   }
 
   async claim(workerId) {
