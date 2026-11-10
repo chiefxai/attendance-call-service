@@ -197,6 +197,50 @@ class PostgresRepository {
     return r.rows[0];
   }
 
+  async findEmployeeScheduleOverlap({ organizationId, employeeId, startAt, endAt, assignmentId }, client = this.pool) {
+    const { rows } = await client.query(
+      `SELECT external_assignment_id, patient->>'name' AS patient_name,
+              scheduled_start_at, scheduled_end_at
+       FROM attendance_sessions
+       WHERE organization_id=$1
+         AND employee->>'id'=$2
+         AND ($5::text IS NULL OR external_assignment_id<>$5)
+         AND scheduled_start_at < $4
+         AND scheduled_end_at > $3
+       ORDER BY scheduled_start_at
+       LIMIT 1`,
+      [organizationId, String(employeeId), startAt, endAt, assignmentId ? String(assignmentId) : null],
+    );
+    const row = rows[0];
+    return row ? {
+      assignmentId: row.external_assignment_id,
+      patientName: row.patient_name || "Unknown patient",
+      scheduledStartAt: row.scheduled_start_at,
+      scheduledEndAt: row.scheduled_end_at,
+    } : null;
+  }
+
+  async assertEmployeeScheduleAvailable(assignment, client = this.pool) {
+    const lockKey = `${assignment.organizationId}:employee:${assignment.employee.id}`;
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [lockKey]);
+    const conflict = await this.findEmployeeScheduleOverlap({
+      organizationId: assignment.organizationId,
+      employeeId: assignment.employee.id,
+      startAt: assignment.scheduledStartAt,
+      endAt: assignment.scheduledEndAt,
+      assignmentId: assignment.assignmentId,
+    }, client);
+    if (conflict) {
+      const error = new Error(
+        `This employee already has assignment ${conflict.assignmentId} for ${conflict.patientName} during the selected duty window.`,
+      );
+      error.status = 409;
+      error.code = "EMPLOYEE_SCHEDULE_OVERLAP";
+      error.conflict = conflict;
+      throw error;
+    }
+  }
+
   async createAttendanceSession(assignment, client = this.pool) {
     const r = await client.query(
       `INSERT INTO attendance_sessions
@@ -352,7 +396,7 @@ class PostgresRepository {
     return row ? {
       id: row.external_id, name: row.name, phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
-      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
   }
 
@@ -370,7 +414,7 @@ class PostgresRepository {
     return row ? {
       id: row.external_id, name: row.name, phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
-      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
   }
 
@@ -427,7 +471,7 @@ class PostgresRepository {
       records.set(row.external_id, {
         id: row.external_id, name: row.name, phoneNumber: row.phone_number,
         phoneMasked: this.maskPhone(row.phone_number), address: row.address || "", language: row.language,
-        patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+        patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
       });
     }
     for (const session of sessions) {

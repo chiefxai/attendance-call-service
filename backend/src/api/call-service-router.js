@@ -135,6 +135,23 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     } catch (error) { fail(res, error); }
   });
 
+  router.get("/assignments/overlap", async (req, res) => {
+    try {
+      const organizationId = org(req);
+      const employeeId = String(req.query.employeeId || "").trim();
+      const startAt = new Date(String(req.query.startAt || ""));
+      const endAt = new Date(String(req.query.endAt || ""));
+      if (!employeeId || !Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
+        return res.status(400).json({ error: "employeeId, valid startAt, and a later endAt are required." });
+      }
+      const conflict = await repository.findEmployeeScheduleOverlap({
+        organizationId, employeeId, startAt, endAt,
+        assignmentId: String(req.query.assignmentId || "").trim(),
+      });
+      res.json({ overlap: Boolean(conflict), conflict });
+    } catch (error) { fail(res, error); }
+  });
+
   router.post("/staff", async (req, res) => {
     const id = String(req.body?.id || "").trim();
     const name = String(req.body?.name || "").trim();
@@ -302,6 +319,13 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const agent = await repository.getAgent(organizationId, body.agentId);
       if (!agent?.active) return res.status(400).json({ error: "An active agent in this organization is required" });
       const session = await queue.transaction(async (client) => {
+        await repository.assertEmployeeScheduleAvailable({
+          organizationId,
+          assignmentId: body.assignmentId,
+          employee: { id: body.employee.id },
+          scheduledStartAt: startAt,
+          scheduledEndAt: endAt,
+        }, client);
         await repository.createStaffDirectoryRecord(organizationId, {
           id: body.employee.id, name: body.employee.name, phoneNumber: employeePhone,
           address: String(body.employee.address || "").trim(), language: body.language,
