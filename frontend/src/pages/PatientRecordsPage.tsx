@@ -6,8 +6,9 @@ import PersonAddAltRoundedIcon from "@mui/icons-material/PersonAddAltRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
+import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
-import { createPatient, fetchPatients, type CreatePatientPayload } from "../api/client";
+import { createPatient, fetchPatients, updatePatient, type CreatePatientPayload, type PatientRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
@@ -20,14 +21,16 @@ export function PatientRecordsPage() {
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<PatientRecord | null>(null);
   const [newPatient, setNewPatient] = useState<CreatePatientPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), refetchInterval: 30_000 });
   const createMutation = useMutation({
-    mutationFn: createPatient,
+    mutationFn: ({ payload, id, update }: { payload: CreatePatientPayload; id: string; update: boolean }) => update ? updatePatient(id, payload) : createPatient(payload),
     onSuccess: async () => {
       setAddOpen(false);
+      setEditing(null);
       setNewPatient({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
       setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["patients"] });
@@ -43,14 +46,32 @@ export function PatientRecordsPage() {
     const phoneNumber = phoneInput ? normalizeIndianMobile(phoneInput) : "";
     if (phoneInput && !phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
-    createMutation.mutate({ ...newPatient, id: newPatient.id.trim(), name: newPatient.name.trim(), phoneNumber: phoneNumber || undefined, address: newPatient.address.trim(), careCategory: newPatient.careCategory?.trim(), hub: newPatient.hub?.trim() });
+    const payload = { ...newPatient, id: newPatient.id.trim(), name: newPatient.name.trim(), phoneNumber: phoneNumber || undefined, address: newPatient.address.trim(), careCategory: newPatient.careCategory?.trim(), hub: newPatient.hub?.trim() };
+    createMutation.mutate({ payload, id: payload.id, update: Boolean(editing) });
   };
   const categories = [...new Set(records.map((row) => row.careCategory).filter((value) => value !== "Not specified"))];
   const hubs = [...new Set(records.map((row) => row.hub).filter((value) => value !== "Not specified"))];
   const activeFilters = Number(hub !== "all") + Number(category !== "all") + Number(language !== "all") + Number(status !== "all");
+  const openAdd = () => {
+    setEditing(null);
+    setNewPatient({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
+    setPhoneError("");
+    setAddOpen(true);
+  };
+  const openEdit = (record: PatientRecord) => {
+    setEditing(record);
+    setNewPatient({ id: record.id, name: record.name, phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en", careCategory: record.careCategory === "Not specified" ? "" : record.careCategory, hub: record.hub === "Not specified" ? "" : record.hub });
+    setPhoneError("");
+    setAddOpen(true);
+  };
+  const closeEditDialog = () => {
+    if (createMutation.isPending) return;
+    setAddOpen(false);
+    setEditing(null);
+  };
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="HOME HEALTH / ASSIGNMENT DIRECTORY" title="Patient records" description="Manage saved patient profiles, addresses, and assignment details." actions={<><Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled>Export</Button><Button variant="contained" startIcon={<PersonAddAltRoundedIcon />} onClick={() => setAddOpen(true)}>Add patient</Button></>} />
+    <PageHeader eyebrow="HOME HEALTH / ASSIGNMENT DIRECTORY" title="Patient records" description="Manage saved patient profiles, addresses, and assignment details." actions={<><Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled>Export</Button><Button variant="contained" startIcon={<PersonAddAltRoundedIcon />} onClick={openAdd}>Add patient</Button></>} />
     {query.isError && <Alert severity="error">Could not load patient assignment records from the backend.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Patient records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned patients" icon={<ElderlyRoundedIcon />} /></Grid>
@@ -75,16 +96,16 @@ export function PatientRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Patient assignment directory" sx={{ minWidth: 1100 }}><TableHead><TableRow>{["Patient & ID", "Mobile number", "Patient address", "Hub", "Care category", "Assigned employee", "Language", "Location check", "Session status"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || "Not provided"}</TableCell><TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.hub}</TableCell><TableCell>{row.careCategory}</TableCell><TableCell><Typography variant="body2">{row.assignedStaff}</Typography><Typography variant="caption" color="text.secondary">{row.employeeId || "Employee ID unavailable"}</Typography></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.locationVerification} /></TableCell><TableCell><StatusChip status={row.status} /></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+      <TableContainer><Table size="small" aria-label="Patient assignment directory" sx={{ minWidth: 1100 }}><TableHead><TableRow>{["Patient & ID", "Mobile number", "Patient address", "Hub", "Care category", "Assigned employee", "Language", "Location check", "Session status", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || "Not provided"}</TableCell><TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.hub}</TableCell><TableCell>{row.careCategory}</TableCell><TableCell><Typography variant="body2">{row.assignedStaff}</Typography><Typography variant="caption" color="text.secondary">{row.employeeId || "Employee ID unavailable"}</Typography></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.locationVerification} /></TableCell><TableCell><StatusChip status={row.status} /></TableCell><TableCell><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>No patient records match these filters.</Typography>}
     </Card>
-    <Dialog open={addOpen} onClose={() => { if (!createMutation.isPending) setAddOpen(false); }} fullWidth maxWidth="sm">
-      <DialogTitle>Add patient</DialogTitle>
+    <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
+      <DialogTitle>{editing ? "Edit patient record" : "Add patient"}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
           {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Patient ID" value={newPatient.id} onChange={(event) => setNewPatient((current) => ({ ...current, id: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Patient ID" value={newPatient.id} InputProps={editing ? { readOnly: true } : undefined} onChange={(event) => setNewPatient((current) => ({ ...current, id: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newPatient.name} onChange={(event) => setNewPatient((current) => ({ ...current, name: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="tel" label="Indian mobile number (optional)" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "If provided, enter 10 digits; 91 or +91 is optional."} value={newPatient.phoneNumber || ""} onChange={(event) => { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const input = newPatient.phoneNumber?.trim() || ""; if (!input) { setPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Preferred language</InputLabel><Select label="Preferred language" value={newPatient.language} onChange={(event) => setNewPatient((current) => ({ ...current, language: event.target.value }))}><MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
@@ -94,7 +115,7 @@ export function PatientRecordsPage() {
           </Grid>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={() => setAddOpen(false)} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={savePatient} disabled={createMutation.isPending || !newPatient.id.trim() || !newPatient.name.trim() || !newPatient.address.trim()}>Save patient</Button></DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={savePatient} disabled={createMutation.isPending || !newPatient.id.trim() || !newPatient.name.trim() || !newPatient.address.trim()}>{editing ? "Update patient" : "Save patient"}</Button></DialogActions>
     </Dialog>
   </Stack>;
 }

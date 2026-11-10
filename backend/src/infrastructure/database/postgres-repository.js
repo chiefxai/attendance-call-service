@@ -340,8 +340,8 @@ class PostgresRepository {
       maxConcurrentCalls: Number(process.env.MAX_CONCURRENT_CALLS) || 20,
     };
   }
-  async createStaffDirectoryRecord(organizationId, person) {
-    const { rows } = await this.pool.query(
+  async createStaffDirectoryRecord(organizationId, person, client = this.pool) {
+    const { rows } = await client.query(
       `INSERT INTO staff_directory (organization_id,external_id,name,phone_number,address,language)
        VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (organization_id,external_id) DO NOTHING
@@ -356,11 +356,50 @@ class PostgresRepository {
     } : null;
   }
 
-  async createPatientDirectoryRecord(organizationId, patient) {
+  async updateStaffDirectoryRecord(organizationId, person) {
     const { rows } = await this.pool.query(
+      `INSERT INTO staff_directory (organization_id,external_id,name,phone_number,address,language,active)
+       VALUES ($1,$2,$3,$4,$5,$6,TRUE)
+       ON CONFLICT (organization_id,external_id) DO UPDATE SET
+         name=EXCLUDED.name, phone_number=EXCLUDED.phone_number, address=EXCLUDED.address,
+         language=EXCLUDED.language, active=TRUE, updated_at=NOW()
+       RETURNING external_id,name,phone_number,address,language`,
+      [organizationId, person.id, person.name, person.phoneNumber, person.address, person.language || "en"],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+      phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
+      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+    } : null;
+  }
+
+  async createPatientDirectoryRecord(organizationId, patient, client = this.pool) {
+    const { rows } = await client.query(
       `INSERT INTO patient_directory (organization_id,external_id,name,phone_number,address,language,care_category,hub)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (organization_id,external_id) DO NOTHING
+       RETURNING external_id,name,phone_number,address,language,care_category,hub`,
+      [organizationId, patient.id, patient.name, patient.phoneNumber || null, patient.address,
+        patient.language || "en", patient.careCategory || "", patient.hub || ""],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address,
+      language: row.language, assignedStaff: "Unassigned", employeeId: null,
+      careCategory: row.care_category || "Not specified", hub: row.hub || "Not specified",
+      locationVerification: "not_integrated", status: "unassigned",
+    } : null;
+  }
+
+  async updatePatientDirectoryRecord(organizationId, patient) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO patient_directory (organization_id,external_id,name,phone_number,address,language,care_category,hub,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE)
+       ON CONFLICT (organization_id,external_id) DO UPDATE SET
+         name=EXCLUDED.name, phone_number=EXCLUDED.phone_number, address=EXCLUDED.address,
+         language=EXCLUDED.language, care_category=EXCLUDED.care_category, hub=EXCLUDED.hub,
+         active=TRUE, updated_at=NOW()
        RETURNING external_id,name,phone_number,address,language,care_category,hub`,
       [organizationId, patient.id, patient.name, patient.phoneNumber || null, patient.address,
         patient.language || "en", patient.careCategory || "", patient.hub || ""],

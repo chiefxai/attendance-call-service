@@ -302,6 +302,11 @@ export async function createStaff(payload: CreateStaffPayload) {
   return response.data;
 }
 
+export async function updateStaff(id: string, payload: CreateStaffPayload) {
+  const response = await api.put<StaffRecord>(`/staff/${encodeURIComponent(id)}`, payload);
+  return response.data;
+}
+
 export async function fetchStaff(params: { search?: string; status?: string; limit?: number } = {}) {
   const response = await api.get<StaffRecord[]>("/staff", { params });
   return response.data;
@@ -309,6 +314,11 @@ export async function fetchStaff(params: { search?: string; status?: string; lim
 
 export async function createPatient(payload: CreatePatientPayload) {
   const response = await api.post<PatientRecord>("/patients", payload);
+  return response.data;
+}
+
+export async function updatePatient(id: string, payload: CreatePatientPayload) {
+  const response = await api.put<PatientRecord>(`/patients/${encodeURIComponent(id)}`, payload);
   return response.data;
 }
 

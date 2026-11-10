@@ -120,12 +120,12 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
         <Grid container spacing={2}>
           <Grid size={{ xs: 12, lg: 6 }}>
             <Typography variant="subtitle2" fontWeight={700}>Save staff</Typography>
-            <Typography variant="body2" sx={{ mt: .5 }}>Endpoint: <Box component="code">POST /api/call-service/staff</Box></Typography>
+            <Typography variant="body2" sx={{ mt: .5 }}>Endpoints: <Box component="code">POST /api/call-service/staff</Box> to create and <Box component="code">PUT /api/call-service/staff/&#123;STAFF_ID&#125;</Box> to update.</Typography>
             <Paper variant="outlined" sx={{ mt: 1, p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{'{ "id": "STAFF-1001", "name": "Employee name", "phoneNumber": "+919876543210", "address": "Employee address", "language": "ta" }'}</Box></Paper>
           </Grid>
           <Grid size={{ xs: 12, lg: 6 }}>
             <Typography variant="subtitle2" fontWeight={700}>Save patient</Typography>
-            <Typography variant="body2" sx={{ mt: .5 }}>Endpoint: <Box component="code">POST /api/call-service/patients</Box></Typography>
+            <Typography variant="body2" sx={{ mt: .5 }}>Endpoints: <Box component="code">POST /api/call-service/patients</Box> to create and <Box component="code">PUT /api/call-service/patients/&#123;PATIENT_ID&#125;</Box> to update.</Typography>
             <Paper variant="outlined" sx={{ mt: 1, p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{'{ "id": "PATIENT-2001", "name": "Patient name", "phoneNumber": "+919876543210", "address": "Client service address", "language": "en", "careCategory": "Home care", "hub": "Chennai" }'}</Box></Paper>
           </Grid>
         </Grid>

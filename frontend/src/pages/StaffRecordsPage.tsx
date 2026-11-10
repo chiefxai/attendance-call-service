@@ -7,8 +7,9 @@ import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
+import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
-import { createStaff, fetchStaff, type CreateStaffPayload, type StaffRecord } from "../api/client";
+import { createStaff, fetchStaff, updateStaff, type CreateStaffPayload, type StaffRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
@@ -19,15 +20,17 @@ export function StaffRecordsPage() {
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<StaffRecord | null>(null);
+  const [editing, setEditing] = useState<StaffRecord | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newStaff, setNewStaff] = useState<CreateStaffPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), refetchInterval: 30_000 });
   const createMutation = useMutation({
-    mutationFn: createStaff,
+    mutationFn: ({ payload, id, update }: { payload: CreateStaffPayload; id: string; update: boolean }) => update ? updateStaff(id, payload) : createStaff(payload),
     onSuccess: async () => {
       setAddOpen(false);
+      setEditing(null);
       setNewStaff({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
       setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["staff"] });
@@ -44,12 +47,30 @@ export function StaffRecordsPage() {
     const phoneNumber = normalizeIndianMobile(newStaff.phoneNumber);
     if (!phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
-    createMutation.mutate({ ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), phoneNumber, address: newStaff.address.trim() });
+    const payload = { ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), phoneNumber, address: newStaff.address.trim() };
+    createMutation.mutate({ payload, id: payload.id, update: Boolean(editing) });
   };
   const activeFilters = Number(language !== "all") + Number(status !== "all");
+  const openAdd = () => {
+    setEditing(null);
+    setNewStaff({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
+    setPhoneError("");
+    setAddOpen(true);
+  };
+  const openEdit = (record: StaffRecord) => {
+    setEditing(record);
+    setNewStaff({ id: record.id, name: record.name, phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
+    setPhoneError("");
+    setAddOpen(true);
+  };
+  const closeEditDialog = () => {
+    if (createMutation.isPending) return;
+    setAddOpen(false);
+    setEditing(null);
+  };
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="WORKFORCE / ATTENDANCE ASSIGNMENTS" title="Staff records" description="Manage saved staff profiles and review their attendance assignments. View registered employee contact details." actions={<><Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled={!records.length}>Export</Button><Button variant="contained" startIcon={<PersonAddAltRoundedIcon />} onClick={() => setAddOpen(true)}>Add staff</Button></>} />
+    <PageHeader eyebrow="WORKFORCE / ATTENDANCE ASSIGNMENTS" title="Staff records" description="Manage saved staff profiles and review their attendance assignments. View registered employee contact details." actions={<><Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled={!records.length}>Export</Button><Button variant="contained" startIcon={<PersonAddAltRoundedIcon />} onClick={openAdd}>Add staff</Button></>} />
     {query.isError && <Alert severity="error">Could not load staff records from the backend.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Staff records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned employees" icon={<GroupRoundedIcon />} /></Grid>
@@ -72,16 +93,16 @@ export function StaffRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 1050 }}><TableHead><TableRow>{["Staff identity", "Mobile number", "Staff address", "Calling language", "Current patient", "Assignment", "Session state", "Profile"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || row.phoneMasked || "Not supplied"}</TableCell><TableCell sx={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell>{row.patientName}</TableCell><TableCell>{row.assignmentId}</TableCell><TableCell><StatusChip status={row.dutyStatus} /></TableCell><TableCell><Button size="small" onClick={() => setSelected(row)}>View</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+      <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 1050 }}><TableHead><TableRow>{["Staff identity", "Mobile number", "Staff address", "Calling language", "Current patient", "Assignment", "Session state", "Profile"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || row.phoneMasked || "Not supplied"}</TableCell><TableCell sx={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell>{row.patientName}</TableCell><TableCell>{row.assignmentId}</TableCell><TableCell><StatusChip status={row.dutyStatus} /></TableCell><TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setSelected(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell></TableRow>)}</TableBody></Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No staff records match these filters.</Typography>}
     </Card>
-    <Dialog open={addOpen} onClose={() => { if (!createMutation.isPending) setAddOpen(false); }} fullWidth maxWidth="sm">
-      <DialogTitle>Add staff</DialogTitle>
+    <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
+      <DialogTitle>{editing ? "Edit staff record" : "Add staff"}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
           {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} onChange={(event) => setNewStaff((current) => ({ ...current, id: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} InputProps={editing ? { readOnly: true } : undefined} onChange={(event) => setNewStaff((current) => ({ ...current, id: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={newStaff.phoneNumber} onChange={(event) => { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(newStaff.phoneNumber); if (!newStaff.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Calling language</InputLabel><Select label="Calling language" value={newStaff.language} onChange={(event) => setNewStaff((current) => ({ ...current, language: event.target.value }))}><MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
@@ -89,7 +110,7 @@ export function StaffRecordsPage() {
           </Grid>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={() => setAddOpen(false)} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={saveStaff} disabled={createMutation.isPending || !newStaff.id.trim() || !newStaff.name.trim() || !newStaff.phoneNumber.trim() || !newStaff.address.trim()}>Save staff</Button></DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={saveStaff} disabled={createMutation.isPending || !newStaff.id.trim() || !newStaff.name.trim() || !newStaff.phoneNumber.trim() || !newStaff.address.trim()}>{editing ? "Update staff" : "Save staff"}</Button></DialogActions>
     </Dialog>
     <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="sm">{selected && <><DialogTitle>Employee assignment · {selected.id}</DialogTitle><DialogContent><Stack spacing={1.5} sx={{ pt: 1 }}><Typography variant="h6">{selected.name}</Typography><Typography variant="body2">Calling language: {selected.language.toUpperCase()}</Typography><Typography variant="body2" color="text.secondary">Registered employee phone: {selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography><Typography variant="body2" color="text.secondary">Staff address: {selected.address || "Not provided"}</Typography><Typography variant="body2" color="text.secondary">Current patient: {selected.patientName}</Typography><Typography variant="body2" color="text.secondary">Assignment: {selected.assignmentId}</Typography><Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert></Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>
   </Stack>;
