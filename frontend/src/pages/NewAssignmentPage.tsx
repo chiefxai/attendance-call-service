@@ -238,6 +238,7 @@ export function NewAssignmentPage() {
   const selectStaff = (employeeId: string) => {
     const employee = staff.data?.find((row) => row.id === employeeId);
     if (!employee) return;
+    setPhoneError("");
     setForm((current) => ({ ...current, employeeId: employee.id, employeeName: employee.name,
       employeePhone: employee.phoneNumber || "", employeeAddress: employee.address || "",
       language: employee.language ? callLanguageCode(employee.language) : current.language }));
@@ -245,6 +246,7 @@ export function NewAssignmentPage() {
   const selectPatient = (patientId: string) => {
     const patient = patients.data?.find((row) => row.id === patientId);
     if (!patient) return;
+    setPatientPhoneError("");
     setForm((current) => ({ ...current, patientId: patient.id, patientName: patient.name,
       patientPhone: patient.phoneNumber || "", patientAddress: patient.address || "" }));
   };
@@ -284,7 +286,7 @@ export function NewAssignmentPage() {
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee ID" value={form.employeeId} onChange={update("employeeId")} required /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee name" value={form.employeeName} onChange={update("employeeName")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee phone" value={form.employeePhone} onChange={update("employeePhone")} required helperText="Include country code." /></Grid>
+              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee mobile number" value={form.employeePhone} onChange={(value) => { setPhoneError(""); update("employeePhone")(value); }} required error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} onBlur={() => { const normalized = normalizeIndianMobile(form.employeePhone); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setForm((current) => ({ ...current, employeePhone: normalized })); } }} /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee address" value={form.employeeAddress} onChange={update("employeeAddress")} required /></Grid>
             </Grid>
           </CardContent></Card>
@@ -299,7 +301,7 @@ export function NewAssignmentPage() {
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient ID" value={form.patientId} onChange={update("patientId")} required /></Grid>
               <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient name" value={form.patientName} onChange={update("patientName")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient phone (optional)" value={form.patientPhone} onChange={update("patientPhone")} /></Grid>
+              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient mobile number (optional)" value={form.patientPhone} onChange={(value) => { setPatientPhoneError(""); update("patientPhone")(value); }} error={Boolean(patientPhoneError)} helperText={patientPhoneError || "If provided, enter 10 digits; 91 or +91 is optional. The patient is not called."} onBlur={() => { const input = form.patientPhone.trim(); if (!input) { setPatientPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPatientPhoneError(INDIAN_MOBILE_ERROR); else { setPatientPhoneError(""); setForm((current) => ({ ...current, patientPhone: normalized })); } }} /></Grid>
               <Grid size={12}><FormField label="Patient address" value={form.patientAddress} onChange={update("patientAddress")} required multiline rows={2} /></Grid>
             </Grid>
           </CardContent></Card>
