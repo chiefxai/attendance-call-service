@@ -72,16 +72,39 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
 
+  async function settleCheckoutIfCheckInFailed(sessionId) {
+    let current = await repository.getAttendanceSession(sessionId);
+    if (!current || !["missed", "not_answered", "review"].includes(current.checkInStatus)) return false;
+    if (current.checkOutStatus === "scheduled") {
+      await repository.setStageStatus(sessionId, "check_out", "missed", {
+        reason: "check_in_not_confirmed",
+        checkInStatus: current.checkInStatus,
+      });
+      current = await repository.getAttendanceSession(sessionId);
+    }
+    const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
+    if (terminal.has(current.checkInStatus) && terminal.has(current.checkOutStatus)
+        && (current.checkInStatus !== "confirmed" || current.checkOutStatus !== "confirmed")) {
+      await repository.markSessionException(sessionId);
+    }
+    return true;
+  }
+
   async function placeCall({ sessionId, stage, attemptNumber, capacityWaitCount = 0, consecutiveNoAnswer = 0 }) {
     const session = await repository.getAttendanceSession(sessionId);
     // A terminal result for one stage must not suppress the other scheduled
     // stage. The session becomes an exception only after both stages settle.
     if (!session || session.sessionStatus === "completed") return;
+    if (stage === "check_out" && session.checkInStatus !== "confirmed") {
+      await settleCheckoutIfCheckInFailed(sessionId);
+      return;
+    }
     const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
     if (["confirmed", "missed", "not_answered", "review"].includes(stageStatus)) return;
     const agent = await repository.getAgent(session.organizationId, session.agentId);
     if (!agent?.active) {
       await repository.setStageStatus(sessionId, stage, "review", { reason: "agent_missing_or_inactive" });
+      if (stage === "check_in") await settleCheckoutIfCheckInFailed(sessionId);
       throw new Error("The assigned calling agent is missing or inactive");
     }
     const attempt = await repository.createCallAttempt({
@@ -91,6 +114,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     if (!attempt.shouldPlace || attempt.providerCallId || attempt.status !== "scheduled") {
       if (attempt.status === "placing" && !attempt.providerCallId) {
         await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_reconciliation_required", callAttemptId: attempt.id });
+        if (stage === "check_in") await settleCheckoutIfCheckInFailed(sessionId);
       }
       return;
     }
@@ -127,6 +151,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       // lost. Do not blindly redial; mark the placement for reconciliation.
       await repository.markCallPlacementFailed(attempt.id, error.message);
       await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_unknown", callAttemptId: attempt.id });
+      if (stage === "check_in") await settleCheckoutIfCheckInFailed(sessionId);
       throw error;
     }
   }
@@ -238,6 +263,19 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       const decision = chooseAttendanceAction(attempt.stage, attempt.outcome || {});
       if (decision.action === "confirm_stage") {
         await repository.setStageStatus(sessionId, attempt.stage, "confirmed", { reportedAt: decision.reportedAt, callAttemptId });
+        if (attempt.stage === "check_in") {
+          const updatedSession = await repository.getAttendanceSession(sessionId);
+          const scheduledCheckOut = new Date(updatedSession.scheduledEndAt).getTime();
+          if (updatedSession.checkOutStatus === "scheduled" && Number.isFinite(scheduledCheckOut)) {
+            // Re-enqueue after check-in confirmation. The original end-time job
+            // is also protected by the gate below; a unique DB attempt prevents
+            // duplicate calls if both jobs become runnable together.
+            const runAt = new Date(Math.max(Date.now(), scheduledCheckOut));
+            await queue.enqueue("place_call", { sessionId, stage: "check_out", attemptNumber: 1 }, {
+              idempotencyKey: `call:${sessionId}:check_out:after-check-in`, runAt,
+            });
+          }
+        }
       } else if (decision.action === "follow_up") {
         if (!decision.runAt) {
           await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: "callback_time_unclear", callAttemptId });
@@ -258,6 +296,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       }
     }
 
+    await settleCheckoutIfCheckInFailed(sessionId);
     const current = await repository.getAttendanceSession(sessionId);
     if (current.checkInStatus === "confirmed" && current.checkOutStatus === "confirmed") {
       const eligibleForCompletion = await repository.markSessionCompleted(sessionId);
@@ -287,6 +326,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   }
 
   async function evaluateSession({ sessionId }) {
+    await settleCheckoutIfCheckInFailed(sessionId);
     const session = await repository.getAttendanceSession(sessionId);
     if (!session) return;
     const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
