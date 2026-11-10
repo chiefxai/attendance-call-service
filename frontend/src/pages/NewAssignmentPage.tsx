@@ -160,11 +160,11 @@ function requestError(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-function FormField({ label, value, onChange, required = false, type = "text", helperText, multiline = false, rows }: {
+function FormField({ label, value, onChange, required = false, type = "text", helperText, multiline = false, rows, error = false, onBlur }: {
   label: string; value: string; onChange: (value: string) => void; required?: boolean;
-  type?: string; helperText?: string; multiline?: boolean; rows?: number;
+  type?: string; helperText?: string; multiline?: boolean; rows?: number; error?: boolean; onBlur?: () => void;
 }) {
-  return <TextField fullWidth size="small" label={label} value={value} required={required} type={type} helperText={helperText} multiline={multiline} rows={rows} onChange={(event) => onChange(event.target.value)} InputLabelProps={type === "datetime-local" ? { shrink: true } : undefined} />;
+  return <TextField fullWidth size="small" label={label} value={value} required={required} type={type} helperText={helperText} error={error} multiline={multiline} rows={rows} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} InputLabelProps={type === "datetime-local" ? { shrink: true } : undefined} />;
 }
 
 export function NewAssignmentPage() {
@@ -216,12 +216,19 @@ export function NewAssignmentPage() {
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const employeePhone = normalizeIndianMobile(form.employeePhone);
+    const patientPhoneInput = form.patientPhone.trim();
+    const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
+    if (!employeePhone) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
+    if (patientPhoneInput && !patientPhone) { setPatientPhoneError(INDIAN_MOBILE_ERROR); return; }
+    setPhoneError("");
+    setPatientPhoneError("");
     const payload: AssignmentPayload = {
       assignmentId: form.assignmentId.trim(), agentId: form.agentId, fromNumber: form.fromNumber.trim(),
       language: form.language, scheduledStartAt: toUtcIso(form.scheduledStartAt),
       scheduledEndAt: toUtcIso(form.scheduledEndAt), metadata: { timeZone: getBrowserTimeZone() },
-      employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), phoneNumber: form.employeePhone.trim(), address: form.employeeAddress.trim() },
-      patient: { id: form.patientId.trim(), name: form.patientName.trim(), phoneNumber: form.patientPhone.trim(), address: form.patientAddress.trim() },
+      employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), phoneNumber: employeePhone, address: form.employeeAddress.trim() },
+      patient: { id: form.patientId.trim(), name: form.patientName.trim(), phoneNumber: patientPhone || undefined, address: form.patientAddress.trim() },
     };
     mutation.mutate(payload);
   };
