@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Divider, Grid, Stack, Typography } from "@mui/material";
+import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
@@ -50,6 +51,7 @@ export function AssignmentStatusPage() {
     enabled: Boolean(sessionId),
     refetchInterval: (state) => state.state.data?.sessionStatus === "active" ? 8_000 : false,
   });
+  const [logStage, setLogStage] = useState<"check_in" | "check_out" | null>(null);
   const artifacts = useQuery({
     queryKey: ["session-artifacts", sessionId],
     queryFn: () => fetchSessionArtifacts(sessionId),
@@ -57,7 +59,10 @@ export function AssignmentStatusPage() {
     retry: false,
   });
 
-  const showCallLogs = () => { void artifacts.refetch(); };
+  const showCallLogs = (stage?: "check_in" | "check_out") => {
+    setLogStage(stage || null);
+    void artifacts.refetch().then(() => requestAnimationFrame(() => document.getElementById("session-call-logs")?.scrollIntoView({ behavior: "smooth", block: "start" })));
+  };
 
   return (
     <Stack spacing={3}>
@@ -75,10 +80,11 @@ export function AssignmentStatusPage() {
             {stage.value.status === "calling" && <Alert severity="warning" sx={{ mb: 2 }}>The outbound call is in progress.</Alert>}
             {stage.value.status === "scheduled" && stage.value.scheduledAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Call scheduled for {new Date(stage.value.scheduledAt).toLocaleString()}</Typography>}
             {stage.value.status === "follow_up" && stage.value.nextCallAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Next call scheduled for {new Date(stage.value.nextCallAt).toLocaleString()}</Typography>}
-            <Typography variant="body2" color="text.secondary">Reported time</Typography><Typography fontWeight={650}>{stage.value.reportedAt ? new Date(stage.value.reportedAt).toLocaleString() : "Not confirmed"}</Typography>
+            <Typography variant="body2" color="text.secondary">Reported time</Typography><Typography fontWeight={650} sx={{ mb: 2 }}>{stage.value.reportedAt ? new Date(stage.value.reportedAt).toLocaleString() : "Not confirmed"}</Typography>
+            <Button fullWidth sx={{ mt: 1 }} variant="outlined" startIcon={<HistoryRoundedIcon />} onClick={() => showCallLogs(stage.label === "Check-in" ? "check_in" : "check_out")}>View {stage.label.toLowerCase()} logs</Button>
           </CardContent></Card></Grid>)}
         </Grid>
-        <Card><CardContent sx={{ p: 3 }}>
+        <Card id="session-call-logs"><CardContent sx={{ p: 3 }}>
           <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1.5}>
             <Box><Typography variant="h6">Call logs and recordings</Typography><Typography variant="body2" color="text.secondary">View attempts, transcripts, and recordings separately for check-in and check-out.</Typography></Box>
             <Button variant="outlined" startIcon={artifacts.isFetching ? <CircularProgress size={16} /> : <ArticleRoundedIcon />} onClick={showCallLogs} disabled={artifacts.isFetching}>
@@ -88,6 +94,7 @@ export function AssignmentStatusPage() {
           {artifacts.isError && <Alert severity="error" sx={{ mt: 2 }}>Could not load call logs. Confirm this API key can access the session.</Alert>}
           {artifacts.data && <Stack spacing={2.5} sx={{ mt: 2.5 }}>
             {(["check_in", "check_out"] as const).map((stage) => {
+              if (logStage && logStage !== stage) return null;
               const attempts = artifacts.data.callAttempts.filter((attempt) => attempt.stage === stage);
               return <Box key={stage}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25 }}>
