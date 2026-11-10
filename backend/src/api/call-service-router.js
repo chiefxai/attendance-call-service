@@ -62,6 +62,24 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     return req.orgId;
   };
   const fail = (res, error) => res.status(error.status || 500).json({ error: error.message || "Request failed" });
+  const envNumber = (name, fallback) => process.env[name] !== undefined && process.env[name] !== "" && Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback;
+  const getEffectiveCallingSettings = async (organizationId) => {
+    const stored = await repository.getOrganizationCallSettings(organizationId);
+    const storedRetry = stored.callRetry || {};
+    return {
+      defaultFromNumber: stored.defaultFromNumber ?? process.env.VOBIZ_FROM_NUMBER ?? "",
+      retry: {
+        maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 5),
+        initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 5),
+        multiplier: storedRetry.multiplier ?? envNumber("CALL_RETRY_MULTIPLIER", 1.2),
+        maxMinutes: storedRetry.maxMinutes ?? envNumber("CALL_RETRY_MAX_MINUTES", 30),
+      },
+      source: {
+        defaultFromNumber: stored.defaultFromNumber ? "settings" : "environment",
+        retry: Object.keys(storedRetry).length ? "settings" : "environment",
+      },
+    };
+  };
 
   router.post("/api-keys", async (req, res) => {
     try {
@@ -126,15 +144,56 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     try { res.json(await repository.getCallCenterData(org(req))); } catch (error) { fail(res, error); }
   });
 
+  router.get("/settings/calling", async (req, res) => {
+    try { res.set("Cache-Control", "private, no-store").json(await getEffectiveCallingSettings(org(req))); }
+    catch (error) { fail(res, error); }
+  });
+
+  router.put("/settings/calling", async (req, res) => {
+    try {
+      const organizationId = org(req);
+      const body = req.body || {};
+      const defaultFromNumber = body.defaultFromNumber == null || body.defaultFromNumber === "" ? null : String(body.defaultFromNumber).trim();
+      if (defaultFromNumber && !/^\\+[1-9]\\d{7,14}$/.test(defaultFromNumber)) {
+        return res.status(400).json({ error: "Default caller ID must be in E.164 format, for example +918071580130" });
+      }
+      const retry = body.retry;
+      if (!retry || typeof retry !== "object") return res.status(400).json({ error: "retry settings are required" });
+      const maxConsecutiveNoAnswer = Number(retry.maxConsecutiveNoAnswer);
+      const initialMinutes = Number(retry.initialMinutes);
+      const multiplier = Number(retry.multiplier);
+      const maxMinutes = Number(retry.maxMinutes);
+      if (!Number.isInteger(maxConsecutiveNoAnswer) || maxConsecutiveNoAnswer < 1 || maxConsecutiveNoAnswer > 20
+        || !Number.isInteger(initialMinutes) || initialMinutes < 1 || initialMinutes > 1440
+        || !Number.isFinite(multiplier) || multiplier < 1 || multiplier > 5
+        || !Number.isInteger(maxMinutes) || maxMinutes < initialMinutes || maxMinutes > 1440) {
+        return res.status(400).json({ error: "Retry limit must be 1–20, initial/max intervals 1–1440 minutes with max ≥ initial, and multiplier 1–5" });
+      }
+      await repository.saveOrganizationCallSettings(organizationId, {
+        defaultFromNumber,
+        callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
+      });
+      res.json(await getEffectiveCallingSettings(organizationId));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.post("/settings/calling/reset", async (req, res) => {
+    try {
+      const organizationId = org(req);
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null });
+      res.json(await getEffectiveCallingSettings(organizationId));
+    } catch (error) { fail(res, error); }
+  });
+
   router.post("/assignments", async (req, res) => {
     try {
       const organizationId = org(req);
       const body = req.body || {};
       const required = ["assignmentId", "agentId", "language", "scheduledStartAt", "scheduledEndAt"];
       const missing = required.filter((key) => !body[key]);
-      const fromNumber = body.fromNumber || process.env.VOBIZ_FROM_NUMBER;
+      const callingSettings = await getEffectiveCallingSettings(organizationId);\n      const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
       if (missing.length || !fromNumber || !body.employee?.id || !body.employee?.name || !body.employee?.phoneNumber || !body.patient?.id || !body.patient?.name || !body.patient?.address) {
-        return res.status(400).json({ error: "Assignment requires assignmentId, agentId, language, scheduledStartAt, scheduledEndAt, employee identity and phone, patient identity and address, and either fromNumber or VOBIZ_FROM_NUMBER in the service environment" });
+        return res.status(400).json({ error: "Assignment requires assignmentId, agentId, language, scheduledStartAt, scheduledEndAt, employee identity and phone, patient identity and address, and either fromNumber or the default caller ID in Settings/.env" });
       }
       const startAt = new Date(body.scheduledStartAt);
       const endAt = new Date(body.scheduledEndAt);
