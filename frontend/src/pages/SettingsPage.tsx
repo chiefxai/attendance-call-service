@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, CircularProgress, Grid, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, CircularProgress, FormControlLabel, Grid, Stack, Switch, Tab, Tabs, TextField, Typography } from "@mui/material";
 import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
 import SettingsPhoneRoundedIcon from "@mui/icons-material/SettingsPhoneRounded";
@@ -12,6 +12,7 @@ import { PageHeader } from "../components/OperationsUI";
 type CallingForm = Omit<CallingSettings, "source">;
 const emptySettings: CallingForm = {
   defaultFromNumber: "",
+  allowNonPatientInboundCalls: false,
   retry: { maxConsecutiveNoAnswer: 5, initialMinutes: 5, multiplier: 1.2, maxMinutes: 30 },
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
@@ -23,7 +24,7 @@ export function SettingsPage() {
   const settings = useQuery({ queryKey: ["calling-settings"], queryFn: fetchCallingSettings, retry: false });
   useEffect(() => {
     if (!settings.data) return;
-    setForm({ defaultFromNumber: settings.data.defaultFromNumber, retry: settings.data.retry });
+    setForm({ defaultFromNumber: settings.data.defaultFromNumber, allowNonPatientInboundCalls: settings.data.allowNonPatientInboundCalls, retry: settings.data.retry });
   }, [settings.data]);
 
   const save = useMutation({
@@ -64,6 +65,13 @@ export function SettingsPage() {
             helperText={settings.data.source.defaultFromNumber === "settings" ? "Workspace setting override · E.164 format" : "Using .env fallback · saving here overrides it"}
             inputProps={{ inputMode: "tel" }}
           />
+          <Box sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+            <FormControlLabel
+              control={<Switch checked={form.allowNonPatientInboundCalls} onChange={(_, checked) => setForm((current) => ({ ...current, allowNonPatientInboundCalls: checked }))} />}
+              label={<Box><Typography fontWeight={650}>Allow non-patient incoming calls</Typography><Typography variant="body2" color="text.secondary">When enabled, answer calls from numbers that don’t match a registered patient. When disabled, reject them immediately.</Typography></Box>}
+              sx={{ alignItems: "flex-start", m: 0, "& .MuiSwitch-root": { mr: 1 } }}
+            />
+          </Box>
           <Box><Typography variant="h6">No-answer retry policy</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>The retry delay grows exponentially and stops at the configured attempt limit. {settings.data.source.retry === "settings" ? "Workspace override is active." : "Values currently come from .env."}</Typography></Box>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="number" label="Maximum consecutive unanswered calls" value={form.retry.maxConsecutiveNoAnswer} onChange={(event) => updateRetry("maxConsecutiveNoAnswer", event.target.value)} inputProps={{ min: 1, max: 20, step: 1 }} helperText="Allowed range: 1–20 calls" /></Grid>

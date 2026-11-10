@@ -5,6 +5,8 @@
 
 See [backend/README.md](backend/README.md) for backend integration and setup.
 
+For automatic deployments after merges to `main`, see [GitHub Actions VM deployment](docs/github-actions-vm-deploy.md). This requires one-time GCP Workload Identity Federation, OS Login/IAP, and GitHub repository variable setup.
+
 ## Deploy on a GCP Linux VM
 
 Docker Compose runs PostgreSQL, private MinIO storage, the API, a one-shot

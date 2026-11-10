@@ -84,6 +84,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     const storedRetry = stored.callRetry || {};
     return {
       defaultFromNumber: stored.defaultFromNumber ?? process.env.VOBIZ_FROM_NUMBER ?? "",
+      allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
       retry: {
         maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 5),
         initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 5),
@@ -307,6 +308,9 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       }
       const retry = body.retry;
       if (!retry || typeof retry !== "object") return res.status(400).json({ error: "retry settings are required" });
+      if (body.allowNonPatientInboundCalls !== undefined && typeof body.allowNonPatientInboundCalls !== "boolean") {
+        return res.status(400).json({ error: "allowNonPatientInboundCalls must be a boolean" });
+      }
       const maxConsecutiveNoAnswer = Number(retry.maxConsecutiveNoAnswer);
       const initialMinutes = Number(retry.initialMinutes);
       const multiplier = Number(retry.multiplier);
@@ -317,9 +321,11 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         || !Number.isInteger(maxMinutes) || maxMinutes < initialMinutes || maxMinutes > 1440) {
         return res.status(400).json({ error: "Retry limit must be 1–20, initial/max intervals 1–1440 minutes with max ≥ initial, and multiplier 1–5" });
       }
+      const existingSettings = await repository.getOrganizationCallSettings(organizationId);
       await repository.saveOrganizationCallSettings(organizationId, {
         defaultFromNumber,
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
+        allowNonPatientInboundCalls: body.allowNonPatientInboundCalls ?? existingSettings.allowNonPatientInboundCalls ?? false,
       });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
@@ -328,7 +334,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.post("/settings/calling/reset", async (req, res) => {
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowNonPatientInboundCalls: false });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });

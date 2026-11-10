@@ -1,0 +1,97 @@
+name: Deploy to GCP VM
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: attendance-production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy production VM
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_VM_NAME: ${{ vars.GCP_VM_NAME }}
+      GCP_VM_ZONE: ${{ vars.GCP_VM_ZONE }}
+      GCP_DEPLOY_USER: ${{ vars.GCP_DEPLOY_USER }}
+      GCP_DEPLOY_PATH: ${{ vars.GCP_DEPLOY_PATH }}
+      PUBLIC_HEALTH_URL: ${{ vars.PUBLIC_HEALTH_URL }}
+    steps:
+      - name: Check out production revision
+        uses: actions/checkout@v7
+
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Deploy over IAP SSH
+        shell: bash
+        env:
+          REMOTE_SCRIPT: |
+            set -Eeuo pipefail
+            cd "$GCP_DEPLOY_PATH"
+            test "$(git branch --show-current)" = "main"
+            git pull --ff-only origin main
+            echo "Deploying commit $(git rev-parse --short HEAD)"
+
+            sudo -n docker compose --parallel 1 --env-file .env \
+              -f docker-compose.yml -f docker-compose.vertex-credentials.yml \
+              build backend-api backend-worker backend-migrate frontend
+
+            sudo -n docker compose --env-file .env \
+              -f docker-compose.yml -f docker-compose.vertex-credentials.yml \
+              up -d --no-build
+
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error --connect-timeout 5 "$PUBLIC_HEALTH_URL"; then
+                echo "Deployment health check passed."
+                exit 0
+              fi
+              sleep 5
+            done
+
+            sudo -n docker compose --env-file .env \
+              -f docker-compose.yml -f docker-compose.vertex-credentials.yml \
+              logs --tail=100 backend-migrate backend-api backend-worker frontend caddy
+            exit 1
+        run: |
+          set -Eeuo pipefail
+          for name in GCP_PROJECT_ID GCP_VM_NAME GCP_VM_ZONE GCP_DEPLOY_USER GCP_DEPLOY_PATH PUBLIC_HEALTH_URL; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing GitHub repository variable: ${name}" >&2
+              exit 1
+            fi
+          done
+          [[ "$GCP_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "GCP_DEPLOY_USER must be a Linux username" >&2; exit 1; }
+          [[ "$GCP_DEPLOY_PATH" =~ ^/home/[a-zA-Z0-9._/-]+$ && "$GCP_DEPLOY_PATH" != *".."* ]] || { echo "GCP_DEPLOY_PATH must be a simple absolute path under /home" >&2; exit 1; }
+          [[ "$PUBLIC_HEALTH_URL" =~ ^https://[a-zA-Z0-9.-]+/healthz$ ]] || { echo "PUBLIC_HEALTH_URL must be an HTTPS /healthz URL" >&2; exit 1; }
+
+          remote_payload="$(printf '%s' "$REMOTE_SCRIPT" | base64 | tr -d '\n')"
+          printf -v remote_user_q '%q' "$GCP_DEPLOY_USER"
+          printf -v deploy_path_q '%q' "$GCP_DEPLOY_PATH"
+          printf -v health_url_q '%q' "$PUBLIC_HEALTH_URL"
+          remote_command="printf '%s' '${remote_payload}' | base64 --decode | sudo -n -u ${remote_user_q} -H env GCP_DEPLOY_PATH=${deploy_path_q} PUBLIC_HEALTH_URL=${health_url_q} bash"
+
+          gcloud compute ssh "$GCP_VM_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$GCP_VM_ZONE" \
+            --tunnel-through-iap \
+            --quiet \
+            --command "$remote_command"
