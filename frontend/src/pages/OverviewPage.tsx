@@ -6,7 +6,6 @@ import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import HowToRegRoundedIcon from "@mui/icons-material/HowToRegRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
-import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import CrisisAlertRoundedIcon from "@mui/icons-material/CrisisAlertRounded";
 import CallRoundedIcon from "@mui/icons-material/CallRounded";
 import { fetchAgents, fetchAttendance, fetchOperationsSummary, type AttendanceRecord, type OperationsSummary } from "../api/client";
@@ -98,9 +97,8 @@ export function OverviewPage({ showAgents = false }: { showAgents?: boolean }) {
 
   const metrics = [
     { label: "Scheduled today", value: metricValue(summary?.scheduledToday), detail: "Assignments scheduled for today", icon: <GroupRoundedIcon /> },
-    { label: "Verified check-ins", value: metricValue(summary?.checkInsConfirmed), detail: "Confirmed from employee calls", icon: <HowToRegRoundedIcon />, tint: "#e5f5ee", accent: "#178264" },
+    { label: "Verified check-ins / check-outs", value: summary ? `${metricValue(summary.checkInsConfirmed)} / ${metricValue(summary.checkOutsConfirmed)}` : "—", detail: "Arrivals / duty completion confirmations", icon: <HowToRegRoundedIcon />, tint: "#e5f5ee", accent: "#178264" },
     { label: "Pending check-ins", value: metricValue(summary?.checkInsPending), detail: "Scheduled, calling, or follow-up", icon: <PendingActionsRoundedIcon />, tint: "#fff3df", accent: "#b8751a" },
-    { label: "Verified check-outs", value: metricValue(summary?.checkOutsConfirmed), detail: "Duty completion confirmed", icon: <LogoutRoundedIcon />, tint: "#e9efff", accent: "#1557c0" },
     { label: "Exceptions", value: metricValue(summary?.exceptions), detail: "No-answer or review required", icon: <CrisisAlertRoundedIcon />, tint: "#fff0ed", accent: "#c44747" },
   ];
   const pipeline = [
@@ -114,7 +112,7 @@ export function OverviewPage({ showAgents = false }: { showAgents?: boolean }) {
       actions={<><Chip label={new Date().toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })} variant="outlined" /><Button component={RouterLink} to="/attendance" variant="contained" endIcon={<ArrowForwardRoundedIcon />}>Open attendance</Button></>} />
     {(summaryQuery.isError || attendanceQuery.isError) && <Alert severity="error">Could not load live operations data. Check backend availability and authenticated organization access.</Alert>}
     <Grid container spacing={1.75}>
-      {metrics.map((metric) => <Grid key={metric.label} size={{ xs: 12, sm: 6, xl: 2.4 }}><MetricCard {...metric} /></Grid>)}
+      {metrics.map((metric) => <Grid key={metric.label} size={{ xs: 12, sm: 6, md: 3 }}><MetricCard {...metric} /></Grid>)}
     </Grid>
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, xl: 7 }}><SectionCard title="Check-in and check-out trend" subtitle="Confirmed employee-reported arrival and departure times over the past 7 days."><AttendanceTrendChart points={chartData.trend} /></SectionCard></Grid>
@@ -123,12 +121,12 @@ export function OverviewPage({ showAgents = false }: { showAgents?: boolean }) {
       <Grid size={{ xs: 12, md: 6 }}><SectionCard title="Attendance by calling language" subtitle="Session outcomes grouped by the employee's selected language."><LanguageOutcomeChart rows={chartData.languageStacks} /></SectionCard></Grid>
     </Grid>
     <Grid container spacing={2}>
-      <Grid size={{ xs: 12, xl: 7 }}><SectionCard title="Attendance status" subtitle="Confirmed and pending check-ins and check-outs from PostgreSQL.">
+      <Grid size={{ xs: 12, lg: 7 }}><SectionCard title="Attendance status" subtitle="Confirmed and pending check-ins and check-outs from PostgreSQL.">
         {summaryQuery.isLoading ? <LinearProgress /> : <Stack spacing={2.2}>
           {[{ label: "Check-ins confirmed", value: summary?.checkInsConfirmed || 0, total: summary?.scheduledToday || 0, color: "#1557c0" }, { label: "Check-outs confirmed", value: summary?.checkOutsConfirmed || 0, total: summary?.scheduledToday || 0, color: "#178264" }, { label: "Check-ins pending", value: summary?.checkInsPending || 0, total: summary?.scheduledToday || 0, color: "#c07b24" }].map((item) => <Box key={item.label}><Stack direction="row" justifyContent="space-between" sx={{ mb: .7 }}><Typography variant="body2">{item.label}</Typography><Typography variant="body2" fontWeight={700}>{item.value} / {item.total}</Typography></Stack><LinearProgress variant="determinate" value={item.total ? Math.min(100, item.value / item.total * 100) : 0} sx={{ height: 8, borderRadius: 5, bgcolor: "#edf0f5", "& .MuiLinearProgress-bar": { bgcolor: item.color, borderRadius: 5 } }} /></Box>)}
         </Stack>}
       </SectionCard></Grid>
-      <Grid size={{ xs: 12, xl: 5 }}><SectionCard title="Outbound call pipeline" subtitle="Current provider call and durable retry queue state." action={<Chip size="small" label={`${summary?.activeCalls ?? "—"} / ${summary?.maxConcurrentCalls ?? "—"} active`} variant="outlined" />}>
+      <Grid size={{ xs: 12, lg: 5 }}><SectionCard title="Outbound call pipeline" subtitle="Current provider call and durable retry queue state." action={<Chip size="small" label={`${summary?.activeCalls ?? "—"} / ${summary?.maxConcurrentCalls ?? "—"} active`} variant="outlined" />}>
         {summaryQuery.isLoading ? <LinearProgress /> : pipeline.map((row) => <Box key={row.name} sx={{ mb: 2.1 }}><Stack direction="row" justifyContent="space-between" sx={{ mb: .7 }}><Typography variant="body2">{row.name}</Typography><Typography variant="body2" fontWeight={700}>{row.value}</Typography></Stack><LinearProgress variant="determinate" value={Math.max(0, Math.min(100, row.percent))} color={row.color as "success" | "warning" | "primary"} sx={{ height: 7, borderRadius: 5, bgcolor: "#edf0f5" }} /></Box>)}
         <Button component={RouterLink} to="/call-center" fullWidth endIcon={<ArrowForwardRoundedIcon />}>Open AI call center</Button>
       </SectionCard></Grid>
