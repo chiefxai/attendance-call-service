@@ -142,7 +142,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     const language = String(req.body?.language || "en").trim().toLowerCase();
     if (!id || id.length > 120) return res.status(400).json({ error: "Staff ID is required and must be at most 120 characters." });
     if (!name || name.length > 120) return res.status(400).json({ error: "Staff name is required and must be at most 120 characters." });
-    if (!/^\\+[1-9]\\d{7,14}$/.test(phoneNumber)) return res.status(400).json({ error: "Enter the staff phone in E.164 format, such as +919876543210." });
+    if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber)) return res.status(400).json({ error: "Enter the staff phone in E.164 format, such as +919876543210." });
     if (!address || address.length > 1000) return res.status(400).json({ error: "Staff address is required and must be at most 1000 characters." });
     if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
     try {
@@ -167,7 +167,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     const hub = String(req.body?.hub || "").trim();
     if (!id || id.length > 120) return res.status(400).json({ error: "Patient ID is required and must be at most 120 characters." });
     if (!name || name.length > 120) return res.status(400).json({ error: "Patient name is required and must be at most 120 characters." });
-    if (phoneNumber && !/^\\+[1-9]\\d{7,14}$/.test(phoneNumber)) return res.status(400).json({ error: "Enter the patient phone in E.164 format." });
+    if (phoneNumber && !/^\+[1-9]\d{7,14}$/.test(phoneNumber)) return res.status(400).json({ error: "Enter the patient phone in E.164 format." });
     if (!address || address.length > 1000) return res.status(400).json({ error: "Patient address is required and must be at most 1000 characters." });
     if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
     if (careCategory.length > 120 || hub.length > 120) return res.status(400).json({ error: "Care category and hub must be at most 120 characters." });
