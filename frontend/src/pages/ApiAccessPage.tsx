@@ -79,7 +79,7 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
 
   return <Stack spacing={2.5}>
     {section === "docs" && <PageHeader eyebrow="PLATFORM INTEGRATION" title="API documentation" description="Integrate assignment scheduling, session results, recordings, transcripts, and completion callbacks." />}
-    {section === "settings" && <PageHeader eyebrow="SERVICE API" title="API configuration" description="Manage service keys and connect this browser to the selected workspace." />}
+    {section === "settings" && <PageHeader eyebrow="SERVICE API" title="API configuration" description="Manage service API keys for your platform integrations." />}
     {section === "settings" && <>
     <Alert severity="info">Web access uses your signed-in account. To add or disable accounts, an administrator runs the server-side account provisioning command. Service API keys below are for your platform backend; they are shown only once and should never be stored in browser code.</Alert>
 
