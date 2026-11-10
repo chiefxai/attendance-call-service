@@ -211,6 +211,8 @@ export interface StaffRecord {
   dutyStatus: string;
   assignmentId: string;
   sessionId: string;
+  scheduledStartAt: string | null;
+  scheduledEndAt: string | null;
 }
 
 export interface PatientRecord {
