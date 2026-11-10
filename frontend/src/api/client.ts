@@ -359,6 +359,21 @@ export async function updateAgent(agentId: string, update: Pick<Agent, "name" | 
   return response.data;
 }
 
+export interface EmployeeScheduleOverlap {
+  overlap: boolean;
+  conflict: { assignmentId: string; patientName: string; scheduledStartAt: string; scheduledEndAt: string } | null;
+}
+
+export async function fetchEmployeeScheduleOverlap(params: {
+  employeeId: string;
+  startAt: string;
+  endAt: string;
+  assignmentId?: string;
+}) {
+  const response = await api.get<EmployeeScheduleOverlap>("/assignments/overlap", { params });
+  return response.data;
+}
+
 export async function createAssignment(payload: AssignmentPayload) {
   const response = await api.post<{ sessionId: string; status: string; queued: string[] }>("/assignments", payload);
   return response.data;
