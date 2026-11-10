@@ -35,7 +35,7 @@ async function main() {
     recordings,
   });
   const postCallAgent = createAttendancePostCallAgent({
-    getClientForOrg,
+    project: process.env.GOOGLE_CLOUD_PROJECT,
     location: process.env.VERTEX_SUMMARY_LOCATION || "global",
   });
   const backend = createAttendanceBackendClient();
