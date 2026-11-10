@@ -99,7 +99,7 @@ export interface AssignmentPayload {
   language: string;
   scheduledStartAt: string;
   scheduledEndAt: string;
-  employee: { id: string; name: string; phoneNumber: string };
+  employee: { id: string; name: string; phoneNumber: string; address: string };
   patient: { id: string; name: string; address: string; phoneNumber?: string };
 }
 
@@ -141,7 +141,9 @@ export interface OperationsSummary {
 export interface StaffRecord {
   id: string;
   name: string;
+  phoneNumber: string | null;
   phoneMasked: string | null;
+  address: string;
   language: string;
   patientName: string;
   patientId: string | null;
@@ -153,6 +155,8 @@ export interface StaffRecord {
 export interface PatientRecord {
   id: string;
   name: string;
+  phoneNumber: string | null;
+  address: string;
   language: string;
   assignedStaff: string;
   employeeId: string | null;
