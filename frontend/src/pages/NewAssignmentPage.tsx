@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, CircularProgress, Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
+import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import { AxiosError } from "axios";
 import { createAssignment, fetchAgents, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
 import { useNavigate } from "react-router-dom";
@@ -47,6 +48,99 @@ const initialValues: FormValues = {
   patientId: "", patientName: "", patientPhone: "", patientAddress: "",
 };
 
+const BULK_HEADERS = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress"];
+const MAX_BULK_ROWS = 200;
+interface BulkAssignmentRow { line: number; payload?: AssignmentPayload; errors: string[]; }
+interface BulkAssignmentResult { sessionId?: string; error?: string; }
+
+function parseCsvRows(input: string): string[][] {
+  const text = input.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (quoted && text[index + 1] === '"') { cell += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) { row.push(cell); cell = ""; }
+    else if (char === "\n" && !quoted) {
+      row.push(cell.replace(/\r$/, ""));
+      if (row.some((value) => value.trim())) rows.push(row);
+      row = []; cell = "";
+    } else cell += char;
+  }
+  if (quoted) throw new Error("The CSV contains an unclosed quoted field.");
+  if (cell || row.length) {
+    row.push(cell.replace(/\r$/, ""));
+    if (row.some((value) => value.trim())) rows.push(row);
+  }
+  return rows;
+}
+
+function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows: BulkAssignmentRow[]; error?: string } {
+  let sourceRows: string[][];
+  try { sourceRows = parseCsvRows(csv); }
+  catch (error) { return { rows: [], error: error instanceof Error ? error.message : "Could not read this CSV." }; }
+  if (sourceRows.length < 2) return { rows: [], error: "The CSV needs a header row and at least one assignment row." };
+  const headers = sourceRows[0].map((value) => value.trim());
+  const indexes = new Map(headers.map((header, index) => [header, index]));
+  const optionalHeaders = ["fromNumber", "patientPhone"];
+  const missingHeaders = BULK_HEADERS.filter((header) => !optionalHeaders.includes(header) && !indexes.has(header));
+  if (missingHeaders.length) return { rows: [], error: "Missing CSV columns: " + missingHeaders.join(", ") };
+  const dataRows = sourceRows.slice(1);
+  if (dataRows.length > MAX_BULK_ROWS) return { rows: [], error: "Upload no more than " + MAX_BULK_ROWS + " assignments at once." };
+  const seenAssignments = new Set<string>();
+  const languageMap: Record<string, string> = { ta: "ta", tamil: "ta", en: "en", english: "en", ml: "ml", malayalam: "ml", te: "te", telugu: "te" };
+  const rows = dataRows.map((cells, index): BulkAssignmentRow => {
+    const get = (field: string) => cells[indexes.get(field) ?? -1]?.trim() || "";
+    const line = index + 2;
+    const assignmentId = get("assignmentId");
+    const agentId = get("agentId");
+    const language = languageMap[get("language").toLowerCase()];
+    const startValue = get("scheduledStartAt");
+    const endValue = get("scheduledEndAt");
+    const hasTimezone = (value: string) => /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+    const startAt = Date.parse(startValue);
+    const endAt = Date.parse(endValue);
+    const errors: string[] = [];
+    if (!assignmentId) errors.push("assignmentId is required");
+    else if (seenAssignments.has(assignmentId)) errors.push("assignmentId is duplicated in this file");
+    else seenAssignments.add(assignmentId);
+    if (!agentId || !activeAgentIds.has(agentId)) errors.push("agentId must match an active agent");
+    if (!language) errors.push("language must be ta, en, ml, or te");
+    if (!startValue || !hasTimezone(startValue) || !Number.isFinite(startAt)) errors.push("scheduledStartAt must be ISO 8601 with a timezone");
+    if (!endValue || !hasTimezone(endValue) || !Number.isFinite(endAt)) errors.push("scheduledEndAt must be ISO 8601 with a timezone");
+    if (Number.isFinite(startAt) && Number.isFinite(endAt) && endAt <= startAt) errors.push("scheduledEndAt must be after scheduledStartAt");
+    for (const field of ["employeeId", "employeeName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientAddress"]) {
+      if (!get(field)) errors.push(field + " is required");
+    }
+    const payload: AssignmentPayload = {
+      assignmentId, agentId, fromNumber: get("fromNumber"), language: language || "en",
+      scheduledStartAt: Number.isFinite(startAt) ? new Date(startAt).toISOString() : "",
+      scheduledEndAt: Number.isFinite(endAt) ? new Date(endAt).toISOString() : "",
+      employee: { id: get("employeeId"), name: get("employeeName"), phoneNumber: get("employeePhone"), address: get("employeeAddress") },
+      patient: { id: get("patientId"), name: get("patientName"), address: get("patientAddress"), phoneNumber: get("patientPhone") },
+    };
+    return { line, payload: errors.length ? undefined : payload, errors };
+  });
+  return { rows };
+}
+
+function downloadBulkTemplate() {
+  const csv = BULK_HEADERS.join(",") + "\r\n";
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = "attendance-assignments-template.csv";
+  link.click(); URL.revokeObjectURL(url);
+}
+
+function requestError(error: unknown) {
+  if (error instanceof AxiosError) return error.response?.data?.error || error.message;
+  return error instanceof Error ? error.message : "Request failed";
+}
+
 function FormField({ label, value, onChange, required = false, type = "text", helperText, multiline = false, rows }: {
   label: string; value: string; onChange: (value: string) => void; required?: boolean;
   type?: string; helperText?: string; multiline?: boolean; rows?: number;
@@ -57,6 +151,11 @@ function FormField({ label, value, onChange, required = false, type = "text", he
 export function NewAssignmentPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState(initialValues);
+  const [mode, setMode] = useState<"single" | "bulk">("single");
+  const [bulkRows, setBulkRows] = useState<BulkAssignmentRow[]>([]);
+  const [bulkFileError, setBulkFileError] = useState("");
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkResults, setBulkResults] = useState<Record<number, BulkAssignmentResult>>({});
   const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents, retry: 0 });
   const staff = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), retry: 0 });
   const patients = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), retry: 0 });
@@ -65,6 +164,35 @@ export function NewAssignmentPage() {
     onSuccess: (result) => navigate(`/sessions/${result.sessionId}`),
   });
   const update = (key: keyof FormValues) => (value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const activeAgentIds = new Set(agents.data?.filter((agent) => agent.active).map((agent) => agent.id) || []);
+  const validBulkCount = bulkRows.filter((row) => row.payload && !bulkResults[row.line]?.sessionId).length;
+  const completedBulkCount = Object.values(bulkResults).filter((result) => result.sessionId).length;
+  const handleBulkFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setBulkRows([]); setBulkResults({}); setBulkFileError("");
+    if (file.size > 5 * 1024 * 1024) { setBulkFileError("CSV file must be 5 MB or smaller."); return; }
+    try {
+      const parsed = parseBulkAssignments(await file.text(), activeAgentIds);
+      setBulkRows(parsed.rows); setBulkFileError(parsed.error || "");
+    } catch (error) { setBulkFileError(requestError(error)); }
+  };
+  const submitBulk = async () => {
+    if (bulkRunning) return;
+    setBulkRunning(true); setBulkFileError("");
+    try {
+      for (const row of bulkRows) {
+        if (!row.payload || bulkResults[row.line]?.sessionId) continue;
+        try {
+          const result = await createAssignment(row.payload);
+          setBulkResults((current) => ({ ...current, [row.line]: { sessionId: result.sessionId } }));
+        } catch (error) {
+          setBulkResults((current) => ({ ...current, [row.line]: { error: requestError(error) } }));
+        }
+      }
+    } finally { setBulkRunning(false); }
+  };
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const payload: AssignmentPayload = {
@@ -99,6 +227,11 @@ export function NewAssignmentPage() {
       {mutation.isError && <Alert severity="error">Assignment could not be scheduled: {errorMessage}</Alert>}
       {agents.isError && <Alert severity="warning">Unable to load agents. Verify the API connection and workspace access.</Alert>}
       {(staff.isError || patients.isError) && <Alert severity="warning">Saved staff or patient records could not be loaded. You can still enter the details manually.</Alert>}
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        <Button variant={mode === "single" ? "contained" : "outlined"} onClick={() => setMode("single")} disabled={mutation.isPending || bulkRunning}>Single assignment</Button>
+        <Button variant={mode === "bulk" ? "contained" : "outlined"} onClick={() => setMode("bulk")} disabled={mutation.isPending || bulkRunning}>Bulk CSV upload</Button>
+      </Stack>
+      {mode === "single" ? (
       <Box component="form" onSubmit={submit}>
         <Stack spacing={2.5}>
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
@@ -148,6 +281,51 @@ export function NewAssignmentPage() {
           </Stack>
         </Stack>
       </Box>
+      ) : (
+        <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+          <Stack spacing={2}>
+            <Box><Typography variant="h6">Create multiple sessions</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Upload a CSV with one assignment per row. Each row creates its own session and queues its check-in and check-out calls.</Typography>
+            </Box>
+            <Alert severity="info">Use the template columns exactly. Dates must be ISO 8601 with a timezone, such as 2026-11-12T08:00:00+05:30. The agentId must match an active calling agent.</Alert>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
+              <Button variant="outlined" onClick={downloadBulkTemplate} disabled={bulkRunning}>Download CSV template</Button>
+              <Button component="label" variant="contained" startIcon={<UploadFileRoundedIcon />} disabled={bulkRunning || agents.isLoading || agents.isError}>
+                Choose CSV file <input hidden type="file" accept=".csv,text/csv" onChange={handleBulkFile} />
+              </Button>
+            </Stack>
+            {bulkFileError && <Alert severity="error">{bulkFileError}</Alert>}
+            {bulkRows.length > 0 && <>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                <Chip size="small" label={bulkRows.length + " rows"} />
+                <Chip size="small" color="success" label={bulkRows.filter((row) => row.payload).length + " valid"} />
+                {bulkRows.some((row) => row.errors.length > 0) && <Chip size="small" color="error" label={bulkRows.filter((row) => row.errors.length > 0).length + " invalid"} />}
+                {completedBulkCount > 0 && <Chip size="small" color="success" label={completedBulkCount + " sessions created"} />}
+                {Object.values(bulkResults).some((result) => result.error) && <Chip size="small" color="error" label={Object.values(bulkResults).filter((result) => result.error).length + " failed"} />}
+              </Stack>
+              {bulkRunning && <Alert severity="info">Creating sessions sequentially. Keep this page open until processing finishes.</Alert>}
+              <Stack spacing={1} sx={{ maxHeight: 420, overflowY: "auto" }}>
+                {bulkRows.map((row) => {
+                  const result = bulkResults[row.line];
+                  const label = row.payload ? row.payload.assignmentId + " · " + row.payload.employee.name + " · " + row.payload.patient.name : "Row " + row.line;
+                  return <Box key={row.line} sx={{ border: "1px solid", borderColor: row.errors.length || result?.error ? "error.light" : result?.sessionId ? "success.light" : "divider", borderRadius: 2, p: 1.5 }}>
+                    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
+                      <Typography variant="body2" fontWeight={650}>{label}</Typography>
+                      <Chip size="small" color={row.errors.length || result?.error ? "error" : result?.sessionId ? "success" : "default"} label={row.errors.length ? "Invalid" : result?.sessionId ? "Created" : result?.error ? "Failed" : "Ready"} />
+                    </Stack>
+                    {row.errors.length > 0 && <Typography variant="caption" color="error.main" display="block" sx={{ mt: .5 }}>Row {row.line}: {row.errors.join("; ")}</Typography>}
+                    {result?.sessionId && <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: .5 }}>Session {result.sessionId}</Typography>}
+                    {result?.error && <Typography variant="caption" color="error.main" display="block" sx={{ mt: .5 }}>Creation failed: {result.error}</Typography>}
+                  </Box>;
+                })}
+              </Stack>
+              <Button variant="contained" onClick={() => void submitBulk()} disabled={bulkRunning || agents.isLoading || validBulkCount === 0} endIcon={bulkRunning ? <CircularProgress size={16} color="inherit" /> : undefined}>
+                {bulkRunning ? "Creating sessions…" : "Create " + validBulkCount + " valid sessions"}
+              </Button>
+            </>}
+          </Stack>
+        </CardContent></Card>
+      )}
     </Stack>
   );
 }
