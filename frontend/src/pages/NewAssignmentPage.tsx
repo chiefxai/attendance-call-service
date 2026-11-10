@@ -7,6 +7,7 @@ import { AxiosError } from "axios";
 import { createAssignment, fetchAgents, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/OperationsUI";
+import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
 interface FormValues {
   assignmentId: string;
@@ -114,6 +115,10 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
     const startAt = Date.parse(startValue);
     const endAt = Date.parse(endValue);
     const errors: string[] = [];
+    const employeePhoneInput = get("employeePhone");
+    const employeePhone = normalizeIndianMobile(employeePhoneInput);
+    const patientPhoneInput = get("patientPhone");
+    const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
     try { new Intl.DateTimeFormat("en-US", { timeZone: assignmentTimeZone }).format(); }
     catch { errors.push("timeZone must be a valid IANA timezone"); }
     if (!assignmentId) errors.push("assignmentId is required");
@@ -124,6 +129,8 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
     if (!startValue || !hasTimezone(startValue) || !Number.isFinite(startAt)) errors.push("scheduledStartAt must be ISO 8601 with a timezone");
     if (!endValue || !hasTimezone(endValue) || !Number.isFinite(endAt)) errors.push("scheduledEndAt must be ISO 8601 with a timezone");
     if (Number.isFinite(startAt) && Number.isFinite(endAt) && endAt <= startAt) errors.push("scheduledEndAt must be after scheduledStartAt");
+    if (employeePhoneInput && !employeePhone) errors.push("employeePhone must be a valid Indian mobile number (10 digits, optionally prefixed with 91 or +91)");
+    if (patientPhoneInput && !patientPhone) errors.push("patientPhone must be a valid Indian mobile number (10 digits, optionally prefixed with 91 or +91)");
     for (const field of ["employeeId", "employeeName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientAddress"]) {
       if (!get(field)) errors.push(field + " is required");
     }
@@ -132,8 +139,8 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
       scheduledStartAt: Number.isFinite(startAt) ? new Date(startAt).toISOString() : "",
       scheduledEndAt: Number.isFinite(endAt) ? new Date(endAt).toISOString() : "",
       metadata: { timeZone: assignmentTimeZone },
-      employee: { id: get("employeeId"), name: get("employeeName"), phoneNumber: get("employeePhone"), address: get("employeeAddress") },
-      patient: { id: get("patientId"), name: get("patientName"), address: get("patientAddress"), phoneNumber: get("patientPhone") },
+      employee: { id: get("employeeId"), name: get("employeeName"), phoneNumber: employeePhone || employeePhoneInput, address: get("employeeAddress") },
+      patient: { id: get("patientId"), name: get("patientName"), address: get("patientAddress"), phoneNumber: patientPhone || undefined },
     };
     return { line, payload: errors.length ? undefined : payload, errors };
   });
@@ -153,16 +160,18 @@ function requestError(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-function FormField({ label, value, onChange, required = false, type = "text", helperText, multiline = false, rows }: {
+function FormField({ label, value, onChange, required = false, type = "text", helperText, multiline = false, rows, error = false, onBlur }: {
   label: string; value: string; onChange: (value: string) => void; required?: boolean;
-  type?: string; helperText?: string; multiline?: boolean; rows?: number;
+  type?: string; helperText?: string; multiline?: boolean; rows?: number; error?: boolean; onBlur?: () => void;
 }) {
-  return <TextField fullWidth size="small" label={label} value={value} required={required} type={type} helperText={helperText} multiline={multiline} rows={rows} onChange={(event) => onChange(event.target.value)} InputLabelProps={type === "datetime-local" ? { shrink: true } : undefined} />;
+  return <TextField fullWidth size="small" label={label} value={value} required={required} type={type} helperText={helperText} error={error} multiline={multiline} rows={rows} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} InputLabelProps={type === "datetime-local" ? { shrink: true } : undefined} />;
 }
 
 export function NewAssignmentPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState(initialValues);
+  const [phoneError, setPhoneError] = useState("");
+  const [patientPhoneError, setPatientPhoneError] = useState("");
   const [mode, setMode] = useState<"single" | "bulk">("single");
   const [bulkRows, setBulkRows] = useState<BulkAssignmentRow[]>([]);
   const [bulkFileError, setBulkFileError] = useState("");
@@ -207,12 +216,19 @@ export function NewAssignmentPage() {
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const employeePhone = normalizeIndianMobile(form.employeePhone);
+    const patientPhoneInput = form.patientPhone.trim();
+    const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
+    if (!employeePhone) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
+    if (patientPhoneInput && !patientPhone) { setPatientPhoneError(INDIAN_MOBILE_ERROR); return; }
+    setPhoneError("");
+    setPatientPhoneError("");
     const payload: AssignmentPayload = {
       assignmentId: form.assignmentId.trim(), agentId: form.agentId, fromNumber: form.fromNumber.trim(),
       language: form.language, scheduledStartAt: toUtcIso(form.scheduledStartAt),
       scheduledEndAt: toUtcIso(form.scheduledEndAt), metadata: { timeZone: getBrowserTimeZone() },
-      employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), phoneNumber: form.employeePhone.trim(), address: form.employeeAddress.trim() },
-      patient: { id: form.patientId.trim(), name: form.patientName.trim(), phoneNumber: form.patientPhone.trim(), address: form.patientAddress.trim() },
+      employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), phoneNumber: employeePhone, address: form.employeeAddress.trim() },
+      patient: { id: form.patientId.trim(), name: form.patientName.trim(), phoneNumber: patientPhone || undefined, address: form.patientAddress.trim() },
     };
     mutation.mutate(payload);
   };
@@ -222,6 +238,7 @@ export function NewAssignmentPage() {
   const selectStaff = (employeeId: string) => {
     const employee = staff.data?.find((row) => row.id === employeeId);
     if (!employee) return;
+    setPhoneError("");
     setForm((current) => ({ ...current, employeeId: employee.id, employeeName: employee.name,
       employeePhone: employee.phoneNumber || "", employeeAddress: employee.address || "",
       language: employee.language ? callLanguageCode(employee.language) : current.language }));
@@ -229,6 +246,7 @@ export function NewAssignmentPage() {
   const selectPatient = (patientId: string) => {
     const patient = patients.data?.find((row) => row.id === patientId);
     if (!patient) return;
+    setPatientPhoneError("");
     setForm((current) => ({ ...current, patientId: patient.id, patientName: patient.name,
       patientPhone: patient.phoneNumber || "", patientAddress: patient.address || "" }));
   };
@@ -268,7 +286,7 @@ export function NewAssignmentPage() {
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee ID" value={form.employeeId} onChange={update("employeeId")} required /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee name" value={form.employeeName} onChange={update("employeeName")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee phone" value={form.employeePhone} onChange={update("employeePhone")} required helperText="Include country code." /></Grid>
+              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee mobile number" value={form.employeePhone} onChange={(value) => { setPhoneError(""); update("employeePhone")(value); }} required error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} onBlur={() => { const normalized = normalizeIndianMobile(form.employeePhone); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setForm((current) => ({ ...current, employeePhone: normalized })); } }} /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee address" value={form.employeeAddress} onChange={update("employeeAddress")} required /></Grid>
             </Grid>
           </CardContent></Card>
@@ -283,7 +301,7 @@ export function NewAssignmentPage() {
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient ID" value={form.patientId} onChange={update("patientId")} required /></Grid>
               <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient name" value={form.patientName} onChange={update("patientName")} required /></Grid>
-              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient phone (optional)" value={form.patientPhone} onChange={update("patientPhone")} /></Grid>
+              <Grid size={{ xs: 12, sm: 4 }}><FormField label="Patient mobile number (optional)" value={form.patientPhone} onChange={(value) => { setPatientPhoneError(""); update("patientPhone")(value); }} error={Boolean(patientPhoneError)} helperText={patientPhoneError || "If provided, enter 10 digits; 91 or +91 is optional. The patient is not called."} onBlur={() => { const input = form.patientPhone.trim(); if (!input) { setPatientPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPatientPhoneError(INDIAN_MOBILE_ERROR); else { setPatientPhoneError(""); setForm((current) => ({ ...current, patientPhone: normalized })); } }} /></Grid>
               <Grid size={12}><FormField label="Patient address" value={form.patientAddress} onChange={update("patientAddress")} required multiline rows={2} /></Grid>
             </Grid>
           </CardContent></Card>

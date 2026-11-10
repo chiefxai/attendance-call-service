@@ -129,7 +129,7 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
             <Paper variant="outlined" sx={{ mt: 1, p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{'{ "id": "PATIENT-2001", "name": "Patient name", "phoneNumber": "+919876543210", "address": "Client service address", "language": "en", "careCategory": "Home care", "hub": "Chennai" }'}</Box></Paper>
           </Grid>
         </Grid>
-        <Typography variant="caption" color="text.secondary">Staff IDs and patient IDs must be unique within the organization. Phone numbers must use E.164 format; patient phone number is optional. Supported languages are English, Tamil, Malayalam, and Telugu.</Typography>
+        <Typography variant="caption" color="text.secondary">Staff IDs and patient IDs must be unique within the organization. Indian phone numbers may be entered as 10 digits (9876543210), with the country code 91 (919876543210), or +91 (+919876543210); the service validates and normalizes them to +91 followed by 10 digits. Patient phone number is optional. Supported languages are English, Tamil, Malayalam, and Telugu.</Typography>
       </Stack>
     </SectionCard>
 

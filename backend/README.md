@@ -110,7 +110,14 @@ the employee requests a later callback. The host app can read
 
 `POST /assignments` accepts employee and patient details, agent, language,
 caller ID, and scheduled shift times. It schedules employee calls at check-in
-and check-out in one database transaction with the session record. Repeating
+and check-out in one database transaction with the session record.
+
+Indian mobile numbers are accepted as 10 digits (`9876543210`), 12 digits with
+country code 91 (`919876543210`), or with an explicit `+91` prefix
+(`+919876543210`). The service validates Indian mobile numbers (starting with
+6–9) and normalizes them to `+91` plus the 10-digit number before storing or
+dialing. Staff and employee numbers are required; patient numbers are optional
+and are never dialed by the current workflow. Repeating
 the same request is idempotent and repairs missing queue entries; changing
 assignment details or times requires a new `scheduleVersion` (otherwise the
 API returns HTTP 409). The patient phone may be stored for future use, but is not
