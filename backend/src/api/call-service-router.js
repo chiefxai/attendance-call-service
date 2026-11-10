@@ -31,7 +31,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     return expected.length > 0 && expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
   };
   router.use(async (req, res, next) => {
-    if (req.method === "POST" && ["/answer", "/webhooks/call-status"].includes(req.path)) return next();
+    if (req.method === "POST" && ["/answer", "/incoming/answer", "/webhooks/call-status"].includes(req.path)) return next();
 
     try {
       const cookieHeader = String(req.headers.cookie || "");
@@ -65,6 +65,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   });
   const liveRuntime = createVobizLiveRuntime({ repository, vobiz, verifyWebhook: validateWebhook, getClientForOrg, recordings, queue });
   router.post("/answer", liveRuntime.answerHandler);
+  router.post("/incoming/answer", liveRuntime.incomingAnswerHandler);
   router.handleVobizUpgrade = liveRuntime.handleUpgrade;
   router.closeVobizLiveRuntime = liveRuntime.close;
 
@@ -252,6 +253,43 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
 
   router.get("/call-center", async (req, res) => {
     try { res.json(await repository.getCallCenterData(org(req))); } catch (error) { fail(res, error); }
+  });
+
+  router.get("/incoming-calls", async (req, res) => {
+    try {
+      const calls = await repository.listInboundCalls(org(req), req.query.limit || 100);
+      res.json(calls.map((call) => ({
+        id: call.id, status: call.status, fromNumber: call.fromNumber, patient: call.patient || null,
+        language: call.language, startedAt: call.startedAt, answeredAt: call.answeredAt,
+        endedAt: call.endedAt, durationSeconds: call.durationSeconds,
+        hasRecording: Boolean(call.recordingObjectKey), transcript: call.transcript || null,
+      })));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/incoming-calls/:id", async (req, res) => {
+    try {
+      const call = await repository.getInboundCall(req.params.id, org(req));
+      if (!call) return res.status(404).json({ error: "Incoming call not found" });
+      res.json({
+        id: call.id, status: call.status, fromNumber: call.fromNumber, patient: call.patient || null,
+        language: call.language, startedAt: call.startedAt, answeredAt: call.answeredAt,
+        endedAt: call.endedAt, durationSeconds: call.durationSeconds,
+        hasRecording: Boolean(call.recordingObjectKey), transcript: call.transcript || null,
+      });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/incoming-calls/:id/recording", async (req, res) => {
+    try {
+      const call = await repository.getInboundCall(req.params.id, org(req));
+      if (!call?.recordingObjectKey) return res.status(404).json({ error: "Recording not found" });
+      const audio = await recordings.getObjectBuffer(call.recordingObjectKey);
+      res.set("Content-Type", call.recordingContentType || "audio/wav");
+      res.set("Content-Disposition", `inline; filename="${call.id}.wav"`);
+      res.set("Cache-Control", "private, no-store");
+      res.send(audio);
+    } catch (error) { fail(res, error); }
   });
 
   router.get("/settings/calling", async (req, res) => {
@@ -514,7 +552,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         providerCallId,
         status: providerStatus,
         durationSeconds: req.body?.DialDuration || req.body?.duration || null,
-        endedAt: req.body?.EndTime || new Date().toISOString(),
+        endedAt: req.body?.EndTime || null,
         rawEvent: req.body || {},
       });
       const status = String(req.body?.CallStatus || req.body?.status || "").toLowerCase().replace(/[\s_-]+/g, "");
