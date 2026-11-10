@@ -34,7 +34,10 @@ function localInputValue(date: Date) {
 
 function formatLocalDateTime(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, {
+    weekday: "short", year: "numeric", month: "short", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+  });
 }
 
 function getBrowserTimeZone() {

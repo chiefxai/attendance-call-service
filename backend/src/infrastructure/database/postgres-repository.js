@@ -269,8 +269,8 @@ class PostgresRepository {
        WHERE organization_id=$1
          AND employee->>'id'=$2
          AND ($5::text IS NULL OR external_assignment_id<>$5)
-         AND scheduled_start_at < $4
-         AND scheduled_end_at > $3
+         AND tstzrange(scheduled_start_at, scheduled_end_at, '[)')
+             && tstzrange($3::timestamptz, $4::timestamptz, '[)')
        ORDER BY scheduled_start_at
        LIMIT 1`,
       [organizationId, String(employeeId), startAt, endAt, assignmentId ? String(assignmentId) : null],
