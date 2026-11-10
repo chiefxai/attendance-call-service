@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 
 const { createVobizClient } = require("../infrastructure/telephony/vobiz-client");
+const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { verifyVobizWebhookSignature } = require("../infrastructure/telephony/vobiz-signature");
 const { createVobizLiveRuntime } = require("../realtime/vobiz-live-runtime");
@@ -137,12 +138,12 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.post("/staff", async (req, res) => {
     const id = String(req.body?.id || "").trim();
     const name = String(req.body?.name || "").trim();
-    const phoneNumber = String(req.body?.phoneNumber || "").trim();
+    const phoneNumber = normalizeIndianMobile(req.body?.phoneNumber);
     const address = String(req.body?.address || "").trim();
     const language = String(req.body?.language || "en").trim().toLowerCase();
     if (!id || id.length > 120) return res.status(400).json({ error: "Staff ID is required and must be at most 120 characters." });
     if (!name || name.length > 120) return res.status(400).json({ error: "Staff name is required and must be at most 120 characters." });
-    if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber)) return res.status(400).json({ error: "Enter the staff phone in E.164 format, such as +919876543210." });
+    if (!phoneNumber) return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." });
     if (!address || address.length > 1000) return res.status(400).json({ error: "Staff address is required and must be at most 1000 characters." });
     if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
     try {
@@ -160,14 +161,15 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.post("/patients", async (req, res) => {
     const id = String(req.body?.id || "").trim();
     const name = String(req.body?.name || "").trim();
-    const phoneNumber = String(req.body?.phoneNumber || "").trim();
+    const phoneInput = String(req.body?.phoneNumber || "").trim();
+    const phoneNumber = phoneInput ? normalizeIndianMobile(phoneInput) : "";
     const address = String(req.body?.address || "").trim();
     const language = String(req.body?.language || "en").trim().toLowerCase();
     const careCategory = String(req.body?.careCategory || "").trim();
     const hub = String(req.body?.hub || "").trim();
     if (!id || id.length > 120) return res.status(400).json({ error: "Patient ID is required and must be at most 120 characters." });
     if (!name || name.length > 120) return res.status(400).json({ error: "Patient name is required and must be at most 120 characters." });
-    if (phoneNumber && !/^\+[1-9]\d{7,14}$/.test(phoneNumber)) return res.status(400).json({ error: "Enter the patient phone in E.164 format." });
+    if (phoneInput && !phoneNumber) return res.status(400).json({ error: "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." });
     if (!address || address.length > 1000) return res.status(400).json({ error: "Patient address is required and must be at most 1000 characters." });
     if (!["ta", "en", "ml", "te"].includes(language)) return res.status(400).json({ error: "Language must be ta, en, ml, or te." });
     if (careCategory.length > 120 || hub.length > 120) return res.status(400).json({ error: "Care category and hub must be at most 120 characters." });
@@ -246,9 +248,14 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const missing = required.filter((key) => !body[key]);
       const callingSettings = await getEffectiveCallingSettings(organizationId);
       const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
-      if (missing.length || !fromNumber || !body.employee?.id || !body.employee?.name || !body.employee?.phoneNumber || !body.patient?.id || !body.patient?.name || !body.patient?.address) {
-        return res.status(400).json({ error: "Assignment requires assignmentId, agentId, language, scheduledStartAt, scheduledEndAt, employee identity and phone, patient identity and address, and either fromNumber or the default caller ID in Settings/.env" });
+      const employeePhone = normalizeIndianMobile(body.employee?.phoneNumber);
+      const patientPhoneInput = String(body.patient?.phoneNumber || "").trim();
+      const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
+      if (missing.length || !fromNumber || !body.employee?.id || !body.employee?.name || !body.patient?.id || !body.patient?.name || !body.patient?.address) {
+        return res.status(400).json({ error: "Assignment requires assignmentId, agentId, language, scheduledStartAt, scheduledEndAt, employee identity, patient identity and address, and either fromNumber or the default caller ID in Settings/.env" });
       }
+      if (!employeePhone) return res.status(400).json({ error: "Enter a valid 10-digit Indian employee mobile number, optionally prefixed with 91 or +91." });
+      if (patientPhoneInput && !patientPhone) return res.status(400).json({ error: "Enter a valid 10-digit Indian patient mobile number, optionally prefixed with 91 or +91." });
       const startAt = new Date(body.scheduledStartAt);
       const endAt = new Date(body.scheduledEndAt);
       if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
@@ -260,7 +267,8 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         const created = await repository.createAttendanceSession({
           organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
           agentId: body.agentId, fromNumber, language: body.language,
-          employee: body.employee, patient: body.patient, scheduledStartAt: startAt,
+          employee: { ...body.employee, phoneNumber: employeePhone },
+          patient: { ...body.patient, phoneNumber: patientPhone || undefined }, scheduledStartAt: startAt,
           scheduledEndAt: endAt, metadata: body.metadata || {},
         }, client);
         await queue.enqueue("place_call", { sessionId: created.id, stage: "check_in", attemptNumber: 1 }, {
