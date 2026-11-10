@@ -191,7 +191,8 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const body = req.body || {};
       const required = ["assignmentId", "agentId", "language", "scheduledStartAt", "scheduledEndAt"];
       const missing = required.filter((key) => !body[key]);
-      const callingSettings = await getEffectiveCallingSettings(organizationId);\n      const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
+      const callingSettings = await getEffectiveCallingSettings(organizationId);
+      const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
       if (missing.length || !fromNumber || !body.employee?.id || !body.employee?.name || !body.employee?.phoneNumber || !body.patient?.id || !body.patient?.name || !body.patient?.address) {
         return res.status(400).json({ error: "Assignment requires assignmentId, agentId, language, scheduledStartAt, scheduledEndAt, employee identity and phone, patient identity and address, and either fromNumber or the default caller ID in Settings/.env" });
       }
