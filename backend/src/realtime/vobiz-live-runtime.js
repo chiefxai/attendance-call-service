@@ -91,6 +91,16 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     return "en-IN";
   }
 
+  function inboundGreetingPeriod() {
+    const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
+    try {
+      const hour = Number(new Intl.DateTimeFormat("en-IN", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(new Date()));
+      return hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+    } catch {
+      const hour = new Date().getUTCHours();
+      return hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+    }
+  }
   function inboundPatientAgentPrompt(language, dialect, patientContext, matchedByRegisteredPhone, careActivities) {
     const name = process.env.INBOUND_PATIENT_AGENT_NAME || "Athulya Patient Care Assistant";
     const extraInstructions = process.env.INBOUND_PATIENT_AGENT_PROMPT?.trim();
@@ -625,7 +635,6 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       activeCalls.delete(token.callId);
       console.info(`[vobiz-live] stream closed call=${token.callId} code=${code} reason=${reason?.toString() || ""} inboundFrames=${inboundFrames} outboundFrames=${outboundFrames} generatedAudioParts=${generatedAudioParts}`);
       if (inboundCall) void finalizeInboundCall(code === 1000 ? "completed" : "failed");
-      if (inboundCall) void finalizeInboundCall("failed");
       recorderFinalizePromise ||= Promise.resolve(recorder?.finalize()).catch((error) => {
         console.error(`[vobiz-recording] finalize failed attempt=${attempt.id}`, error?.message || error);
       });
