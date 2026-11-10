@@ -1,10 +1,10 @@
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import { AxiosError } from "axios";
-import { createAssignment, fetchAgents, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
+import { createAssignment, fetchAgents, fetchEmployeeScheduleOverlap, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
@@ -30,6 +30,11 @@ interface FormValues {
 function localInputValue(date: Date) {
   const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return localDate.toISOString().slice(0, 16);
+}
+
+function formatLocalDateTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function getBrowserTimeZone() {
@@ -178,9 +183,34 @@ export function NewAssignmentPage() {
   const [bulkFileError, setBulkFileError] = useState("");
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkResults, setBulkResults] = useState<Record<number, BulkAssignmentResult>>({});
+  const [overlapWindow, setOverlapWindow] = useState({ employeeId: "", startAt: "", endAt: "", assignmentId: "" });
+  useEffect(() => {
+    const timer = window.setTimeout(() => setOverlapWindow({
+      employeeId: form.employeeId.trim(),
+      startAt: form.scheduledStartAt,
+      endAt: form.scheduledEndAt,
+      assignmentId: form.assignmentId.trim(),
+    }), 400);
+    return () => window.clearTimeout(timer);
+  }, [form.employeeId, form.scheduledStartAt, form.scheduledEndAt, form.assignmentId]);
   const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents, retry: 0 });
   const staff = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), retry: 0 });
   const patients = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), retry: 0 });
+  const overlapStartMs = new Date(overlapWindow.startAt).getTime();
+  const overlapEndMs = new Date(overlapWindow.endAt).getTime();
+  const overlapEnabled = Boolean(overlapWindow.employeeId)
+    && Number.isFinite(overlapStartMs) && Number.isFinite(overlapEndMs) && overlapEndMs > overlapStartMs;
+  const employeeOverlap = useQuery({
+    queryKey: ["employee-schedule-overlap", overlapWindow],
+    queryFn: () => fetchEmployeeScheduleOverlap({
+      employeeId: overlapWindow.employeeId,
+      startAt: new Date(overlapStartMs).toISOString(),
+      endAt: new Date(overlapEndMs).toISOString(),
+      assignmentId: overlapWindow.assignmentId || undefined,
+    }),
+    enabled: overlapEnabled,
+    retry: 0,
+  });
   const mutation = useMutation({
     mutationFn: createAssignment,
     onSuccess: (result) => navigate(`/sessions/${result.sessionId}`),
@@ -286,6 +316,9 @@ export function NewAssignmentPage() {
               <Grid size={{ xs: 12, sm: 6 }}><FormField label="Scheduled check-in" value={form.scheduledStartAt} onChange={update("scheduledStartAt")} type="datetime-local" required /></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><FormField label="Scheduled check-out" value={form.scheduledEndAt} onChange={update("scheduledEndAt")} type="datetime-local" required /></Grid>
             </Grid>
+            {employeeOverlap.data?.overlap && employeeOverlap.data.conflict && <Alert severity="error">
+              This employee already has assignment {employeeOverlap.data.conflict.assignmentId} for {employeeOverlap.data.conflict.patientName} from {formatLocalDateTime(employeeOverlap.data.conflict.scheduledStartAt)} to {formatLocalDateTime(employeeOverlap.data.conflict.scheduledEndAt)}. Choose a non-overlapping duty window.
+            </Alert>}
           </CardContent></Card>
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
             <Typography variant="h6">Employee to call</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>The current outbound workflow only calls the employee.</Typography>
@@ -321,7 +354,7 @@ export function NewAssignmentPage() {
           </CardContent></Card>
           <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={2}>
             <Typography variant="caption" color="text.secondary">Calls are queued for the employee only.</Typography>
-            <Button type="submit" variant="contained" endIcon={mutation.isPending ? <CircularProgress size={16} color="inherit" /> : <ArrowForwardRoundedIcon />} disabled={mutation.isPending || agents.isLoading || !agents.data?.some((agent) => agent.id === form.agentId && agent.active)} sx={{ px: 2.5, py: 1.1 }}>{mutation.isPending ? "Scheduling…" : "Create assignment"}</Button>
+            <Button type="submit" variant="contained" endIcon={mutation.isPending ? <CircularProgress size={16} color="inherit" /> : <ArrowForwardRoundedIcon />} disabled={mutation.isPending || employeeOverlap.data?.overlap === true || agents.isLoading || !agents.data?.some((agent) => agent.id === form.agentId && agent.active)} sx={{ px: 2.5, py: 1.1 }}>{mutation.isPending ? "Scheduling…" : "Create assignment"}</Button>
           </Stack>
         </Stack>
       </Box>
