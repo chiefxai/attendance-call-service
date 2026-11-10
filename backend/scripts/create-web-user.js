@@ -1,12 +1,13 @@
 "use strict";
 
 const crypto = require("node:crypto");
-const fs = require("node:fs/promises");
 const { createPostgresPool } = require("../src/infrastructure/database/postgres-pool");
 const { PostgresRepository } = require("../src/infrastructure/database/postgres-repository");
 
 async function main() {
-  const [rawEmail = "", rawName = "", rawPassword = ""] = (await fs.readFile(0, "utf8")).split(/\r?\n/);
+  let input = "";
+  for await (const chunk of process.stdin) input += chunk.toString();
+  const [rawEmail = "", rawName = "", rawPassword = ""] = input.split(/\r?\n/);
   const email = rawEmail.trim().toLowerCase();
   const password = rawPassword;
   const displayName = rawName.trim() || email;
