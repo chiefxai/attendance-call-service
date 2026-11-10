@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { NavLink, Route, Routes } from "react-router-dom";
 import { AppBar, Avatar, Box, Button, Chip, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
-import NotificationsNoneRoundedIcon from "@mui/icons-material/NotificationsNoneRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
@@ -22,6 +21,7 @@ import { NewAssignmentPage } from "./pages/NewAssignmentPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
+import { PageHeaderTargetContext } from "./components/OperationsUI";
 
 const drawerWidth = 252;
 const navigation = [
@@ -37,10 +37,7 @@ const navigation = [
 
 function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const location = useLocation();
-  const activeNav = navigation.find((item) => item.path === location.pathname);
-  const title = activeNav?.label || (location.pathname.startsWith("/sessions/") ? "Session status" : "Operations");
-
+  const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
   const drawer = (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%", px: 2, py: 2.5, overflowY: "auto" }}>
       <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 1, mb: 4 }}>
@@ -71,9 +68,9 @@ function App() {
       <AppBar position="fixed" elevation={0} color="inherit" sx={{ borderBottom: "1px solid #e8eeeb", bgcolor: "rgba(255,255,255,.9)", backdropFilter: "blur(10px)", width: { md: `calc(100% - ${drawerWidth}px)` }, ml: { md: `${drawerWidth}px` } }}>
         <Toolbar sx={{ minHeight: "72px !important", px: { xs: 2, md: 4 } }}>
           <IconButton onClick={() => setMobileOpen(true)} sx={{ display: { md: "none" }, mr: 1 }} aria-label="Open navigation"><MenuRoundedIcon /></IconButton>
-          <Box sx={{ flexGrow: 1 }}><Typography variant="body2" color="text.secondary">Athulya Senior Care / Operations</Typography><Typography fontWeight={700}>{title}</Typography></Box>
+          <Box ref={setHeaderTarget} sx={{ flex: 1, minWidth: 0 }} />
           <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650, display: { xs: "none", sm: "inline-flex" } }} />
-          <IconButton sx={{ ml: 1 }} aria-label="Notifications"><NotificationsNoneRoundedIcon /></IconButton>
+          <IconButton component={NavLink} to="/assignments/new" aria-label="New assignment" sx={{ display: { xs: "inline-flex", sm: "none" } }}><AddRoundedIcon /></IconButton>
           <Button component={NavLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />} sx={{ ml: 1.5, display: { xs: "none", sm: "inline-flex" } }}>New assignment</Button>
         </Toolbar>
       </AppBar>
@@ -81,7 +78,8 @@ function App() {
         <Drawer variant="temporary" open={mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box" } }}>{drawer}</Drawer>
         <Drawer variant="permanent" open sx={{ display: { xs: "none", md: "block" }, "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box", borderRight: "1px solid #e8eeeb" } }}>{drawer}</Drawer>
       </Box>
-      <Box component="main" sx={{ flex: "1 1 auto", minWidth: 0, maxWidth: { xs: "100%", md: `calc(100% - ${drawerWidth}px)` }, boxSizing: "border-box", px: { xs: 1.5, sm: 3, lg: 5 }, pt: { xs: "92px", sm: "104px" }, pb: 6 }}>
+      <Box component="main" sx={{ flex: "1 1 auto", minWidth: 0, maxWidth: { xs: "100%", md: `calc(100% - ${drawerWidth}px)` }, boxSizing: "border-box", px: { xs: 1.5, sm: 3, lg: 5 }, pt: { xs: "160px", sm: "132px" }, pb: 6 }}>
+        <PageHeaderTargetContext.Provider value={headerTarget}>
         <Routes>
           <Route path="/" element={<OverviewPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
@@ -95,6 +93,7 @@ function App() {
           <Route path="/sessions/:sessionId" element={<AssignmentStatusPage />} />
           <Route path="*" element={<OverviewPage />} />
         </Routes>
+        </PageHeaderTargetContext.Provider>
       </Box>
     </Box>
   );
