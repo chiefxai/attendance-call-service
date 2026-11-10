@@ -18,7 +18,7 @@ const AGENT_DEFAULTS = {
 function createCallServiceRouter({ express, repository, queue, vobiz = createVobizClient(), verifyWebhook, getClientForOrg, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
   assertRepository(repository);
-  if (!queue?.enqueue) throw new Error("A durable job queue is required");
+  if (!queue?.enqueue || !queue?.transaction) throw new Error("A transactional durable job queue is required");
 
   const router = express.Router();
   router.use(express.json());
@@ -143,17 +143,20 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       }
       const agent = await repository.getAgent(organizationId, body.agentId);
       if (!agent?.active) return res.status(400).json({ error: "An active agent in this organization is required" });
-      const session = await repository.createAttendanceSession({
-        organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
-        agentId: body.agentId, fromNumber, language: body.language,
-        employee: body.employee, patient: body.patient, scheduledStartAt: startAt,
-        scheduledEndAt: endAt, metadata: body.metadata || {},
-      });
-      await queue.enqueue("place_call", { sessionId: session.id, stage: "check_in", attemptNumber: 1 }, {
-        idempotencyKey: `call:${session.id}:check_in:1`, runAt: startAt,
-      });
-      await queue.enqueue("place_call", { sessionId: session.id, stage: "check_out", attemptNumber: 1 }, {
-        idempotencyKey: `call:${session.id}:check_out:1`, runAt: endAt,
+      const session = await queue.transaction(async (client) => {
+        const created = await repository.createAttendanceSession({
+          organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
+          agentId: body.agentId, fromNumber, language: body.language,
+          employee: body.employee, patient: body.patient, scheduledStartAt: startAt,
+          scheduledEndAt: endAt, metadata: body.metadata || {},
+        }, client);
+        await queue.enqueue("place_call", { sessionId: created.id, stage: "check_in", attemptNumber: 1 }, {
+          idempotencyKey: `call:${created.id}:check_in:1`, runAt: created.scheduledStartAt, client,
+        });
+        await queue.enqueue("place_call", { sessionId: created.id, stage: "check_out", attemptNumber: 1 }, {
+          idempotencyKey: `call:${created.id}:check_out:1`, runAt: created.scheduledEndAt, client,
+        });
+        return created;
       });
       res.status(202).json({ sessionId: session.id, status: session.sessionStatus, queued: ["check_in", "check_out"] });
     } catch (error) { fail(res, error); }

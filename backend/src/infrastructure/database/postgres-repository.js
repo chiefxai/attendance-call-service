@@ -1,6 +1,13 @@
 "use strict";
 
 function json(value) { return typeof value === "string" ? JSON.parse(value) : value; }
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
 
 class PostgresRepository {
   constructor(pool) {
@@ -115,20 +122,43 @@ class PostgresRepository {
     return r.rows[0];
   }
 
-  async createAttendanceSession(assignment) {
-    const r = await this.pool.query(
+  async createAttendanceSession(assignment, client = this.pool) {
+    const r = await client.query(
       `INSERT INTO attendance_sessions
        (organization_id,external_assignment_id,schedule_version,agent_id,language,employee,patient,assignment_metadata,from_number,scheduled_start_at,scheduled_end_at,active_context)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12::jsonb)
-       ON CONFLICT (organization_id,external_assignment_id,schedule_version)
-       DO UPDATE SET external_assignment_id=EXCLUDED.external_assignment_id
+       ON CONFLICT (organization_id,external_assignment_id,schedule_version) DO NOTHING
        RETURNING *`,
       [assignment.organizationId, assignment.assignmentId, String(assignment.scheduleVersion || "1"), assignment.agentId,
         assignment.language, JSON.stringify(assignment.employee), JSON.stringify(assignment.patient), JSON.stringify(assignment.metadata || {}),
         assignment.fromNumber, assignment.scheduledStartAt, assignment.scheduledEndAt,
         JSON.stringify({ assignmentId: assignment.assignmentId, language: assignment.language, stage: "check_in", factsConfirmed: {}, priorCallStatus: [] })],
     );
-    return this.mapSession(r.rows[0]);
+    let row = r.rows[0];
+    if (!row) {
+      const existing = await client.query(
+        `SELECT * FROM attendance_sessions
+         WHERE organization_id=$1 AND external_assignment_id=$2 AND schedule_version=$3
+         FOR UPDATE`,
+        [assignment.organizationId, assignment.assignmentId, String(assignment.scheduleVersion || "1")],
+      );
+      row = existing.rows[0];
+      if (!row) throw new Error("Assignment session conflicted but could not be loaded");
+      const same = row.agent_id === assignment.agentId
+        && row.language === assignment.language
+        && row.from_number === assignment.fromNumber
+        && new Date(row.scheduled_start_at).getTime() === new Date(assignment.scheduledStartAt).getTime()
+        && new Date(row.scheduled_end_at).getTime() === new Date(assignment.scheduledEndAt).getTime()
+        && stableJson(json(row.employee)) === stableJson(assignment.employee)
+        && stableJson(json(row.patient)) === stableJson(assignment.patient)
+        && stableJson(json(row.assignment_metadata)) === stableJson(assignment.metadata || {});
+      if (!same) {
+        const error = new Error("This assignment already exists with different details. Increment scheduleVersion to create a revised session.");
+        error.status = 409;
+        throw error;
+      }
+    }
+    return this.mapSession(row);
   }
 
   mapSession(row) {

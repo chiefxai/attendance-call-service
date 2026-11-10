@@ -14,9 +14,25 @@ class PostgresJobQueue {
     this.retry = retry;
   }
 
-  async enqueue(jobType, payload, { idempotencyKey, runAt = new Date(), maxAttempts = this.defaultMaxAttempts } = {}) {
+  async transaction(operation) {
+    if (typeof operation !== "function") throw new Error("A transaction operation is required");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await operation(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async enqueue(jobType, payload, { idempotencyKey, runAt = new Date(), maxAttempts = this.defaultMaxAttempts, client } = {}) {
     if (!jobType || !idempotencyKey) throw new Error("jobType and idempotencyKey are required");
-    const result = await this.pool.query(
+    const result = await (client || this.pool).query(
       `INSERT INTO attendance_jobs (job_type, payload, idempotency_key, run_at, max_attempts)
        VALUES ($1, $2::jsonb, $3, $4, $5)
        ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key

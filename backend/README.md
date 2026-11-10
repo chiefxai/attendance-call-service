@@ -110,7 +110,10 @@ the employee requests a later callback. The host app can read
 
 `POST /assignments` accepts employee and patient details, agent, language,
 caller ID, and scheduled shift times. It schedules employee calls at check-in
-and check-out. The patient phone may be stored for future use, but is not
+and check-out in one database transaction with the session record. Repeating
+the same request is idempotent and repairs missing queue entries; changing
+assignment details or times requires a new `scheduleVersion` (otherwise the
+API returns HTTP 409). The patient phone may be stored for future use, but is not
 dialed. Vobiz status events enqueue `process_call_result`; answered calls flow
 through `transcribe_call`, `extract_intent`, and `evaluate_attendance`. Once
 both stages are confirmed, the service queues a POST to `ATTENDANCE_BACKEND_URL`
