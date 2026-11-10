@@ -14,6 +14,8 @@ const repositoryMethods = Object.freeze([
   "createCampaign(organizationId, campaign)",
   "createCall(organizationId, call)",
   "updateCallByProviderId(event)",
+  "findEmployeeScheduleOverlap(query)",
+  "assertEmployeeScheduleAvailable(assignment, client)",
   "createAttendanceSession(assignment)",
   "getAttendanceSession(sessionId)",
   "listAttendanceSessions(organizationId, filters)",
