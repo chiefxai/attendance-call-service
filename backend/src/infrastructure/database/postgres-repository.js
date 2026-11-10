@@ -340,36 +340,125 @@ class PostgresRepository {
       maxConcurrentCalls: Number(process.env.MAX_CONCURRENT_CALLS) || 20,
     };
   }
+  async createStaffDirectoryRecord(organizationId, person) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO staff_directory (organization_id,external_id,name,phone_number,address,language)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (organization_id,external_id) DO NOTHING
+       RETURNING external_id,name,phone_number,address,language`,
+      [organizationId, person.id, person.name, person.phoneNumber, person.address, person.language || "en"],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+      phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
+      patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+    } : null;
+  }
+
+  async createPatientDirectoryRecord(organizationId, patient) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO patient_directory (organization_id,external_id,name,phone_number,address,language,care_category,hub)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (organization_id,external_id) DO NOTHING
+       RETURNING external_id,name,phone_number,address,language,care_category,hub`,
+      [organizationId, patient.id, patient.name, patient.phoneNumber || null, patient.address,
+        patient.language || "en", patient.careCategory || "", patient.hub || ""],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address,
+      language: row.language, assignedStaff: "Unassigned", employeeId: null,
+      careCategory: row.care_category || "Not specified", hub: row.hub || "Not specified",
+      locationVerification: "not_integrated", status: "unassigned",
+    } : null;
+  }
+
   async listStaffDirectory(organizationId, { search = "", status = "all", limit = 100 } = {}) {
-    const sessions = await this.listAttendanceSessions(organizationId, { limit: 500 });
-    const latest = new Map();
+    const [profiles, sessions] = await Promise.all([
+      this.pool.query(
+        `SELECT external_id,name,phone_number,address,language FROM staff_directory
+         WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
+        [organizationId],
+      ),
+      this.listAttendanceSessions(organizationId, { limit: 500 }),
+    ]);
+    const records = new Map();
+    for (const row of profiles.rows) {
+      records.set(row.external_id, {
+        id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+        phoneMasked: this.maskPhone(row.phone_number), address: row.address || "", language: row.language,
+        patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "",
+      });
+    }
     for (const session of sessions) {
       const person = session.employee;
       const key = person.id || person.name;
-      if (!key || latest.has(key)) continue;
+      if (!key) continue;
+      const previous = records.get(key);
       const state = session.sessionStatus === "active" ? "on duty" : session.sessionStatus;
-      const record = { id: person.id || session.employee.name, name: person.name, phoneNumber: person.phoneNumber || null, phoneMasked: this.maskPhone(person.phoneNumber), address: person.address || "",
-        language: session.language, patientName: session.patient.name, patientId: session.patient.id,
-        dutyStatus: state, assignmentId: session.assignmentId, sessionId: session.sessionId };
-      if ((status === "all" || status === state) && (!search || `${record.id} ${record.name} ${record.patientName} ${record.address}`.toLowerCase().includes(search.toLowerCase()))) latest.set(key, record);
+      records.set(key, {
+        id: key,
+        name: previous?.name || person.name,
+        phoneNumber: previous?.phoneNumber || person.phoneNumber || null,
+        phoneMasked: previous?.phoneMasked || this.maskPhone(person.phoneNumber),
+        address: previous?.address || person.address || "",
+        language: previous?.language || session.language,
+        patientName: session.patient.name,
+        patientId: session.patient.id,
+        dutyStatus: state,
+        assignmentId: session.assignmentId,
+        sessionId: session.sessionId,
+      });
     }
-    return [...latest.values()].slice(0, Math.min(Number(limit) || 100, 500));
+    return [...records.values()]
+      .filter((record) => (status === "all" || status === record.dutyStatus)
+        && (!search || `${record.id} ${record.name} ${record.patientName} ${record.address}`.toLowerCase().includes(search.toLowerCase())))
+      .slice(0, Math.min(Number(limit) || 100, 500));
   }
+
   async listPatientDirectory(organizationId, { search = "", status = "all", limit = 100 } = {}) {
-    const sessions = await this.listAttendanceSessions(organizationId, { limit: 500 });
-    const latest = new Map();
+    const [profiles, sessions] = await Promise.all([
+      this.pool.query(
+        `SELECT external_id,name,phone_number,address,language,care_category,hub FROM patient_directory
+         WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
+        [organizationId],
+      ),
+      this.listAttendanceSessions(organizationId, { limit: 500 }),
+    ]);
+    const records = new Map();
+    for (const row of profiles.rows) {
+      records.set(row.external_id, {
+        id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address || "",
+        language: row.language, assignedStaff: "Unassigned", employeeId: null,
+        careCategory: row.care_category || "Not specified", hub: row.hub || "Not specified",
+        locationVerification: "not_integrated", status: "unassigned",
+      });
+    }
     for (const session of sessions) {
       const patient = session.patient;
       const key = patient.id || patient.name;
-      if (!key || latest.has(key)) continue;
+      if (!key) continue;
+      const previous = records.get(key);
       const metadata = session.metadata || {};
-      const record = { id: patient.id || patient.name, name: patient.name, phoneNumber: patient.phoneNumber || null, address: patient.address || "", language: session.language,
-        assignedStaff: session.employee.name, employeeId: session.employee.id,
-        careCategory: metadata.careCategory || "Not specified", hub: metadata.hub || "Not specified",
-        locationVerification: "not_integrated", status: session.sessionStatus };
-      if ((status === "all" || status === record.status) && (!search || `${record.id} ${record.name} ${record.assignedStaff} ${record.address}`.toLowerCase().includes(search.toLowerCase()))) latest.set(key, record);
+      records.set(key, {
+        id: key,
+        name: previous?.name || patient.name,
+        phoneNumber: previous?.phoneNumber || patient.phoneNumber || null,
+        address: previous?.address || patient.address || "",
+        language: previous?.language || session.language,
+        assignedStaff: session.employee.name,
+        employeeId: session.employee.id,
+        careCategory: previous?.careCategory !== "Not specified" && previous?.careCategory ? previous.careCategory : metadata.careCategory || "Not specified",
+        hub: previous?.hub !== "Not specified" && previous?.hub ? previous.hub : metadata.hub || "Not specified",
+        locationVerification: "not_integrated",
+        status: session.sessionStatus,
+      });
     }
-    return [...latest.values()].slice(0, Math.min(Number(limit) || 100, 500));
+    return [...records.values()]
+      .filter((record) => (status === "all" || status === record.status)
+        && (!search || `${record.id} ${record.name} ${record.assignedStaff} ${record.address}`.toLowerCase().includes(search.toLowerCase())))
+      .slice(0, Math.min(Number(limit) || 100, 500));
   }
   async listSupervisionQueue(organizationId, { search = "", severity = "all", limit = 100 } = {}) {
     const sessions = await this.listAttendanceSessions(organizationId, { limit: 500 });
