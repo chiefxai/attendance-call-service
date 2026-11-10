@@ -31,18 +31,32 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   };
   router.use(async (req, res, next) => {
     if (req.method === "POST" && ["/answer", "/webhooks/call-status"].includes(req.path)) return next();
-    if (req.path === "/api-keys" || req.path.startsWith("/api-keys/")) {
-      if (!process.env.API_KEY_ADMIN_TOKEN) return res.status(503).json({ error: "API_KEY_ADMIN_TOKEN is not configured" });
-      if (!validateAdminToken(req)) return res.status(401).json({ error: "Valid X-API-Admin-Token is required" });
-      req.orgId = process.env.DEFAULT_ORGANIZATION_ID;
-      if (!req.orgId) return res.status(503).json({ error: "DEFAULT_ORGANIZATION_ID is not configured" });
-      return next();
-    }
-    const match = /^Bearer\s+(.+)$/i.exec(String(req.get("authorization") || ""));
-    if (!match) return res.status(401).json({ error: "A valid API key in Authorization: Bearer <key> is required" });
-    const hash = crypto.createHash("sha256").update(match[1]).digest("hex");
+
     try {
-      const organizationId = await repository.resolveApiKey(hash);
+      const cookieHeader = String(req.headers.cookie || "");
+      const cookiePair = cookieHeader.split(";").map((item) => item.trim()).find((item) => item.startsWith("attendance_session="));
+      const sessionToken = cookiePair ? decodeURIComponent(cookiePair.slice("attendance_session=".length)) : "";
+      if (sessionToken) {
+        const user = await repository.resolveWebSession(crypto.createHash("sha256").update(sessionToken).digest("hex"));
+        if (user) {
+          req.orgId = user.organizationId;
+          req.webUser = { id: user.id, email: user.email, displayName: user.displayName };
+          return next();
+        }
+      }
+
+      if (req.path === "/api-keys" || req.path.startsWith("/api-keys/")) {
+        if (!process.env.API_KEY_ADMIN_TOKEN) return res.status(503).json({ error: "API_KEY_ADMIN_TOKEN is not configured" });
+        if (!validateAdminToken(req)) return res.status(401).json({ error: "A web session or valid X-API-Admin-Token is required" });
+        req.orgId = process.env.DEFAULT_ORGANIZATION_ID;
+        if (!req.orgId) return res.status(503).json({ error: "DEFAULT_ORGANIZATION_ID is not configured" });
+        return next();
+      }
+
+      const match = /^Bearer\\s+(.+)$/i.exec(String(req.get("authorization") || ""));
+      if (!match) return res.status(401).json({ error: "Sign in or provide a service API key." });
+      const keyHash = crypto.createHash("sha256").update(match[1]).digest("hex");
+      const organizationId = await repository.resolveApiKey(keyHash);
       if (!organizationId) return res.status(401).json({ error: "API key is invalid or revoked" });
       req.orgId = organizationId;
       return next();
