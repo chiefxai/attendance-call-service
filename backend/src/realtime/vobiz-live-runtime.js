@@ -8,7 +8,8 @@ const { createCallRecorder } = require("../recording/manager");
 
 const LIVE_MODEL = process.env.VERTEX_LIVE_AUDIO_MODEL || "gemini-live-2.5-flash-native-audio";
 const MEDIA_PATH = process.env.VOBIZ_MEDIA_PATH || "/api/call-service/media";
-const OUTPUT_RATE = 24_000;
+// Vobiz expects the bidirectional stream at 16 kHz. Gemini Live returns 24 kHz.
+const OUTPUT_RATE = 16_000;
 
 function downsample24kTo16k(pcm24) {
   const inputSamples = Math.floor(pcm24.length / 2);
@@ -184,6 +185,8 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     let inboundFrames = 0;
     let outboundFrames = 0;
     let generatedAudioParts = 0;
+    let employeeTranscriptChars = 0;
+    let employeeResponseTurns = 0;
     let playbackTurn = 0;
     let checkpointFrameOffset = 0;
     let latestCheckpoint = null;
@@ -214,9 +217,10 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
     }
     function sendPcmAudio(data) {
       if (!active || !streamId || vobizWs.readyState !== 1) return;
-      const alignedLength = data.length - (data.length % 2);
+      const pcm16 = downsample24kTo16k(data);
+      const alignedLength = pcm16.length - (pcm16.length % 2);
       for (let offset = 0; offset < alignedLength; offset += OUTPUT_FRAME_BYTES) {
-        const frame = data.subarray(offset, Math.min(offset + OUTPUT_FRAME_BYTES, alignedLength));
+        const frame = pcm16.subarray(offset, Math.min(offset + OUTPUT_FRAME_BYTES, alignedLength));
         safeSend({ event: "playAudio", media: { contentType: "audio/x-l16", sampleRate: OUTPUT_RATE, payload: frame.toString("base64") } });
         outboundFrames += 1;
         if (outboundFrames === 1) console.info(`[vobiz-live] first audio frame sent call=${token.callId} bytes=${frame.length} sampleRate=${OUTPUT_RATE}`);
@@ -248,6 +252,20 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
             turnComplete: true,
           });
         } catch (error) { console.error(`[vobiz-live] rejected early end_call call=${token.callId}`, error.message); }
+        return;
+      }
+      const minimumResponses = token.stage === "check_in" ? 5 : 3;
+      if (employeeResponseTurns < minimumResponses) {
+        console.warn(`[vobiz-live] rejected incomplete end_call call=${token.callId} stage=${token.stage} employeeResponseTurns=${employeeResponseTurns}/${minimumResponses} transcriptChars=${employeeTranscriptChars}`);
+        try {
+          await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: false, reason: "The verification checklist is incomplete. Continue asking one question at a time and wait for the employee answer." } } }] });
+          liveSession?.sendClientContent({
+            turns: [{ role: "user", parts: [{ text: token.stage === "check_in"
+              ? "The check-in verification is incomplete. Ask the next unanswered question now. Do not say goodbye or call end_call."
+              : "The check-out verification is incomplete. Ask the next unanswered question now. Do not say goodbye or call end_call." }] }],
+            turnComplete: true,
+          });
+        } catch (error) { console.error(`[vobiz-live] incomplete end-call response failed call=${token.callId}`, error.message); }
         return;
       }
       hangupRequested = true;
@@ -327,6 +345,12 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
                 console.info(`[vobiz-live] employee response detected call=${token.callId} transcriptChars=${callerText.length}`);
               }
               if (response.serverContent?.interrupted) safeSend({ event: "clearAudio" });
+              const inputText = String(response.serverContent?.inputTranscription?.text || response.serverContent?.inputAudioTranscription?.text || "").trim();
+              if (inputText) {
+                employeeTranscriptChars += inputText.length;
+                employeeResponseTurns += 1;
+                console.info(`[vobiz-live] employee response detected call=${token.callId} transcriptChars=${inputText.length} totalResponses=${employeeResponseTurns}`);
+              }
               for (const part of response.serverContent?.modelTurn?.parts || []) {
                 if (part.inlineData?.mimeType?.startsWith("audio/")) {
                   const audio = Buffer.from(part.inlineData.data, "base64");
