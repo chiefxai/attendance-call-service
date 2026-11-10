@@ -11,6 +11,7 @@ import { AxiosError } from "axios";
 import { createPatient, fetchPatients, updatePatient, type CreatePatientPayload, type PatientRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
+import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
@@ -109,7 +110,7 @@ export function PatientRecordsPage() {
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newPatient.name} onChange={(event) => setNewPatient((current) => ({ ...current, name: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="tel" label="Indian mobile number (optional)" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "If provided, enter 10 digits; 91 or +91 is optional."} value={newPatient.phoneNumber || ""} onChange={(event) => { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const input = newPatient.phoneNumber?.trim() || ""; if (!input) { setPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Preferred language</InputLabel><Select label="Preferred language" value={newPatient.language} onChange={(event) => setNewPatient((current) => ({ ...current, language: event.target.value }))}><MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
-            <Grid size={12}><TextField fullWidth required multiline minRows={2} label="Patient address" value={newPatient.address} onChange={(event) => setNewPatient((current) => ({ ...current, address: event.target.value }))} /></Grid>
+            <Grid size={12}><AddressFields required value={newPatient.address} onChange={(address) => setNewPatient((current) => ({ ...current, address }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Care category (optional)" value={newPatient.careCategory || ""} onChange={(event) => setNewPatient((current) => ({ ...current, careCategory: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Hub (optional)" value={newPatient.hub || ""} onChange={(event) => setNewPatient((current) => ({ ...current, hub: event.target.value }))} /></Grid>
           </Grid>
