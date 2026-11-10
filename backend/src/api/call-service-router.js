@@ -154,7 +154,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const organizationId = org(req);
       const body = req.body || {};
       const defaultFromNumber = body.defaultFromNumber == null || body.defaultFromNumber === "" ? null : String(body.defaultFromNumber).trim();
-      if (defaultFromNumber && !/^\\+[1-9]\\d{7,14}$/.test(defaultFromNumber)) {
+      if (defaultFromNumber && !/^\+[1-9]\d{7,14}$/.test(defaultFromNumber)) {
         return res.status(400).json({ error: "Default caller ID must be in E.164 format, for example +918071580130" });
       }
       const retry = body.retry;
