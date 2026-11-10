@@ -51,6 +51,24 @@ async function main() {
     capacity: config.callCapacity,
   });
   const worker = startWorkers({ queue, handlers, ...config.worker });
+  async function purgeExpiredInboundCalls() {
+    const expired = await repository.listExpiredInboundCalls(100);
+    for (const call of expired) {
+      try {
+        if (call.recordingObjectKey) await recordings.deleteObject(call.recordingObjectKey);
+        await repository.deleteExpiredInboundCall(call.id);
+        console.info(`[attendance-worker] purged expired inbound call ${call.id}`);
+      } catch (error) {
+        console.error(`[attendance-worker] inbound retention purge failed call=${call.id}`, error.message);
+      }
+    }
+  }
+  const retentionIntervalMs = Number(process.env.RETENTION_SCAN_INTERVAL_MS);
+  const retentionTimer = setInterval(() => purgeExpiredInboundCalls().catch((error) => {
+    console.error("[attendance-worker] inbound retention scan failed", error.message);
+  }), Number.isSafeInteger(retentionIntervalMs) && retentionIntervalMs >= 60_000 ? retentionIntervalMs : 60 * 60 * 1000);
+  retentionTimer.unref?.();
+  void purgeExpiredInboundCalls().catch((error) => console.error("[attendance-worker] inbound retention scan failed", error.message));
   pool.on("error", (error) => console.error("[attendance-worker] postgres pool error", error.message));
   console.log(`[attendance-worker] started ${worker.workerIds.length} consumers`);
   let stopping = false;
@@ -63,6 +81,18 @@ async function main() {
       const dueCalls = await repository.listDueFollowUpCalls(100);
       for (const due of dueCalls) {
         if (due.hasRunningJob) continue;
+        const noAnswerCount = due.reason === "employee_requested_callback" ? 0
+          : due.lastAttemptStatus === "noanswer" ? due.lastNoAnswerBefore + 1 : due.lastNoAnswerBefore;
+        if (due.reason !== "employee_requested_callback" && noAnswerCount >= config.callRetry.maxConsecutiveNoAnswer) {
+          await repository.setStageStatus(due.sessionId, due.stage, "not_answered", {
+            reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: noAnswerCount,
+          });
+          await queue.enqueue("evaluate_session", { sessionId: due.sessionId }, {
+            idempotencyKey: `evaluate:${due.sessionId}:not-answered:${due.stage}`,
+          });
+          console.warn(`[attendance-worker] stopped overdue retries at no-answer limit session=${due.sessionId} stage=${due.stage} count=${noAnswerCount}`);
+          continue;
+        }
         const attemptNumber = due.queuedAttemptNumber
           || Math.max(due.maxCallAttempt, due.maxJobAttempt) + 1;
         const consecutiveNoAnswer = due.reason === "employee_requested_callback"
@@ -100,6 +130,7 @@ async function main() {
     stopping = true;
     clearInterval(overdueCallTimer);
     console.log(`[attendance-worker] received ${signal}; shutting down`);
+    clearInterval(retentionTimer);
     await worker.stop();
     await pool.end();
     process.exit(0);

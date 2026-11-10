@@ -226,3 +226,19 @@ and [`postCallAgents`](https://github.com/chiefxai/crm-backend-test/tree/main/sr
 All stored data is organization-scoped. Calls are initiated only from
 assignment sessions and target the employee phone number; patient calling is
 left for a future workflow extension.
+
+
+## Inbound patient calls (Vobiz)
+
+Inbound calls are answered by the same Vertex AI Live audio runtime used for real-time speech, but they are kept separate from attendance sessions. The handler validates the Vobiz request signature, performs an exact organization-scoped patient phone lookup, supplies only the matched patient context to the agent, records the caller and agent audio, and queues transcription after the call. The background worker stores the transcript and applies the configured retention period.
+
+Configure a Vobiz Voice Application:
+
+- **Answer URL (POST):** `https://<your-public-domain>/api/call-service/incoming/answer`
+- **Hangup URL (POST):** `https://<your-public-domain>/api/call-service/webhooks/call-status`
+- **Fallback Answer URL:** leave blank until a separate fallback flow is required.
+- Link the inbound Vobiz phone number to this Voice Application.
+
+The Answer URL is a provider callback: application API-key authentication is bypassed only for that route, while Vobiz signature validation remains mandatory. The APIs `GET /api/call-service/incoming-calls`, `GET /api/call-service/incoming-calls/:id`, and `GET /api/call-service/incoming-calls/:id/recording` require the normal authenticated organization context.
+
+Set `DATA_RETENTION_DAYS=90`, `RETENTION_SCAN_INTERVAL_MS=3600000`, and `INBOUND_RECORDING_MAX_BYTES=52428800` in the service environment as needed. The worker deletes expired recording objects and inbound call rows.

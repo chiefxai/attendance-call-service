@@ -232,6 +232,19 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     await queue.enqueue("extract_intent", { callAttemptId }, { idempotencyKey: `extract:${callAttemptId}` });
   }
 
+  async function transcribeInboundCall({ inboundCallId, organizationId }) {
+    const call = await repository.getInboundCall(inboundCallId, organizationId || process.env.DEFAULT_ORGANIZATION_ID);
+    if (!call?.recordingObjectKey) throw new Error("Inbound call recording is not available");
+    const transcript = await transcriber.transcribe(
+      { key: call.recordingObjectKey, contentType: call.recordingContentType || "audio/wav" },
+      { organizationId: call.organizationId, language: call.language, speakerLabels: "caller and AI agent" },
+    );
+    await repository.saveInboundCallTranscript(inboundCallId, {
+      text: transcript.text, language: transcript.language || call.language,
+    });
+    console.info(`[attendance-worker] inbound transcript saved call=${inboundCallId} characters=${transcript.text.length} language=${transcript.language || call.language}`);
+  }
+
   async function extractIntent({ callAttemptId }) {
     const attempt = await repository.getCallAttempt(callAttemptId);
     if (!attempt) return;
@@ -342,6 +355,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     process_call_result: processCallResult,
     wait_for_recording: waitForRecording,
     transcribe_call: transcribeCall,
+    transcribe_inbound_call: transcribeInboundCall,
     extract_intent: extractIntent,
     evaluate_attendance: evaluateAttendance,
     evaluate_session: evaluateSession,
