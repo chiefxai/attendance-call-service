@@ -53,7 +53,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         return next();
       }
 
-      const match = /^Bearer\\s+(.+)$/i.exec(String(req.get("authorization") || ""));
+      const match = /^Bearer\s+(.+)$/i.exec(String(req.get("authorization") || ""));
       if (!match) return res.status(401).json({ error: "Sign in or provide a service API key." });
       const keyHash = crypto.createHash("sha256").update(match[1]).digest("hex");
       const organizationId = await repository.resolveApiKey(keyHash);
