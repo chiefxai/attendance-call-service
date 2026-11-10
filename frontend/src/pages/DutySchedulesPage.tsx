@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, Chip, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import CallMadeRoundedIcon from "@mui/icons-material/CallMadeRounded";
 import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
@@ -23,7 +24,7 @@ export function DutySchedulesPage() {
   const nextCalls = [...records].sort((a, b) => new Date(a.scheduledStartAt).getTime() - new Date(b.scheduledStartAt).getTime()).slice(0, 4);
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="ASSIGNMENT DISPATCH / CALL SCHEDULES" title="Duty schedules" description="Assignments and scheduled outbound attendance calls received by the service." actions={<><Button variant="outlined" disabled>Bulk upload</Button><Button variant="outlined" disabled>Sync from host system</Button></>} />
+    <PageHeader eyebrow="ASSIGNMENT DISPATCH / CALL SCHEDULES" title="Duty schedules" description="Assignments and scheduled outbound attendance calls received by the service." actions={<Button component={RouterLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />}>New assignment</Button>} />
     {(sessions.isError || summary.isError) && <Alert severity="error">Could not load schedules from the backend.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Scheduled today" value={summary.data?.scheduledToday.toLocaleString() ?? "—"} detail="Assignments in today's shift window" icon={<CalendarMonthRoundedIcon />} /></Grid>
