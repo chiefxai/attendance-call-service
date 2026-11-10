@@ -216,7 +216,7 @@ and [`postCallAgents`](https://github.com/chiefxai/crm-backend-test/tree/main/sr
 - `GET /assignments/:id/artifacts` to retrieve session details, call attempts, transcripts, and audit logs
 - `GET /assignments/:id/recordings/:attemptId` to stream an authorized recording from private MinIO
 - `GET /dashboard/summary` for daily attendance, call, concurrency, and queue metrics
-- `GET/POST /staff` to list and save organization-scoped staff profiles
+- `GET/POST /staff` to list and save organization-scoped staff profiles (with optional `companyName` vendor field, maximum 200 characters)
 - `GET/POST /patients` to list and save organization-scoped patient profiles
 - `GET /supervision-queue` for sessions with unanswered or review statuses
 - `GET /attendance/ledger` for completed sessions with both stages confirmed
