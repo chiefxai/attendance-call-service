@@ -5,6 +5,7 @@ import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import { AxiosError } from "axios";
 import { createAssignment, fetchAgents, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
 import { useNavigate } from "react-router-dom";
+import { PageHeader } from "../components/OperationsUI";
 
 interface FormValues {
   assignmentId: string;
@@ -94,7 +95,7 @@ export function NewAssignmentPage() {
 
   return (
     <Stack spacing={3}>
-      <Box><Typography variant="overline" color="primary.main" fontWeight={750} letterSpacing=".12em">SCHEDULE OUTBOUND CALLS</Typography><Typography variant="h4" sx={{ mt: .5 }}>New assignment</Typography><Typography color="text.secondary" sx={{ mt: .75 }}>Add the shift and contact details. The AI calls the employee at check-in and check-out times.</Typography></Box>
+      <PageHeader eyebrow="SCHEDULE OUTBOUND CALLS" title="New assignment" description="Add the shift and contact details. The AI calls the employee at check-in and check-out times." />
       {mutation.isError && <Alert severity="error">Assignment could not be scheduled: {errorMessage}</Alert>}
       {agents.isError && <Alert severity="warning">Unable to load agents. Verify the API connection and workspace access.</Alert>}
       {(staff.isError || patients.isError) && <Alert severity="warning">Saved staff or patient records could not be loaded. You can still enter the details manually.</Alert>}
