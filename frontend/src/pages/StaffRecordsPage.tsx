@@ -10,6 +10,7 @@ import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
 import { AxiosError } from "axios";
 import { createStaff, fetchStaff, type CreateStaffPayload, type StaffRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
+import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
@@ -20,6 +21,7 @@ export function StaffRecordsPage() {
   const [selected, setSelected] = useState<StaffRecord | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newStaff, setNewStaff] = useState<CreateStaffPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
+  const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), refetchInterval: 30_000 });
   const createMutation = useMutation({
@@ -27,6 +29,7 @@ export function StaffRecordsPage() {
     onSuccess: async () => {
       setAddOpen(false);
       setNewStaff({ id: "", name: "", phoneNumber: "", address: "", language: "en" });
+      setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["staff"] });
     },
   });
@@ -37,6 +40,12 @@ export function StaffRecordsPage() {
   const languages = [...new Set(records.map((row) => row.language.toLowerCase()))];
   const active = records.filter((row) => row.dutyStatus === "on duty").length;
   const contacts = records.filter((row) => row.phoneMasked).length;
+  const saveStaff = () => {
+    const phoneNumber = normalizeIndianMobile(newStaff.phoneNumber);
+    if (!phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
+    setPhoneError("");
+    createMutation.mutate({ ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), phoneNumber, address: newStaff.address.trim() });
+  };
   const activeFilters = Number(language !== "all") + Number(status !== "all");
 
   return <Stack spacing={2.5}>
@@ -74,13 +83,13 @@ export function StaffRecordsPage() {
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} onChange={(event) => setNewStaff((current) => ({ ...current, id: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Phone number" placeholder="+919876543210" helperText="Use E.164 format with country code." value={newStaff.phoneNumber} onChange={(event) => setNewStaff((current) => ({ ...current, phoneNumber: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={newStaff.phoneNumber} onChange={(event) => { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(newStaff.phoneNumber); if (!newStaff.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Calling language</InputLabel><Select label="Calling language" value={newStaff.language} onChange={(event) => setNewStaff((current) => ({ ...current, language: event.target.value }))}><MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
             <Grid size={12}><TextField fullWidth required multiline minRows={2} label="Staff address" value={newStaff.address} onChange={(event) => setNewStaff((current) => ({ ...current, address: event.target.value }))} /></Grid>
           </Grid>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={() => setAddOpen(false)} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={() => createMutation.mutate({ ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), phoneNumber: newStaff.phoneNumber.trim(), address: newStaff.address.trim() })} disabled={createMutation.isPending || !newStaff.id.trim() || !newStaff.name.trim() || !newStaff.phoneNumber.trim() || !newStaff.address.trim()}>Save staff</Button></DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={() => setAddOpen(false)} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={saveStaff} disabled={createMutation.isPending || !newStaff.id.trim() || !newStaff.name.trim() || !newStaff.phoneNumber.trim() || !newStaff.address.trim()}>Save staff</Button></DialogActions>
     </Dialog>
     <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="sm">{selected && <><DialogTitle>Employee assignment · {selected.id}</DialogTitle><DialogContent><Stack spacing={1.5} sx={{ pt: 1 }}><Typography variant="h6">{selected.name}</Typography><Typography variant="body2">Calling language: {selected.language.toUpperCase()}</Typography><Typography variant="body2" color="text.secondary">Registered employee phone: {selected.phoneMasked || "Not available"}</Typography><Typography variant="body2" color="text.secondary">Staff address: {selected.address || "Not provided"}</Typography><Typography variant="body2" color="text.secondary">Current patient: {selected.patientName}</Typography><Typography variant="body2" color="text.secondary">Assignment: {selected.assignmentId}</Typography><Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert></Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>
   </Stack>;
