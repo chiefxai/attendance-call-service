@@ -7,11 +7,42 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-api.interceptors.request.use((config) => {
-  const key = window.sessionStorage.getItem("attendance_api_key");
-  if (key) config.headers.Authorization = `Bearer ${key}`;
-  return config;
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) window.dispatchEvent(new Event("attendance:unauthorized"));
+    return Promise.reject(error);
+  },
+);
+
+export interface WebUser {
+  id: string;
+  email: string;
+  displayName: string;
+}
+
+const authApi = axios.create({
+  baseURL: "/api/auth",
+  timeout: 20_000,
+  withCredentials: true,
+  headers: { "Content-Type": "application/json" },
 });
+
+export async function signIn(email: string, password: string) {
+  const response = await authApi.post<{ user: WebUser }>("/login", { email, password });
+  return response.data;
+}
+
+export async function fetchCurrentUser() {
+  const response = await authApi.get<{ user: WebUser }>("/me");
+  return response.data;
+}
+
+export async function signOut() {
+  const response = await authApi.post<{ success: boolean }>("/logout");
+  return response.data;
+}
 
 export interface ServiceApiKey {
   id: string;
@@ -293,23 +324,17 @@ export async function createAssignment(payload: AssignmentPayload) {
   return response.data;
 }
 
-export async function createServiceApiKey(label: string, adminToken: string) {
-  const response = await api.post<ServiceApiKey & { apiKey: string }>("/api-keys", { label }, {
-    headers: { "X-API-Admin-Token": adminToken },
-  });
+export async function createServiceApiKey(label: string) {
+  const response = await api.post<ServiceApiKey & { apiKey: string }>("/api-keys", { label });
   return response.data;
 }
 
-export async function fetchServiceApiKeys(adminToken: string) {
-  const response = await api.get<ServiceApiKey[]>("/api-keys", {
-    headers: { "X-API-Admin-Token": adminToken },
-  });
+export async function fetchServiceApiKeys() {
+  const response = await api.get<ServiceApiKey[]>("/api-keys");
   return response.data;
 }
 
-export async function revokeServiceApiKey(id: string, adminToken: string) {
-  const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`, {
-    headers: { "X-API-Admin-Token": adminToken },
-  });
+export async function revokeServiceApiKey(id: string) {
+  const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`);
   return response.data;
 }

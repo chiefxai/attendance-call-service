@@ -1,6 +1,7 @@
 "use strict";
 
 const express = require("express");
+const { createAuthRouter } = require("./api/auth-router");
 const http = require("node:http");
 const {
   createCallServiceRouter,
@@ -38,7 +39,8 @@ async function main() {
       res.status(503).json({ status: "unavailable" });
     }
   });
-  // Service routes require a scoped Bearer API key; Vobiz callbacks verify provider signatures in the router.
+  app.use("/api/auth", createAuthRouter({ express, repository }));
+  // Platform integrations authenticate with service keys; the web UI uses HttpOnly session cookies.
   app.use("/api/call-service", router);
 
   const server = http.createServer(app);
