@@ -401,7 +401,7 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         if (!agent?.active) throw new Error("Agent is missing or inactive");
         const client = await clientForOrg(callContext.organizationId);
         const language = displayLanguage(callContext.language);
-        const languageConfig = agent.languagePrompts?.[languageKey(session.language)] || {};
+        const languageConfig = agent.languagePrompts?.[languageKey(callContext.language)] || {};
         const dialect = String(languageConfig.dialect || "").trim();
         const languageInstructions = String(languageConfig.systemPrompt || "").trim();
         const systemPrompt = inboundCall ? [
