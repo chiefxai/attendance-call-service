@@ -33,7 +33,12 @@ function delayDetail(row: AttendanceRecord) {
     check_out_not_confirmed: "Departure not confirmed", callback_time_unclear: "Callback time unclear",
   };
   const reason = delayed.reason ? reasonLabels[delayed.reason] || delayed.reason.replaceAll("_", " ") : delayed.data.status.replaceAll("_", " ");
-  const nextCall = delayed.data.nextCallAt ? ` · Next call ${dateTime(delayed.data.nextCallAt)}` : "";
+  const callAt = delayed.data.nextCallAt ? new Date(delayed.data.nextCallAt) : null;
+  const nextCall = callAt
+    ? callAt.getTime() <= Date.now()
+      ? ` · Retry overdue since ${dateTime(callAt.toISOString())}; being rescheduled`
+      : ` · Next call ${dateTime(callAt.toISOString())}`
+    : "";
   return `${delayed.label} · ${reason}${nextCall}`;
 }
 
@@ -46,7 +51,8 @@ function AttendanceStatusChip({ status }: { status: AttendanceStatus }) {
 function exportCsv(data: AttendanceRecord[]) {
   const header = ["Session ID", "Assignment", "Staff", "Staff ID", "Patient", "Patient ID", "Scheduled start", "Scheduled end", "Attendance status", "Check-in status", "Check-in actual", "Check-out status", "Check-out actual", "Backend delivery"];
   const csv = [header, ...data.map((row) => [row.sessionId, row.assignmentId, row.employee.name, row.employee.id || "", row.patient.name, row.patient.id || "", row.scheduledStartAt, row.scheduledEndAt, attendanceStatus(row), row.checkIn.status, row.checkIn.reportedAt || "", row.checkOut.status, row.checkOut.reportedAt || "", row.backendDeliveryStatus])]
-    .map((values) => values.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
+    .map((values) => values.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("
+");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a"); link.href = url; link.download = "attendance.csv"; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
