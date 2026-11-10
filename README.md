@@ -81,3 +81,8 @@ docker compose restart backend-api backend-worker
 docker compose down                 # preserves named database/object volumes
 docker compose down -v              # permanently deletes database and recordings
 ```
+
+
+## Configure inbound Vobiz calls
+
+After deployment, create a Vobiz Voice Application with the Answer URL `https://<your-domain>/api/call-service/incoming/answer` (POST), Hangup URL `https://<your-domain>/api/call-service/webhooks/call-status` (POST), and link your inbound number to the application. See [backend setup](backend/README.md#inbound-patient-calls-vobiz) for verification, recording, transcript, and retention details.
