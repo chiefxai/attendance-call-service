@@ -44,10 +44,19 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState<WebUser | null>(null);
   useEffect(() => {
+    const onUnauthorized = () => {
+      setUser(null);
+      setAuthChecked(true);
+      queryClient.clear();
+    };
+    window.addEventListener("attendance:unauthorized", onUnauthorized);
     fetchCurrentUser().then((result) => setUser(result.user)).catch(() => setUser(null)).finally(() => setAuthChecked(true));
-  }, []);
+    return () => window.removeEventListener("attendance:unauthorized", onUnauthorized);
+  }, [queryClient]);
   const logout = async () => {
-    try { await signOut(); } finally { setUser(null); queryClient.clear(); }
+    try { await signOut(); } catch { /* Clear the local UI even if the session already expired. */ }
+    setUser(null);
+    queryClient.clear();
   };
   const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
   const drawer = (
