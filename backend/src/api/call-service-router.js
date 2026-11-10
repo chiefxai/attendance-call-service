@@ -256,15 +256,24 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     try { res.json(await repository.getCallCenterData(org(req))); } catch (error) { fail(res, error); }
   });
 
+  function serializeIncomingCall(call) {
+    const hasRecording = Boolean(call.recordingObjectKey);
+    const hasTranscript = Boolean(call.transcript?.trim());
+    const terminalStatus = ["failed", "no_answer", "canceled", "cancelled"].includes(call.status);
+    const status = terminalStatus ? call.status
+      : (["ringing", "in_progress"].includes(call.status) || !hasRecording || !hasTranscript ? "processing" : "ready");
+    return {
+      id: call.id, status, fromNumber: call.fromNumber, patient: call.patient || null,
+      language: call.language, startedAt: call.startedAt, answeredAt: call.answeredAt,
+      endedAt: call.endedAt, durationSeconds: call.durationSeconds,
+      hasRecording, hasTranscript, transcript: call.transcript || null,
+    };
+  }
+
   router.get("/incoming-calls", async (req, res) => {
     try {
       const calls = await repository.listInboundCalls(org(req), req.query.limit || 100);
-      res.json(calls.map((call) => ({
-        id: call.id, status: call.status, fromNumber: call.fromNumber, patient: call.patient || null,
-        language: call.language, startedAt: call.startedAt, answeredAt: call.answeredAt,
-        endedAt: call.endedAt, durationSeconds: call.durationSeconds,
-        hasRecording: Boolean(call.recordingObjectKey), transcript: call.transcript || null,
-      })));
+      res.json(calls.map(serializeIncomingCall));
     } catch (error) { fail(res, error); }
   });
 
@@ -272,12 +281,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     try {
       const call = await repository.getInboundCall(req.params.id, org(req));
       if (!call) return res.status(404).json({ error: "Incoming call not found" });
-      res.json({
-        id: call.id, status: call.status, fromNumber: call.fromNumber, patient: call.patient || null,
-        language: call.language, startedAt: call.startedAt, answeredAt: call.answeredAt,
-        endedAt: call.endedAt, durationSeconds: call.durationSeconds,
-        hasRecording: Boolean(call.recordingObjectKey), transcript: call.transcript || null,
-      });
+      res.json(serializeIncomingCall(call));
     } catch (error) { fail(res, error); }
   });
 

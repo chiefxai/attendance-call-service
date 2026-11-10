@@ -108,6 +108,21 @@ export interface SessionArtifacts {
   logs: SessionAuditLog[];
 }
 
+export interface IncomingPatientCall {
+  id: string;
+  status: "processing" | "ready" | "failed" | "no_answer" | "canceled" | "cancelled";
+  fromNumber: string;
+  patient: { id?: string | null; name?: string | null; phoneNumber?: string | null; address?: string | null } | null;
+  language: string;
+  startedAt: string;
+  answeredAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  hasRecording: boolean;
+  hasTranscript: boolean;
+  transcript: string | null;
+}
+
 export interface AgentLanguagePrompt {
   dialect: string;
   systemPrompt: string;
@@ -343,6 +358,15 @@ export async function fetchAttendanceLedger(params: { search?: string; limit?: n
 export async function fetchCallCenterData() {
   const response = await api.get<CallCenterData>("/call-center");
   return response.data;
+}
+
+export async function fetchIncomingCalls(limit = 100) {
+  const response = await api.get<IncomingPatientCall[]>("/incoming-calls", { params: { limit } });
+  return response.data;
+}
+
+export function incomingCallRecordingUrl(id: string) {
+  return `${api.defaults.baseURL || "/api/call-service"}/incoming-calls/${encodeURIComponent(id)}/recording`;
 }
 
 export async function fetchAgents() {

@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Alert, Box, Button, Card, CardContent, CircularProgress, Dialog, DialogActions,
-  DialogContent, DialogTitle, FormControl, Grid, InputLabel, MenuItem, Select,
+  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog, DialogActions,
+  DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select,
   Stack, TextField, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
+import CallReceivedRoundedIcon from "@mui/icons-material/CallReceivedRounded";
 import { AxiosError } from "axios";
-import { createPatient, fetchPatients, type CreatePatientPayload, type PatientRecord } from "../api/client";
+import { createPatient, fetchIncomingCalls, fetchPatients, incomingCallRecordingUrl, type CreatePatientPayload, type PatientRecord } from "../api/client";
 import { PageHeader } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
@@ -42,6 +43,11 @@ export function EnquiriesPage() {
   const [enquiryMessage, setEnquiryMessage] = useState("");
   const [selectedMessage, setSelectedMessage] = useState("");
   const queryClient = useQueryClient();
+  const incomingCalls = useQuery({
+    queryKey: ["incoming-calls"],
+    queryFn: () => fetchIncomingCalls(100),
+    refetchInterval: 5_000,
+  });
   const patients = useQuery({
     queryKey: ["patients"],
     queryFn: () => fetchPatients({ limit: 500 }),
@@ -109,6 +115,51 @@ export function EnquiriesPage() {
       title="Enquiries"
       actions={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={openDialog}>Add enquiry</Button>}
     />
+
+    <Card>
+      <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+        <Stack spacing={2}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <CallReceivedRoundedIcon color="primary" />
+            <Box>
+              <Typography variant="h6" fontWeight={700}>Incoming patient calls</Typography>
+              <Typography variant="body2" color="text.secondary">Call recordings and transcripts appear here as processing finishes.</Typography>
+            </Box>
+          </Stack>
+          {incomingCalls.isLoading && <LinearProgress />}
+          {incomingCalls.isError && <Alert severity="error">Could not load incoming calls: {errorMessage(incomingCalls.error)}</Alert>}
+          {incomingCalls.isSuccess && incomingCalls.data.length === 0 && <Alert severity="info">No patient calls have been received yet.</Alert>}
+          <Stack spacing={1.5}>
+            {incomingCalls.data?.map((call) => (
+              <Card key={call.id} variant="outlined">
+                <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+                  <Stack spacing={1.5}>
+                    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1} alignItems={{ sm: "center" }}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography fontWeight={700}>{call.patient?.name || "Unmatched caller"}</Typography>
+                        <Typography variant="body2" color="text.secondary">{call.fromNumber} · {new Date(call.startedAt).toLocaleString()}</Typography>
+                      </Box>
+                      <Chip size="small"
+                        color={call.status === "processing" ? "warning" : call.status === "ready" ? "success" : "default"}
+                        label={call.status === "processing" ? "Processing" : call.status === "ready" ? "Received" : call.status.replaceAll("_", " ")}
+                      />
+                    </Stack>
+                    {call.status === "processing" && <Alert severity="info">Call recording and transcription are processing. This entry updates automatically.</Alert>}
+                    {call.hasRecording && <audio controls preload="none" src={incomingCallRecordingUrl(call.id)} style={{ width: "100%" }} />}
+                    {call.transcript
+                      ? <Box sx={{ p: 1.5, bgcolor: "#f7f9f8", borderRadius: 1.5 }}>
+                          <Typography variant="subtitle2" fontWeight={700}>Call transcript</Typography>
+                          <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap" }}>{call.transcript}</Typography>
+                        </Box>
+                      : call.status !== "processing" && <Typography variant="body2" color="text.secondary">No transcript is available for this call.</Typography>}
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
 
     {selectedPatient ? (
       <Card>
