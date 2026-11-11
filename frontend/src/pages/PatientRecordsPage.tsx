@@ -110,7 +110,16 @@ export function PatientRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Patient assignment directory" sx={{ minWidth: 1100 }}><TableHead><TableRow>{["Patient & ID", "Mobile number", "Patient address", "Hub", "Care category", "Assigned employee", "Language", "Location check", "Session status", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead><TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell><TableCell>{row.phoneNumber || "Not provided"}</TableCell><TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell><TableCell>{row.hub}</TableCell><TableCell>{row.careCategory}</TableCell><TableCell><Typography variant="body2">{row.assignedStaff}</Typography><Typography variant="caption" color="text.secondary">{row.employeeId || "Employee ID unavailable"}</Typography></TableCell><TableCell>{row.language.toUpperCase()}</TableCell><TableCell><StatusChip status={row.locationVerification} /></TableCell><TableCell><StatusChip status={row.status} /></TableCell><TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setViewPatient(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+<TableContainer><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
+      <TableHead><TableRow>{["Patient name", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
+      <TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover>
+        <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
+        <TableCell>{row.phoneNumber || "Not provided"}</TableCell>
+        <TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell>
+        <TableCell>{row.language.toUpperCase()}</TableCell>
+        <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setViewPatient(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell>
+      </TableRow>)}</TableBody>
+    </Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>No patient records match these filters.</Typography>}
     </Card>
     <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
