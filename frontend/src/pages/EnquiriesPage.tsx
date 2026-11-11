@@ -360,27 +360,10 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
             <Typography variant="body2">{formatTime(call.enquiryAnalysis?.requestedStartAt, call.enquiryAnalysis?.timeZone)}</Typography>
             {call.enquiryAnalysis?.durationMinutes && <Typography variant="caption" color="text.secondary">{call.enquiryAnalysis.durationMinutes} min</Typography>}
           </TableCell>
-          <TableCell sx={{ minWidth: 240 }}>
-            <Stack spacing={1} alignItems="flex-start">
+          <TableCell sx={{ minWidth: 190 }}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
               <Chip size="small" color={statusColor(call.enquiryStatus)} label={statusLabel(call.enquiryStatus)} />
-              {call.bookingStatus !== "not_started" && <Chip size="small" variant="outlined" label={`Staff booking · ${call.bookingStatus.replaceAll("_", " ")}`} />}
-              {call.enquiryStatus === "suggestion" && call.staffSuggestions.length > 0 && <Stack spacing={.5} sx={{ width: "100%" }}>
-                <Typography variant="caption" color="text.secondary">Staff availability calls run in suggestion order</Typography>
-                {call.staffSuggestions.slice(0, 10).map((staff, index) => <Stack key={staff.id} direction="row" spacing={.75} alignItems="center" flexWrap="wrap">
-                  <Typography variant="body2">{index + 1}. {staff.name}</Typography>
-                  {staff.phoneNumber && <Button size="small" component="a" href={`tel:${staff.phoneNumber}`} sx={{ minWidth: 0, py: 0, px: .5 }}>{staff.phoneNumber}</Button>}
-                  <Chip size="small" variant="outlined" label={locationLabel(staff.locationMatch)} />
-                </Stack>)}
-              </Stack>}
-              {call.enquiryStatus === "resolved" && call.resolvedStaff && <Typography variant="body2">Assigned: {call.resolvedStaff.name}</Typography>}
-              {call.enquiryStatus === "need_review" && <Typography variant="caption" color="text.secondary">Human review required</Typography>}
-              {call.enquiryStatus === "shortage" && <Typography variant="caption" color="text.secondary">Staff shortage · human review and manual assignment required</Typography>}
-              {call.bookingStatus === "not_answered" && <Typography variant="caption" color="warning.main">All suggested staff calls were unanswered or unavailable · human follow-up required</Typography>}
-              {call.bookingStatus === "scheduled" && call.bookingStaff && <Typography variant="caption" color="success.main">Confirmed with {call.bookingStaff.name}</Typography>}
-              {call.bookingStatus === "calling" && <Typography variant="caption" color="text.secondary">Calling suggested staff to confirm availability…</Typography>}
-              {call.enquiryStatus === "resolved" && <Typography variant="caption" color="text.secondary">{call.resolvedStaff?.phoneNumber || ""}</Typography>}
               <Button variant="text" size="small" onClick={() => setDetailCall(call)}>Details</Button>
-              {!["processing", "resolved"].includes(call.enquiryStatus) && call.bookingStatus !== "calling" && <Button variant="outlined" size="small" onClick={() => onResolve(call)}>{call.bookingStatus === "not_answered" || call.bookingStatus === "needs_review" ? "Review & assign" : call.enquiryStatus === "suggestion" ? "Confirm & assign" : call.enquiryStatus === "shortage" ? "Review shortage & assign" : "Review & assign"}</Button>}
             </Stack>
           </TableCell>
         </TableRow>)}</TableBody>
@@ -462,7 +445,10 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
             </Box>
           </Stack>
         </DialogContent>
-        <DialogActions><Button onClick={() => setDetailCall(null)}>Close</Button></DialogActions>
+        <DialogActions>
+          <Button onClick={() => setDetailCall(null)}>Close</Button>
+          {!["processing", "resolved"].includes(detailCall.enquiryStatus) && detailCall.bookingStatus !== "calling" && <Button variant="contained" onClick={() => { onResolve(detailCall); setDetailCall(null); }}>Review & assign</Button>}
+        </DialogActions>
       </>}
     </Dialog>
   </Stack>;
