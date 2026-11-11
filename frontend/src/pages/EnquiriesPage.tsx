@@ -324,7 +324,9 @@ export function EnquiriesPage() {
 
 function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls: IncomingCall[]; loading: boolean; error: boolean; onResolve: (call: IncomingCall) => void }) {
   const [detailCall, setDetailCall] = useState<IncomingCall | null>(null);
-  const formatTime = (value?: string | null) => value ? new Date(value).toLocaleString() : "Not captured";
+  const formatTime = (value?: string | null, timeZone?: string | null) => value
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", ...(timeZone ? { timeZone } : {}) }).format(new Date(value))
+    : "Not captured";
   const locationLabel = (match: IncomingCall["staffSuggestions"][number]["locationMatch"]) => ({
     same_district: "Same district", same_region: "Same state", other_region: "Other area",
   }[match] || "Location not matched");
@@ -354,7 +356,7 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
             {call.enquiryAnalysis?.activityName && call.enquiryAnalysis?.needsSummary && <Typography variant="caption" color="text.secondary">{call.enquiryAnalysis.activityName}{call.enquiryAnalysis.durationMinutes ? ` · ${call.enquiryAnalysis.durationMinutes} min` : ""}</Typography>}
           </TableCell>
           <TableCell sx={{ minWidth: 170 }}>
-            <Typography variant="body2">{formatTime(call.enquiryAnalysis?.requestedStartAt)}</Typography>
+            <Typography variant="body2">{formatTime(call.enquiryAnalysis?.requestedStartAt, call.enquiryAnalysis?.timeZone)}</Typography>
             {call.enquiryAnalysis?.durationMinutes && <Typography variant="caption" color="text.secondary">{call.enquiryAnalysis.durationMinutes} min</Typography>}
           </TableCell>
           <TableCell sx={{ minWidth: 240 }}>
@@ -413,8 +415,8 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
             </Box>
             <Box>
               <Typography variant="subtitle2" fontWeight={700}>Requested timing</Typography>
-              <Typography variant="body2">Start: {formatTime(detailCall.enquiryAnalysis?.requestedStartAt)}</Typography>
-              {detailCall.enquiryAnalysis?.requestedEndAt && <Typography variant="body2">End: {formatTime(detailCall.enquiryAnalysis.requestedEndAt)}</Typography>}
+              <Typography variant="body2">Start: {formatTime(detailCall.enquiryAnalysis?.requestedStartAt, detailCall.enquiryAnalysis?.timeZone)}</Typography>
+              {detailCall.enquiryAnalysis?.requestedEndAt && <Typography variant="body2">End: {formatTime(detailCall.enquiryAnalysis.requestedEndAt, detailCall.enquiryAnalysis?.timeZone)}</Typography>}
               {detailCall.enquiryAnalysis?.durationMinutes && <Typography variant="body2">Duration: {detailCall.enquiryAnalysis.durationMinutes} minutes</Typography>}
             </Box>
             <Box>

@@ -131,6 +131,9 @@ export interface IncomingPatientCall {
     activityId?: string | null;
     activityName?: string | null;
     durationMinutes?: number | null;
+    timeZone?: string | null;
+    requestedLocalDate?: string | null;
+    requestedLocalTime?: string | null;
     requestedStartAt?: string | null;
     requestedEndAt?: string | null;
     needsSummary?: string;

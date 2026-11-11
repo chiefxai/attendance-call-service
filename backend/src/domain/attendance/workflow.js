@@ -3,6 +3,7 @@
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
 const { createPostCallTools } = require("../../agents/post-call-tools");
 const { createAppointmentBookingTools } = require("../../agents/appointment-booking-tools");
+const { localDateTimeToUtc } = require("./local-time");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -249,11 +250,10 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       referenceTime: call.startedAt, timezone: process.env.APP_TIMEZONE || "Asia/Kolkata",
     });
     const activity = activities.find((candidate) => candidate.id === analysis.activityId);
-    const requestedStartText = String(analysis.requestedStartAt || "");
-    const requestedStart = requestedStartText ? new Date(requestedStartText) : null;
-    const hasExplicitZone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(requestedStartText);
+    const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
+    const requestedStart = localDateTimeToUtc(analysis.requestedLocalDate, analysis.requestedLocalTime, timeZone);
     const callStartedAt = new Date(call.startedAt || Date.now()).getTime();
-    const hasValidStart = Boolean(hasExplicitZone && requestedStart && Number.isFinite(requestedStart.getTime())
+    const hasValidStart = Boolean(requestedStart && Number.isFinite(requestedStart.getTime())
       && requestedStart.getTime() >= callStartedAt - 60_000);
     const patientAddressParts = String(call.patient?.address || "").split(" | ");
     const hasPatientDistrict = patientAddressParts.length === 4 && Boolean(patientAddressParts[1].trim());
@@ -277,6 +277,9 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       analysis: {
         activityId: activity?.id || null, activityName: activity?.name || analysis.requestedActivity || null,
         durationMinutes: activity?.durationMinutes || null,
+        requestedLocalDate: analysis.requestedLocalDate || null,
+        requestedLocalTime: analysis.requestedLocalTime || null,
+        timeZone,
         requestedStartAt: hasValidStart ? requestedStart.toISOString() : null,
         requestedEndAt: requestedEndAt?.toISOString() || null,
         needsSummary: String(analysis.needsSummary || "").slice(0, 2000), requiresHumanFollowUp: true,
