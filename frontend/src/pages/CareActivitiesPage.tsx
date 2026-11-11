@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControlLabel, Grid, Stack, Switch, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Grid, Stack, Switch, TextField, Typography } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import { AxiosError } from "axios";
@@ -22,23 +22,36 @@ export function CareActivitiesPage() {
   const queryClient = useQueryClient();
   const activities = useQuery({ queryKey: ["care-activities"], queryFn: () => fetchCareActivities(true) });
   const [form, setForm] = useState<ActivityForm>(emptyForm);
+  const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<CareActivity | null>(null);
   const [templateMessage, setTemplateMessage] = useState("");
   const [templateError, setTemplateError] = useState("");
   const aliases = form.aliasesText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
   const input = () => ({ name: form.name.trim(), aliases, description: form.description.trim(), durationMinutes: form.durationMinutes });
   const resetForm = () => { setEditing(null); setForm(emptyForm()); };
-  const create = useMutation({ mutationFn: createCareActivity, onSuccess: async () => { resetForm(); await queryClient.invalidateQueries({ queryKey: ["care-activities"] }); } });
-  const update = useMutation({ mutationFn: ({ id, ...payload }: CareActivity) => updateCareActivity(id, payload), onSuccess: async () => { resetForm(); await queryClient.invalidateQueries({ queryKey: ["care-activities"] }); } });
+  const create = useMutation({ mutationFn: createCareActivity, onSuccess: async () => { setFormOpen(false); resetForm(); await queryClient.invalidateQueries({ queryKey: ["care-activities"] }); } });
+  const update = useMutation({ mutationFn: ({ id, ...payload }: CareActivity) => updateCareActivity(id, payload), onSuccess: async () => { if (editing) setFormOpen(false); resetForm(); await queryClient.invalidateQueries({ queryKey: ["care-activities"] }); } });
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const payload = input();
     if (editing) update.mutate({ ...editing, ...payload });
     else create.mutate(payload);
   };
+  const openAdd = () => {
+    create.reset(); update.reset();
+    resetForm();
+    setFormOpen(true);
+  };
+  const closeForm = () => {
+    if (create.isPending || update.isPending) return;
+    setFormOpen(false);
+    resetForm();
+  };
   const edit = (activity: CareActivity) => {
+    create.reset(); update.reset();
     setEditing(activity);
     setForm({ name: activity.name, aliasesText: activity.aliases.join("\n"), description: activity.description, durationMinutes: activity.durationMinutes });
+    setFormOpen(true);
   };
   const addExamples = async () => {
     setTemplateMessage(""); setTemplateError("");
@@ -51,17 +64,19 @@ export function CareActivitiesPage() {
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader title="Care activities" />
+    <PageHeader title="Care activities" actions={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={openAdd}>Add activity</Button>} />
     <Alert severity="info">Group different caller phrases under one activity. The voice agent and post-call extractor use each activity’s description and alternate names to identify the same service, then apply its default duration when suggesting available staff.</Alert>
     {activities.isError && <Alert severity="error">Could not load care activities: {errorText(activities.error)}</Alert>}
-    {(create.isError || update.isError) && <Alert severity="error">{errorText(create.error || update.error)}</Alert>}
     {(create.isSuccess || update.isSuccess) && <Alert severity="success">Care activity saved.</Alert>}
     {templateMessage && <Alert severity="success">{templateMessage}</Alert>}
     {templateError && <Alert severity="warning">{templateError}</Alert>}
-    <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-      <Stack component="form" onSubmit={submit} spacing={2}>
+    <Dialog open={formOpen} onClose={closeForm} fullWidth maxWidth="md">
+      <DialogTitle>{editing ? "Edit care activity" : "Add care activity"}</DialogTitle>
+      <DialogContent dividers>
+      <Stack component="form" id="care-activity-form" onSubmit={submit} spacing={2} sx={{ pt: 1 }}>
+        {(create.isError || update.isError) && <Alert severity="error">{errorText(create.error || update.error)}</Alert>}
         <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1} alignItems={{ sm: "center" }}>
-          <Box><Typography variant="h6">{editing ? "Edit activity" : "Add activity"}</Typography><Typography variant="body2" color="text.secondary">Use one canonical activity and list the different words patients may use for it.</Typography></Box>
+          <Box><Typography variant="body2" color="text.secondary">Use one canonical activity and list the different words patients may use for it.</Typography></Box>
           {!editing && <Button startIcon={<AutoAwesomeRoundedIcon />} onClick={() => void addExamples()} disabled={activities.isLoading}>Add starter examples</Button>}
         </Stack>
         <Grid container spacing={2}>
@@ -70,12 +85,13 @@ export function CareActivitiesPage() {
           <Grid size={{ xs: 12, md: 5 }}><TextField fullWidth multiline minRows={2} label="Description" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} inputProps={{ maxLength: 500 }} /></Grid>
           <Grid size={12}><TextField fullWidth multiline minRows={3} label="Alternate names and phrases" helperText="Enter one phrase per line, such as “bathing”, “showering”, or local names for the same activity." value={form.aliasesText} onChange={(event) => setForm((current) => ({ ...current, aliasesText: event.target.value }))} inputProps={{ maxLength: 4000 }} /></Grid>
         </Grid>
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
-          {editing && <Button onClick={resetForm}>Cancel</Button>}
-          <Button type="submit" variant="contained" startIcon={<AddRoundedIcon />} disabled={create.isPending || update.isPending}>{editing ? "Save activity" : "Add activity"}</Button>
-        </Stack>
       </Stack>
-    </CardContent></Card>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, py: 2 }}>
+        <Button onClick={closeForm} disabled={create.isPending || update.isPending}>Cancel</Button>
+        <Button type="submit" form="care-activity-form" variant="contained" startIcon={create.isPending || update.isPending ? <CircularProgress size={16} color="inherit" /> : <AddRoundedIcon />} disabled={create.isPending || update.isPending}>{editing ? "Save activity" : "Add activity"}</Button>
+      </DialogActions>
+    </Dialog>
     {activities.isLoading && <Box sx={{ display: "grid", placeItems: "center", py: 4 }}><CircularProgress /></Box>}
     <Stack spacing={1.25}>
       {activities.data?.map((activity) => <Card key={activity.id}><CardContent sx={{ py: 1.75, "&:last-child": { pb: 1.75 } }}>

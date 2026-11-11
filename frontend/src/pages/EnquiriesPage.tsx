@@ -163,7 +163,7 @@ export function EnquiriesPage() {
           </Alert>
         </CardContent>
       </Card>
-    ) : (
+    ) : incomingCalls.isSuccess && incomingCalls.data.length === 0 ? (
       <Card>
         <CardContent sx={{ minHeight: 300, display: "grid", placeItems: "center", textAlign: "center", p: 4 }}>
           <Stack spacing={1.25} alignItems="center" maxWidth={440}>
@@ -176,7 +176,7 @@ export function EnquiriesPage() {
           </Stack>
         </CardContent>
       </Card>
-    )}
+    ) : null}
 
     <Dialog open={dialogOpen} onClose={() => { if (!createMutation.isPending) setDialogOpen(false); }} fullWidth maxWidth="sm">
       <DialogTitle>Add patient enquiry</DialogTitle>
