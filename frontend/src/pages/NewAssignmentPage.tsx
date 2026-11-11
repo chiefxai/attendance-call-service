@@ -67,7 +67,7 @@ const initialValues: FormValues = {
   patientId: "", patientName: "", patientPhone: "", patientAddress: "",
 };
 
-const BULK_HEADERS = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeePhone", "employeeCompanyName", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress", "timeZone"];
+const BULK_HEADERS = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeeCompanyName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress", "timeZone"];
 const MAX_BULK_ROWS = 200;
 interface BulkAssignmentRow { line: number; payload?: AssignmentPayload; errors: string[]; }
 interface BulkAssignmentResult { sessionId?: string; error?: string; }

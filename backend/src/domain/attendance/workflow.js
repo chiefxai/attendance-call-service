@@ -286,10 +286,15 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       staffSuggestions,
     });
     if (!needsDetails && staffSuggestions.length) {
-      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "calling");
-      await queue.enqueue("call_next_appointment_staff", { inboundCallId, organizationId: call.organizationId, candidateIndex: 0 }, {
-        idempotencyKey: `appointment:${inboundCallId}:candidate:0`,
-      });
+      const callingSettings = await repository.getOrganizationCallSettings(call.organizationId);
+      if (callingSettings.requireHumanVerificationForStaffBooking === true) {
+        await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review");
+      } else {
+        await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "calling");
+        await queue.enqueue("call_next_appointment_staff", { inboundCallId, organizationId: call.organizationId, candidateIndex: 0 }, {
+          idempotencyKey: `appointment:${inboundCallId}:candidate:0`,
+        });
+      }
     } else if (!needsDetails) {
       await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "no_staff_available");
     }
@@ -299,6 +304,11 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   async function callNextAppointmentStaff({ inboundCallId, organizationId, candidateIndex = 0 }) {
     const call = await repository.getInboundCall(inboundCallId, organizationId || process.env.DEFAULT_ORGANIZATION_ID);
     if (!call || call.bookingScheduleSessionId || call.bookingStatus === "scheduled") return;
+    const bookingSettings = await repository.getOrganizationCallSettings(call.organizationId);
+    if (bookingSettings.requireHumanVerificationForStaffBooking === true) {
+      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review");
+      return;
+    }
     const candidates = call.staffSuggestions || [];
     if (candidateIndex >= candidates.length) {
       await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "not_answered");
@@ -361,13 +371,22 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       requestedStartAt: analysis.requestedStartAt, transcript: transcript.text,
     });
     await repository.saveAppointmentCallTranscript(appointmentCallId, transcript.text, outcome);
+    const bookingSettings = await repository.getOrganizationCallSettings(appointment.organizationId);
+    if (bookingSettings.requireHumanVerificationForStaffBooking === true) {
+      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
+      return;
+    }
     if (outcome.outcome === "unavailable") {
       await queue.enqueue("call_next_appointment_staff", { inboundCallId: appointment.inboundCallId, organizationId: appointment.organizationId, candidateIndex: appointment.candidateIndex + 1 }, {
         idempotencyKey: `appointment:${appointment.inboundCallId}:candidate:${appointment.candidateIndex + 1}`,
       });
       return;
     }
-    if (outcome.outcome !== "available_confirmed" || !outcome.confirmedByStaff || !outcome.confirmedActivity || !outcome.confirmedStartTime) {
+    // Activity and start time come from the authoritative enquiry context and
+    // are spoken back by the live agent before asking for confirmation. Require
+    // the staff member's clear acceptance, but do not require them to repeat
+    // those details verbatim in the recording/transcript.
+    if (outcome.outcome !== "available_confirmed" || !outcome.confirmedByStaff) {
       await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
       return;
     }

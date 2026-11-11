@@ -216,12 +216,14 @@ and [`postCallAgents`](https://github.com/chiefxai/crm-backend-test/tree/main/sr
 - `GET /assignments/:id/artifacts` to retrieve session details, call attempts, transcripts, and audit logs
 - `GET /assignments/:id/recordings/:attemptId` to stream an authorized recording from private MinIO
 - `GET /dashboard/summary` for daily attendance, call, concurrency, and queue metrics
-- `GET/POST /staff` to list and save organization-scoped staff profiles (with optional `companyName` vendor field, maximum 200 characters)
+- `GET/POST /staff` to list and save organization-scoped staff profiles
 - `GET/POST /patients` to list and save organization-scoped patient profiles
 - `GET /supervision-queue` for sessions with unanswered or review statuses
 - `GET /attendance/ledger` for completed sessions with both stages confirmed
 - `GET /call-center` for active provider calls and queued call jobs
 - `POST /webhooks/call-status` for signed Vobiz hangup/status events
+
+Staff directory profiles accept an optional `companyName` string (maximum 200 characters) to identify the vendor/provider company; leave it blank for independent staff. It is returned in staff listings and available to enquiry and appointment workflows.
 
 All stored data is organization-scoped. Calls are initiated only from
 assignment sessions and target the employee phone number; patient calling is

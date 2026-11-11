@@ -67,6 +67,7 @@ export interface AssignmentStatus {
   sessionId: string;
   assignmentId: string;
   sessionStatus: string;
+  timeZone?: string;
   checkIn: AttendanceStageStatus;
   checkOut: AttendanceStageStatus;
   backendDeliveryStatus: string;
@@ -216,6 +217,7 @@ export interface AttendanceRecord {
 export interface CallingSettings {
   defaultFromNumber: string;
   allowNonPatientInboundCalls: boolean;
+  requireHumanVerificationForStaffBooking: boolean;
   retry: {
     maxConsecutiveNoAnswer: number;
     initialMinutes: number;
@@ -425,7 +427,7 @@ export async function fetchIncomingCalls(limit = 100) {
 }
 
 export async function resolveIncomingEnquiry(id: string, staffId: string) {
-  const response = await api.post<{ id: string; enquiryStatus: IncomingCall["enquiryStatus"]; resolvedStaff: NonNullable<IncomingCall["resolvedStaff"]>; resolvedAt: string }>(
+  const response = await api.post<{ id: string; enquiryStatus: IncomingCall["enquiryStatus"]; resolvedStaff: NonNullable<IncomingCall["resolvedStaff"]>; resolvedAt: string; bookingStatus?: IncomingCall["bookingStatus"]; bookingScheduleSessionId?: string | null }>(
     `/incoming-calls/${encodeURIComponent(id)}/resolve`, { staffId },
   );
   return response.data;

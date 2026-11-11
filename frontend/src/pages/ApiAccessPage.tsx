@@ -18,7 +18,7 @@ const example = [
   '    "language": "ta",',
   '    "scheduledStartAt": "2026-11-10T08:00:00+05:30",',
   '    "scheduledEndAt": "2026-11-10T20:00:00+05:30",',
-  '    "employee": { "id": "STAFF-1001", "name": "Employee name", "phoneNumber": "+919876543210" },',
+  '    "employee": { "id": "STAFF-1001", "name": "Employee name", "companyName": "Care vendor", "phoneNumber": "+919876543210" },',
   '    "patient": { "id": "PATIENT-2001", "name": "Patient name", "address": "Client service address" }',
   "  }'",
 ].join("\n");

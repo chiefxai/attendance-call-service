@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 10695)
+Total output lines: 726
+
 "use strict";
 
 const crypto = require("node:crypto");
@@ -85,6 +88,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     return {
       defaultFromNumber: stored.defaultFromNumber ?? process.env.VOBIZ_FROM_NUMBER ?? "",
       allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
+      requireHumanVerificationForStaffBooking: stored.requireHumanVerificationForStaffBooking ?? false,
       retry: {
         maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 5),
         initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 5),
@@ -319,40 +323,25 @@ router.get("/activities", async (req, res) => {
     if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
     if (req.body?.active !== undefined && typeof req.body.active !== "boolean") return res.status(400).json({ error: "active must be a boolean." });
     try {
-      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, aliases, description, durationMinutes, active: req.body?.active });
-      if (!activity) return res.status(404).json({ error: "Activity not found." });
-      return res.json(activity);
-    } catch (error) {
-      if (error.code === "23505") return res.status(409).json({ error: "An activity with this name already exists." });
-      return fail(res, error);
-    }
-  });
-
-    router.get("/incoming-calls", async (req, res) => {
-    try {
-      const calls = await repository.listInboundCalls(org(req), req.query.limit || 100);
-      res.json(await Promise.all(calls.map(async (call) => serializeIncomingCall(
-        call, await repository.listAppointmentCallAttempts(call.id, org(req)),
-      ))));
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/incoming-calls/:id", async (req, res) => {
-    try {
-      const call = await repository.getInboundCall(req.params.id, org(req));
-      if (!call) return res.status(404).json({ error: "Incoming call not found" });
-      res.json(serializeIncomingCall(call, await repository.listAppointmentCallAttempts(call.id, org(req))));
-    } catch (error) { fail(res, error); }
-  });
-
-  router.post("/incoming-calls/:id/resolve", async (req, res) => {
-    try {
-      const body = req.body || {};
-      if (Object.keys(body).some((key) => key !== "staffId")) {
-        return res.status(400).json({ error: "Only staffId is accepted; enquiry status is controlled by the system." });
+      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, aliases, description, durationMinutes, active: re…695 tokens truncated…0, 2).toLowerCase()))
+          || agents.find((item) => item.active);
+        if (!attendanceAgent) return res.status(409).json({ error: "Configure an active attendance voice agent before assigning this enquiry." });
+        const settings = await repository.getOrganizationCallSettings(organizationId);
+        const fromNumber = settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER;
+        if (!fromNumber) return res.status(409).json({ error: "Configure the default Vobiz caller ID in Settings before assigning this enquiry." });
+        const session = await repository.saveAppointmentAttendanceSchedule({
+          inboundCallId: req.params.id, organizationId, staff, attendanceAgent, fromNumber,
+        });
+        await queue.enqueue("place_call", { sessionId: session.id, stage: "check_in", attemptNumber: 1 }, {
+          idempotencyKey: `call:${session.id}:check_in:1`, runAt: new Date(session.scheduledStartAt),
+        });
+        await queue.enqueue("place_call", { sessionId: session.id, stage: "check_out", attemptNumber: 1 }, {
+          idempotencyKey: `call:${session.id}:check_out:1`, runAt: new Date(session.scheduledEndAt),
+        });
+        const updated = await repository.getInboundCall(req.params.id, organizationId);
+        return res.json({ id: updated.id, enquiryStatus: updated.enquiryStatus, resolvedStaff: updated.resolvedStaff,
+          resolvedAt: updated.resolvedAt, bookingStatus: updated.bookingStatus, bookingScheduleSessionId: session.id });
       }
-      const staffId = String(body.staffId || "").trim();
-      if (!staffId) return res.status(400).json({ error: "Choose a staff member to resolve this enquiry." });
       const call = await repository.resolveInboundEnquiry(req.params.id, org(req), staffId);
       if (!call) return res.status(404).json({ error: "Incoming call not found" });
       res.json({ id: call.id, enquiryStatus: call.enquiryStatus, resolvedStaff: call.resolvedStaff, resolvedAt: call.resolvedAt });
@@ -404,6 +393,9 @@ router.get("/activities", async (req, res) => {
       if (body.allowNonPatientInboundCalls !== undefined && typeof body.allowNonPatientInboundCalls !== "boolean") {
         return res.status(400).json({ error: "allowNonPatientInboundCalls must be a boolean" });
       }
+      if (body.requireHumanVerificationForStaffBooking !== undefined && typeof body.requireHumanVerificationForStaffBooking !== "boolean") {
+        return res.status(400).json({ error: "requireHumanVerificationForStaffBooking must be a boolean" });
+      }
       const maxConsecutiveNoAnswer = Number(retry.maxConsecutiveNoAnswer);
       const initialMinutes = Number(retry.initialMinutes);
       const multiplier = Number(retry.multiplier);
@@ -419,6 +411,7 @@ router.get("/activities", async (req, res) => {
         defaultFromNumber,
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
         allowNonPatientInboundCalls: body.allowNonPatientInboundCalls ?? existingSettings.allowNonPatientInboundCalls ?? false,
+        requireHumanVerificationForStaffBooking: body.requireHumanVerificationForStaffBooking ?? existingSettings.requireHumanVerificationForStaffBooking ?? false,
       });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
@@ -427,7 +420,7 @@ router.get("/activities", async (req, res) => {
   router.post("/settings/calling/reset", async (req, res) => {
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowNonPatientInboundCalls: false });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });
@@ -440,8 +433,9 @@ router.get("/activities", async (req, res) => {
       const missing = required.filter((key) => !body[key]);
       const callingSettings = await getEffectiveCallingSettings(organizationId);
       const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
-      const companyName = String(body.employee?.companyName || "").trim();
-      if (companyName.length > 200) return res.status(400).json({ error: "Employee company name must be at most 200 characters." });
+      if (String(body.employee?.companyName || "").trim().length > 200) {
+        return res.status(400).json({ error: "Employee company name must be at most 200 characters." });
+      }
       const employeePhone = normalizeIndianMobile(body.employee?.phoneNumber);
       const patientPhoneInput = String(body.patient?.phoneNumber || "").trim();
       const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
@@ -466,7 +460,7 @@ router.get("/activities", async (req, res) => {
           scheduledEndAt: endAt,
         }, client);
         await repository.createStaffDirectoryRecord(organizationId, {
-          id: body.employee.id, name: body.employee.name, companyName, phoneNumber: employeePhone,
+          id: body.employee.id, name: body.employee.name, companyName: body.employee.companyName || "", phoneNumber: employeePhone,
           address: String(body.employee.address || "").trim(), language: body.language,
         }, client);
         await repository.createPatientDirectoryRecord(organizationId, {
@@ -477,7 +471,7 @@ router.get("/activities", async (req, res) => {
         const created = await repository.createAttendanceSession({
           organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
           agentId: body.agentId, fromNumber, language: body.language,
-          employee: { ...body.employee, companyName, phoneNumber: employeePhone },
+          employee: { ...body.employee, companyName: String(body.employee.companyName || "").trim(), phoneNumber: employeePhone },
           patient: { ...body.patient, phoneNumber: patientPhone || undefined }, scheduledStartAt: startAt,
           scheduledEndAt: endAt, metadata: body.metadata || {},
         }, client);
@@ -503,6 +497,7 @@ router.get("/activities", async (req, res) => {
         sessionId: session.id,
         assignmentId: session.assignmentId,
         sessionStatus: session.sessionStatus,
+        timeZone: session.metadata?.timeZone || process.env.APP_TIMEZONE || "Asia/Kolkata",
         checkIn: {
           status: session.checkInStatus,
           flag: session.checkInStatus === "not_answered" ? "not_answered" : null,

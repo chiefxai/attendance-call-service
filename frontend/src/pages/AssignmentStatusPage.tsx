@@ -19,6 +19,20 @@ function statusColor(status: string): "success" | "error" | "warning" | "default
   return "default";
 }
 
+function formatSessionTime(value: string | null | undefined, timeZone?: string) {
+  if (!value) return "Not confirmed";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const options: Intl.DateTimeFormatOptions = {
+    dateStyle: "medium", timeStyle: "short", timeZone: timeZone || "Asia/Kolkata",
+  };
+  try {
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  }
+}
+
 function CallRecording({ sessionId, attemptId }: { sessionId: string; attemptId: string }) {
   const [requested, setRequested] = useState(false);
   const recording = useQuery({
@@ -72,15 +86,16 @@ export function AssignmentStatusPage() {
       {query.isError && <Alert severity="error">Could not load this session. Confirm the session ID and that your account can access this assignment.</Alert>}
       {query.data && <>
         {query.data.checkIn.flag === "not_answered" || query.data.checkOut.flag === "not_answered" ? <Alert severity="error" icon={<ErrorOutlineRoundedIcon />}>The call retry limit was reached for {query.data.checkIn.flag === "not_answered" && query.data.checkOut.flag === "not_answered" ? "check-in and check-out" : query.data.checkIn.flag === "not_answered" ? "check-in" : "check-out"}. Operations follow-up is required.</Alert> : null}
+        <Stack direction="row" justifyContent="flex-end"><Typography variant="caption" color="text.secondary">Times shown in {query.data.timeZone || "Asia/Kolkata"}</Typography></Stack>
         <Grid container spacing={2.5}>
           {[{ label: "Check-in", value: query.data.checkIn }, { label: "Check-out", value: query.data.checkOut }].map((stage) => <Grid key={stage.label} size={{ xs: 12, md: 6 }}><Card><CardContent sx={{ p: 3 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="h6">{stage.label}</Typography><Chip color={statusColor(stage.value.status)} label={stage.value.flag ? "Not answered" : stage.value.status.replaceAll("_", " ")} sx={{ textTransform: "capitalize", fontWeight: 650 }} /></Stack>
             <Box sx={{ minHeight: 100, display: "grid", placeItems: "center", py: 2 }}>{stage.value.status === "confirmed" ? <CheckCircleRoundedIcon color="success" sx={{ fontSize: 42 }} /> : stage.value.flag ? <ErrorOutlineRoundedIcon color="error" sx={{ fontSize: 42 }} /> : <ScheduleRoundedIcon color="disabled" sx={{ fontSize: 42 }} />}</Box>
             {stage.value.status === "processing" && <Alert severity="info" sx={{ mb: 2 }}>Call ended. Recording and attendance details are being processed.</Alert>}
             {stage.value.status === "calling" && <Alert severity="warning" sx={{ mb: 2 }}>The outbound call is in progress.</Alert>}
-            {stage.value.status === "scheduled" && stage.value.scheduledAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Call scheduled for {new Date(stage.value.scheduledAt).toLocaleString()}</Typography>}
-            {stage.value.status === "follow_up" && stage.value.nextCallAt && (new Date(stage.value.nextCallAt).getTime() <= Date.now() ? <Alert severity="warning" sx={{ mb: 1.5 }}>Retry overdue since {new Date(stage.value.nextCallAt).toLocaleString()}. The service is checking for missed work and will place the call as soon as possible.</Alert> : <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Next call scheduled for {new Date(stage.value.nextCallAt).toLocaleString()}</Typography>)}
-            <Typography variant="body2" color="text.secondary">Reported time</Typography><Typography fontWeight={650} sx={{ mb: 2 }}>{stage.value.reportedAt ? new Date(stage.value.reportedAt).toLocaleString() : "Not confirmed"}</Typography>
+            {stage.value.status === "scheduled" && stage.value.scheduledAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Call scheduled for {formatSessionTime(stage.value.scheduledAt, query.data.timeZone)}</Typography>}
+            {stage.value.status === "follow_up" && stage.value.nextCallAt && (new Date(stage.value.nextCallAt).getTime() <= Date.now() ? <Alert severity="warning" sx={{ mb: 1.5 }}>Retry overdue since {formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}. The service is checking for missed work and will place the call as soon as possible.</Alert> : <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Next call scheduled for {formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}</Typography>)}
+            <Typography variant="body2" color="text.secondary">Reported time</Typography><Typography fontWeight={650} sx={{ mb: 2 }}>{formatSessionTime(stage.value.reportedAt, query.data.timeZone)}</Typography>
             <Button fullWidth sx={{ mt: 1 }} variant="outlined" startIcon={<HistoryRoundedIcon />} onClick={() => showCallLogs(stage.label === "Check-in" ? "check_in" : "check_out")}>View {stage.label.toLowerCase()} logs</Button>
           </CardContent></Card></Grid>)}
         </Grid>
@@ -114,9 +129,9 @@ export function AssignmentStatusPage() {
                           </Stack>
                         </Stack>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: .5 }}>
-                          {attempt.scheduledAt ? new Date(attempt.scheduledAt).toLocaleString() : "Call time unavailable"}
-                          {attempt.answeredAt ? ` · answered ${new Date(attempt.answeredAt).toLocaleString()}` : ""}
-                          {attempt.endedAt ? ` · ended ${new Date(attempt.endedAt).toLocaleString()}` : ""}
+                          {attempt.scheduledAt ? formatSessionTime(attempt.scheduledAt, query.data.timeZone) : "Call time unavailable"}
+                          {attempt.answeredAt ? ` · answered ${formatSessionTime(attempt.answeredAt, query.data.timeZone)}` : ""}
+                          {attempt.endedAt ? ` · ended ${formatSessionTime(attempt.endedAt, query.data.timeZone)}` : ""}
                         </Typography>
                         <Divider sx={{ my: 1.5 }} />
                         {transcript ? <Box sx={{ mb: 1.5 }}>
@@ -135,7 +150,7 @@ export function AssignmentStatusPage() {
               {artifacts.data.logs.length ? <Stack spacing={.75}>
                 {artifacts.data.logs.map((log, index) => <Stack key={`${log.createdAt}-${index}`} direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1} sx={{ py: .75, borderBottom: "1px solid", borderColor: "divider" }}>
                   <Typography variant="body2">{log.eventType.replaceAll(".", " · ").replaceAll("_", " ")}</Typography>
-                  <Typography variant="caption" color="text.secondary">{new Date(log.createdAt).toLocaleString()}</Typography>
+                  <Typography variant="caption" color="text.secondary">{formatSessionTime(log.createdAt, query.data.timeZone)}</Typography>
                 </Stack>)}
               </Stack> : <Typography variant="body2" color="text.secondary">No activity logs recorded yet.</Typography>}
             </Box>

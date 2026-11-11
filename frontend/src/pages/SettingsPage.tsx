@@ -13,6 +13,7 @@ type CallingForm = Omit<CallingSettings, "source">;
 const emptySettings: CallingForm = {
   defaultFromNumber: "",
   allowNonPatientInboundCalls: false,
+  requireHumanVerificationForStaffBooking: false,
   retry: { maxConsecutiveNoAnswer: 5, initialMinutes: 5, multiplier: 1.2, maxMinutes: 30 },
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
@@ -24,7 +25,7 @@ export function SettingsPage() {
   const settings = useQuery({ queryKey: ["calling-settings"], queryFn: fetchCallingSettings, retry: false });
   useEffect(() => {
     if (!settings.data) return;
-    setForm({ defaultFromNumber: settings.data.defaultFromNumber, allowNonPatientInboundCalls: settings.data.allowNonPatientInboundCalls, retry: settings.data.retry });
+    setForm({ defaultFromNumber: settings.data.defaultFromNumber, allowNonPatientInboundCalls: settings.data.allowNonPatientInboundCalls, requireHumanVerificationForStaffBooking: settings.data.requireHumanVerificationForStaffBooking, retry: settings.data.retry });
   }, [settings.data]);
 
   const save = useMutation({
@@ -69,6 +70,13 @@ export function SettingsPage() {
             <FormControlLabel
               control={<Switch checked={form.allowNonPatientInboundCalls} onChange={(_, checked) => setForm((current) => ({ ...current, allowNonPatientInboundCalls: checked }))} />}
               label={<Box><Typography fontWeight={650}>Allow non-patient incoming calls</Typography><Typography variant="body2" color="text.secondary">When enabled, answer calls from numbers that don’t match a registered patient. When disabled, reject them immediately.</Typography></Box>}
+              sx={{ alignItems: "flex-start", m: 0, "& .MuiSwitch-root": { mr: 1 } }}
+            />
+          </Box>
+          <Box sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+            <FormControlLabel
+              control={<Switch checked={form.requireHumanVerificationForStaffBooking} onChange={(_, checked) => setForm((current) => ({ ...current, requireHumanVerificationForStaffBooking: checked }))} />}
+              label={<Box><Typography fontWeight={650}>Require human verification for staff booking</Typography><Typography variant="body2" color="text.secondary">When enabled, the system shows suggested staff for a person to review and assign. When disabled, the booking agent calls suggested staff in order and schedules attendance after the first clear acceptance. Cases with no available staff or unclear confirmation still need human review.</Typography></Box>}
               sx={{ alignItems: "flex-start", m: 0, "& .MuiSwitch-root": { mr: 1 } }}
             />
           </Box>
