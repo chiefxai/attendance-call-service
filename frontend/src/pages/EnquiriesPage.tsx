@@ -10,6 +10,7 @@ import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded
 import { AxiosError } from "axios";
 import { appointmentCallRecordingUrl, createPatient, fetchIncomingCalls, fetchPatients, fetchStaff, incomingCallRecordingUrl, resolveIncomingEnquiry, type CreatePatientPayload, type IncomingCall, type PatientRecord } from "../api/client";
 import { PageHeader } from "../components/OperationsUI";
+import { AddressFields } from "../components/AddressFields";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 
 type IntakeMode = "existing" | "new";
@@ -20,7 +21,7 @@ const emptyPatient = (): PatientForm => ({
   name: "",
   phoneNumber: "",
   address: "",
-  language: "en",
+  language: "ta",
   careCategory: "",
   hub: "",
 });
@@ -243,12 +244,12 @@ export function EnquiriesPage() {
                   }}
                 />
               </Grid>
-              <Grid size={12}><TextField fullWidth required multiline minRows={2} label="Patient address" value={patientForm.address} onChange={(event) => updatePatient("address", event.target.value)} /></Grid>
+              <Grid size={12}><AddressFields required value={patientForm.address} onChange={(address) => updatePatient("address", address)} /></Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
                 <FormControl fullWidth size="small">
                   <InputLabel id="enquiry-language-label">Preferred language</InputLabel>
                   <Select labelId="enquiry-language-label" label="Preferred language" value={patientForm.language} onChange={(event) => updatePatient("language", event.target.value)}>
-                    <MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem>
+                    <MenuItem value="ta">Tamil</MenuItem><MenuItem value="en">English</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
