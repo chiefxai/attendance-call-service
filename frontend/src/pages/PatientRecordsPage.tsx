@@ -15,6 +15,8 @@ import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
+const createPatientForm = (): CreatePatientPayload => ({ id: crypto.randomUUID(), name: "", phoneNumber: "", address: "", language: "ta", careCategory: "", hub: "" });
+
 export function PatientRecordsPage() {
   const [search, setSearch] = useState("");
   const [hub, setHub] = useState("all");
@@ -24,7 +26,7 @@ export function PatientRecordsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [viewPatient, setViewPatient] = useState<PatientRecord | null>(null);
   const [editing, setEditing] = useState<PatientRecord | null>(null);
-  const [newPatient, setNewPatient] = useState<CreatePatientPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
+  const [newPatient, setNewPatient] = useState<CreatePatientPayload>(createPatientForm);
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), refetchInterval: 30_000 });
@@ -38,7 +40,7 @@ export function PatientRecordsPage() {
     onSuccess: async () => {
       setAddOpen(false);
       setEditing(null);
-      setNewPatient({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
+      setNewPatient(createPatientForm());
       setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["patients"] });
     },
@@ -66,7 +68,7 @@ export function PatientRecordsPage() {
   const activeFilters = Number(hub !== "all") + Number(category !== "all") + Number(language !== "all") + Number(status !== "all");
   const openAdd = () => {
     setEditing(null);
-    setNewPatient({ id: "", name: "", phoneNumber: "", address: "", language: "en", careCategory: "", hub: "" });
+    setNewPatient(createPatientForm());
     setPhoneError("");
     setAddOpen(true);
   };
@@ -117,7 +119,7 @@ export function PatientRecordsPage() {
         <Stack spacing={2} sx={{ pt: 1 }}>
           {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Patient ID" value={newPatient.id} InputProps={editing ? { readOnly: true } : undefined} onChange={(event) => setNewPatient((current) => ({ ...current, id: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Patient ID" value={newPatient.id} InputProps={{ readOnly: true }} helperText="Generated automatically" /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newPatient.name} onChange={(event) => setNewPatient((current) => ({ ...current, name: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="tel" label="Indian mobile number (optional)" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "If provided, enter 10 digits; 91 or +91 is optional."} value={newPatient.phoneNumber || ""} onChange={(event) => { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const input = newPatient.phoneNumber?.trim() || ""; if (!input) { setPhoneError(""); return; } const normalized = normalizeIndianMobile(input); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewPatient((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Preferred language</InputLabel><Select label="Preferred language" value={newPatient.language} onChange={(event) => setNewPatient((current) => ({ ...current, language: event.target.value }))}><MenuItem value="en">English</MenuItem><MenuItem value="ta">Tamil</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>

@@ -16,6 +16,8 @@ import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
+const createStaffForm = (): CreateStaffPayload => ({ id: crypto.randomUUID(), name: "", companyName: "", phoneNumber: "", address: "", language: "ta" });
+
 function formatDutyDateTime(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, {
@@ -36,7 +38,7 @@ export function StaffRecordsPage() {
   const [selected, setSelected] = useState<StaffRecord | null>(null);
   const [editing, setEditing] = useState<StaffRecord | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [newStaff, setNewStaff] = useState<CreateStaffPayload>({ id: "", name: "", companyName: "", phoneNumber: "", address: "", language: "en" });
+  const [newStaff, setNewStaff] = useState<CreateStaffPayload>(createStaffForm);
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), refetchInterval: 30_000 });
@@ -50,7 +52,7 @@ export function StaffRecordsPage() {
     onSuccess: async () => {
       setAddOpen(false);
       setEditing(null);
-      setNewStaff({ id: "", name: "", companyName: "", phoneNumber: "", address: "", language: "en" });
+      setNewStaff(createStaffForm());
       setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["staff"] });
     },
@@ -77,7 +79,7 @@ export function StaffRecordsPage() {
   const activeFilters = Number(language !== "all") + Number(status !== "all");
   const openAdd = () => {
     setEditing(null);
-    setNewStaff({ id: "", name: "", companyName: "", phoneNumber: "", address: "", language: "en" });
+    setNewStaff(createStaffForm());
     setPhoneError("");
     setAddOpen(true);
   };
@@ -126,7 +128,7 @@ export function StaffRecordsPage() {
         <Stack spacing={2} sx={{ pt: 1 }}>
           {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} InputProps={editing ? { readOnly: true } : undefined} onChange={(event) => setNewStaff((current) => ({ ...current, id: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} InputProps={{ readOnly: true }} helperText="Generated automatically" /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={newStaff.companyName || ""} onChange={(event) => setNewStaff((current) => ({ ...current, companyName: event.target.value }))} helperText="Optional for independent staff." /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={newStaff.phoneNumber} onChange={(event) => { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(newStaff.phoneNumber); if (!newStaff.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>

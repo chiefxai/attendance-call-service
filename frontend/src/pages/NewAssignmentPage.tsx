@@ -60,12 +60,12 @@ function callLanguageCode(language: string) {
 const now = new Date();
 const shiftEnd = new Date(now.getTime() + 8 * 60 * 60_000);
 
-const initialValues: FormValues = {
-  assignmentId: "", agentId: "", fromNumber: "", language: "ta",
+const createInitialValues = (): FormValues => ({
+  assignmentId: crypto.randomUUID(), agentId: "", fromNumber: "", language: "ta",
   scheduledStartAt: localInputValue(now), scheduledEndAt: localInputValue(shiftEnd),
   employeeId: "", employeeName: "", employeeCompanyName: "", employeePhone: "", employeeAddress: "",
   patientId: "", patientName: "", patientPhone: "", patientAddress: "",
-};
+});
 
 const BULK_HEADERS = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeeCompanyName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress", "timeZone"];
 const MAX_BULK_ROWS = 200;
@@ -179,7 +179,7 @@ function FormField({ label, value, onChange, required = false, type = "text", he
 
 export function NewAssignmentPage() {
   const navigate = useNavigate();
-  const [form, setForm] = useState(initialValues);
+  const [form, setForm] = useState<FormValues>(createInitialValues);
   const [phoneError, setPhoneError] = useState("");
   const [patientPhoneError, setPatientPhoneError] = useState("");
   const [mode, setMode] = useState<"single" | "bulk">("single");
@@ -198,6 +198,13 @@ export function NewAssignmentPage() {
     return () => window.clearTimeout(timer);
   }, [form.employeeId, form.scheduledStartAt, form.scheduledEndAt, form.assignmentId]);
   const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents, retry: 0 });
+  useEffect(() => {
+    const activeAgents = agents.data?.filter((agent) => agent.active) || [];
+    if (!activeAgents.length) return;
+    setForm((current) => current.agentId && activeAgents.some((agent) => agent.id === current.agentId)
+      ? current
+      : { ...current, agentId: activeAgents[0].id });
+  }, [agents.data]);
   const staff = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), retry: 0 });
   const patients = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), retry: 0 });
   const overlapStartMs = new Date(overlapWindow.startAt).getTime();
@@ -313,7 +320,7 @@ export function NewAssignmentPage() {
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
             <Typography variant="h6">Shift and calling setup</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>Choose the active voice agent, language, and scheduled shift. Times are entered in {getBrowserTimeZone()} and sent to the API in UTC.</Typography>
             <Grid container spacing={2}>
-              <Grid size={{ xs: 12, sm: 6 }}><FormField label="Assignment ID" value={form.assignmentId} onChange={update("assignmentId")} required /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><FormField label="Assignment ID" value={form.assignmentId} onChange={update("assignmentId")} required readOnly helperText="Generated automatically" /></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><TextField select fullWidth size="small" label="Calling agent" required value={form.agentId} onChange={(event) => update("agentId")(event.target.value)} disabled={agents.isLoading || agents.data?.length === 0}><MenuItem value="" disabled>Select an active agent</MenuItem>{agents.data?.filter((agent) => agent.active).map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.name}</MenuItem>)}</TextField></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><FormField label="Vobiz caller ID override (optional)" value={form.fromNumber} onChange={update("fromNumber")} helperText="Leave blank to use VOBIZ_FROM_NUMBER from the backend .env file." /></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><TextField select fullWidth size="small" label="Call language" value={form.language} onChange={(event) => update("language")(event.target.value)}>{[{ value: "ta", label: "Tamil" }, { value: "en", label: "English" }, { value: "ml", label: "Malayalam" }, { value: "te", label: "Telugu" }].map((language) => <MenuItem key={language.value} value={language.value}>{language.label}</MenuItem>)}</TextField></Grid>
