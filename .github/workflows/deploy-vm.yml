@@ -51,7 +51,16 @@ jobs:
         env:
           REMOTE_SCRIPT: |
             set -Eeuo pipefail
-            trap 'status=$?; echo "Remote deployment failed at line ${LINENO} (exit ${status})" >&2; exit "$status"' ERR
+            deployment_error() {
+              status=$?
+              trap - ERR
+              echo "Remote deployment failed at line ${LINENO} (exit ${status}); collecting redacted container diagnostics." >&2
+              sudo -n docker compose --env-file .env -f docker-compose.yml -f docker-compose.vertex-credentials.yml ps -a >&2 || true
+              sudo -n docker compose --env-file .env -f docker-compose.yml -f docker-compose.vertex-credentials.yml logs --tail=80 --no-color backend-migrate backend-api backend-worker 2>&1 |
+                sed -E 's/([?&]token=)[^&[:space:]]+/\1[REDACTED]/g; s/(VOBIZ_AUTH_TOKEN=)[^[:space:]]+/\1[REDACTED]/g; s/(Bearer )[A-Za-z0-9._~-]+/\1[REDACTED]/g; s/\+?[0-9]{10,15}/[PHONE_REDACTED]/g' >&2 || true
+              exit "$status"
+            }
+            trap deployment_error ERR
             cd "$GCP_DEPLOY_PATH"
             if [[ -n "$(git status --porcelain)" ]]; then
               echo "Deployment checkout has local changes; refusing to switch branches." >&2
