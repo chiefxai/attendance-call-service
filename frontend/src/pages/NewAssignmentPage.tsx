@@ -345,7 +345,7 @@ export function NewAssignmentPage() {
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee name" value={form.employeeName} onChange={update("employeeName")} required readOnly={Boolean(selectedEmployee)} /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Company / vendor name" value={form.employeeCompanyName} onChange={update("employeeCompanyName")} helperText={selectedEmployee ? "Stored company is locked. Edit it in Staff records if needed." : "Optional for independent staff."} readOnly={Boolean(selectedEmployee)} /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee mobile number" value={form.employeePhone} readOnly={Boolean(selectedEmployee)} helperText={phoneError || (selectedEmployee ? "Stored number is locked. Edit it in Staff records if needed." : "Enter 10 digits; 91 or +91 country code is optional.")} onChange={(value) => { setPhoneError(""); update("employeePhone")(value); }} required error={Boolean(phoneError)}  onBlur={() => { const normalized = normalizeIndianMobile(form.employeePhone); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setForm((current) => ({ ...current, employeePhone: normalized })); } }} /></Grid>
-              <Grid size={{ xs: 12, sm: 3 }}><AddressFields required value={form.employeeAddress} onChange={update("employeeAddress")} /></Grid>
+              <Grid size={12}><AddressFields required value={form.employeeAddress} onChange={update("employeeAddress")} /></Grid>
             </Grid>
           </CardContent></Card>
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
