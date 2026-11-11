@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 10695)
-Total output lines: 726
-
 "use strict";
 
 const crypto = require("node:crypto");
@@ -323,7 +320,54 @@ router.get("/activities", async (req, res) => {
     if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
     if (req.body?.active !== undefined && typeof req.body.active !== "boolean") return res.status(400).json({ error: "active must be a boolean." });
     try {
-      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, aliases, description, durationMinutes, active: re…695 tokens truncated…0, 2).toLowerCase()))
+      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, aliases, description, durationMinutes, active: req.body?.active });
+      if (!activity) return res.status(404).json({ error: "Activity not found." });
+      return res.json(activity);
+    } catch (error) {
+      if (error.code === "23505") return res.status(409).json({ error: "An activity with this name already exists." });
+      return fail(res, error);
+    }
+  });
+
+    router.get("/incoming-calls", async (req, res) => {
+    try {
+      const calls = await repository.listInboundCalls(org(req), req.query.limit || 100);
+      res.json(await Promise.all(calls.map(async (call) => serializeIncomingCall(
+        call, await repository.listAppointmentCallAttempts(call.id, org(req)),
+      ))));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/incoming-calls/:id", async (req, res) => {
+    try {
+      const call = await repository.getInboundCall(req.params.id, org(req));
+      if (!call) return res.status(404).json({ error: "Incoming call not found" });
+      res.json(serializeIncomingCall(call, await repository.listAppointmentCallAttempts(call.id, org(req))));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.post("/incoming-calls/:id/resolve", async (req, res) => {
+    try {
+      const body = req.body || {};
+      if (Object.keys(body).some((key) => key !== "staffId")) {
+        return res.status(400).json({ error: "Only staffId is accepted; enquiry status is controlled by the system." });
+      }
+      const staffId = String(body.staffId || "").trim();
+      if (!staffId) return res.status(400).json({ error: "Choose a staff member to resolve this enquiry." });
+      const organizationId = org(req);
+      const pendingCall = await repository.getInboundCall(req.params.id, organizationId);
+      if (!pendingCall) return res.status(404).json({ error: "Incoming call not found" });
+      const analysis = pendingCall.enquiryAnalysis || {};
+      const requestedStart = new Date(analysis.requestedStartAt || "");
+      const requestedEnd = new Date(analysis.requestedEndAt || "");
+      const canSchedule = Boolean(analysis.activityId && Number.isFinite(requestedStart.getTime())
+        && (Number.isFinite(requestedEnd.getTime()) || Number(analysis.durationMinutes) > 0));
+      if (canSchedule) {
+        const staff = await repository.getActiveStaffDirectoryRecord(organizationId, staffId);
+        if (!staff) return res.status(400).json({ error: "Selected staff member is not active in this organization." });
+        if (!staff.phoneNumber) return res.status(400).json({ error: "Selected staff member has no registered phone number." });
+        const agents = await repository.listAgents(organizationId);
+        const attendanceAgent = agents.find((item) => item.active && String(item.language).toLowerCase().startsWith(String(staff.language || pendingCall.language).slice(0, 2).toLowerCase()))
           || agents.find((item) => item.active);
         if (!attendanceAgent) return res.status(409).json({ error: "Configure an active attendance voice agent before assigning this enquiry." });
         const settings = await repository.getOrganizationCallSettings(organizationId);

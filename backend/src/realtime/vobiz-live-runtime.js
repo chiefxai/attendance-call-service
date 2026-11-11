@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 13314)
-Total output lines: 739
-
 "use strict";
 
 const crypto = require("node:crypto");
@@ -312,7 +309,191 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
         wss.emit("connection", ws, request, { token, session, attempt });
       });
       }).catch(() => {
-        socket.write("HTTP/1.1 503 Service Unavailable\r…3314 tokens truncated…ve] end-call tool response failed call=${token.callId}`, error.message); }
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+      });
+    }).catch(() => {
+      socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+    });
+    return true;
+  }
+
+  wss.on("connection", (vobizWs, _request, context) => {
+    const { token, session, attempt, inboundCall, appointmentCall } = context;
+    const callContext = inboundCall || session || appointmentCall;
+    const inboundRecorderPromise = inboundCall ? createInboundPcmRecorder() : Promise.resolve(null);
+    let inboundRecorder = null;
+    const pendingInboundAudio = [];
+    inboundRecorderPromise.then((value) => { inboundRecorder = value; for (const item of pendingInboundAudio.splice(0)) value.append(item.data, item.rate); })
+      .catch((error) => console.error("[vobiz-inbound] recorder initialization failed", error.message));
+    let inboundRecordingFinalized = false;
+    let callStartedAt = Date.now();
+    let streamId = null;
+    let liveSession = null;
+    let recorder = null;
+    let recorderFinalizePromise = null;
+    let setupComplete = false;
+    let greetingSent = false;
+    let active = true;
+    let startTimer;
+    let inboundFrames = 0;
+    let outboundFrames = 0;
+    let generatedAudioParts = 0;
+    let employeeTranscriptChars = 0;
+    let employeeResponseTurns = 0;
+    let playbackTurn = 0;
+    let checkpointFrameOffset = 0;
+    let latestCheckpoint = null;
+    let pendingHangupCheckpoint = null;
+    let hangupRequested = false;
+    let hangupScheduled = false;
+    let appointmentNoResponseTimer;
+    let callerResponseObserved = false;
+    const playedCheckpoints = new Set();
+    const pendingAudio = [];
+    const seenToolCalls = new Set();
+    startTimer = setTimeout(() => { if (!streamId) vobizWs.close(1008, "Missing Vobiz start event"); }, 10_000);
+
+    function safeSend(payload) {
+      if (vobizWs.readyState === 1 && streamId) vobizWs.send(JSON.stringify({ ...payload, streamId }));
+    }
+
+    function appendInboundAudio(data, rate = 16_000) {
+      if (!inboundCall || inboundRecordingFinalized) return;
+      if (inboundRecorder) inboundRecorder.append(data, rate);
+      else if (pendingInboundAudio.length < 250) pendingInboundAudio.push({ data, rate });
+    }
+    async function finalizeInboundCall(status) {
+      if (!inboundCall || inboundRecordingFinalized) return;
+      inboundRecordingFinalized = true;
+      try {
+        const activeRecorder = inboundRecorder || await inboundRecorderPromise;
+        if (activeRecorder) {
+          const file = await activeRecorder.finalize();
+          if (file?.sizeBytes > 44) {
+            try {
+              const object = await recordings.storeInboundCallRecordingFile(file.path, {
+                organizationId: inboundCall.organizationId, inboundCallId: inboundCall.id, contentType: file.contentType,
+              });
+              await repository.saveInboundCallRecording(inboundCall.id, object.key, object.contentType);
+              await queue.enqueue("transcribe_inbound_call", {
+                inboundCallId: inboundCall.id, organizationId: inboundCall.organizationId,
+              }, { idempotencyKey: `transcribe-inbound:${inboundCall.id}` });
+              console.info(`[vobiz-inbound] recording stored call=${token.callId} bytes=${file.sizeBytes}`);
+            } finally { await file.cleanup(); }
+          } else { await file?.cleanup?.(); }
+        }
+      } catch (error) {
+        console.error(`[vobiz-inbound] recording finalization failed call=${token.callId}`, error?.stack || error?.message || error);
+      }
+      await repository.finishInboundCall(inboundCall.id, {
+        status, endedAt: new Date(), durationSeconds: Math.max(0, Math.floor((Date.now() - callStartedAt) / 1000)),
+      }).catch((error) => console.error(`[vobiz-inbound] close persistence failed call=${token.callId}`, error.message));
+    }
+    function sendGreeting() {
+      if (greetingSent || !setupComplete || !liveSession || !active) return;
+      greetingSent = true;
+      const language = displayLanguage(appointmentCall?.staff?.language || callContext.language);
+      if (inboundCall) {
+        const patientMatched = Boolean(inboundCall.patient?.id);
+        const greetingPeriod = inboundGreetingPeriod();
+        const identity = patientMatched
+          ? "A patient record matches the caller's registered phone. Confirm the caller's name before discussing private care details."
+          : "The caller phone does not match a registered patient. Ask who is calling and do not assume identity.";
+        liveSession.sendClientContent({
+          turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Answer an incoming patient-support call in ${language}. Introduce yourself as ${process.env.INBOUND_PATIENT_AGENT_NAME || "Athulya Patient Care Assistant"} from Athulya patient support. Greet with good ${greetingPeriod} in the caller's language and ask how you can help. Do not mention attendance management or employee check-in/check-out. ${identity} Ask one short question at a time and wait for the caller. Collect the requested activity and start date/time, but do not ask for end time or duration. Tell the caller the care team will review and contact them. Never reveal staff or other patients' details. Do not provide diagnosis or medical advice. For immediate danger direct them to 112 in India.` }] }],
+          turnComplete: true,
+        });
+        console.info(`[vobiz-live] inbound greeting requested call=${token.callId} language=${language} patientMatched=${patientMatched}`);
+        return;
+      }
+      if (appointmentCall) {
+        const startAt = appointmentCall.analysis?.requestedStartAt;
+        const localStart = formatLocalAppointmentTime(startAt);
+        const language = displayLanguage(appointmentCall.staff?.language || appointmentCall.language);
+        liveSession.sendClientContent({
+          turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] You are Athulya Senior Care's appointment coordination caller speaking to the care staff member ${appointmentCall.staff?.name || ""}. Speak in ${language}, naturally and briefly. Explain that a patient requested ${appointmentCall.analysis?.activityName || "care service"} at ${localStart}. Ask if they are available and willing to take this assignment at that exact time. Wait for the staff response. If unavailable, acknowledge and end politely. If available, repeat the activity and exact local date/time and ask for explicit final confirmation. Do not imply it is booked until the staff member explicitly confirms. Never ask attendance check-in/check-out questions. After a clear confirmation or decline, thank them, say goodbye, and call end_call.` }] }],
+          turnComplete: true,
+        });
+        console.info(`[vobiz-live] appointment availability greeting requested call=${token.callId} language=${language}`);
+        appointmentNoResponseTimer = setTimeout(async () => {
+          if (!active || callerResponseObserved) return;
+          console.warn(`[appointment-booking] staff did not respond after answer call=${token.callId}`);
+          await repository.markAppointmentCallNoAnswer(appointmentCall.id).catch(() => {});
+          await queue.enqueue("process_appointment_call", { appointmentCallId: appointmentCall.id }, { idempotencyKey: `appointment-result:${appointmentCall.id}` }).catch((error) => console.error("[appointment-booking] no-response continuation failed", error.message));
+          await vobiz.hangupCall(token.callId).catch((error) => console.error(`[appointment-booking] no-response hangup failed call=${token.callId}`, error.message));
+        }, Math.max(10_000, Number(process.env.APPOINTMENT_STAFF_RESPONSE_TIMEOUT_MS) || 25_000));
+        appointmentNoResponseTimer.unref?.();
+        return;
+      }
+      const greeting = token.stage === "check_in"
+        ? "Briefly identify this as a recorded attendance verification call, then ask exactly one first question: 'Have you reached the patient's home now?' Do not ask for employee or patient details before this arrival answer. Wait for the answer."
+        : "Briefly identify this as a recorded attendance verification call, then ask exactly one first question: 'Have you completed the duty and left the patient's home now?' Do not ask for employee or patient details before this answer. Wait for the answer.";
+      liveSession.sendClientContent({
+        turns: [{ role: "user", parts: [{ text: `[System direction, not caller speech] Begin the call now in ${language}. ${greeting} Keep responses short and natural for a phone conversation.` }] }],
+        turnComplete: true,
+      });
+      console.info(`[vobiz-live] greeting requested call=${token.callId} stage=${token.stage} language=${language}`);
+    }
+    function sendPcmAudio(data) {
+      if (!active || !streamId || vobizWs.readyState !== 1) return;
+      const pcm16 = downsample24kTo16k(data);
+      if (inboundCall) appendInboundAudio(pcm16.toString("base64"), 16_000);
+      const alignedLength = pcm16.length - (pcm16.length % 2);
+      for (let offset = 0; offset < alignedLength; offset += OUTPUT_FRAME_BYTES) {
+        const frame = pcm16.subarray(offset, Math.min(offset + OUTPUT_FRAME_BYTES, alignedLength));
+        safeSend({ event: "playAudio", media: { contentType: "audio/x-l16", sampleRate: OUTPUT_RATE, payload: frame.toString("base64") } });
+        outboundFrames += 1;
+        if (outboundFrames === 1) console.info(`[vobiz-live] first audio frame sent call=${token.callId} bytes=${frame.length} sampleRate=${OUTPUT_RATE}`);
+      }
+    }
+    function requestHangupAfterPlayback(checkpoint) {
+      if (!hangupRequested || !checkpoint || hangupScheduled) return;
+      pendingHangupCheckpoint = checkpoint;
+      if (!playedCheckpoints.has(checkpoint)) return;
+      hangupScheduled = true;
+      console.info(`[vobiz-live] goodbye playback confirmed; hanging up call=${token.callId} checkpoint=${checkpoint}`);
+      setTimeout(() => {
+        vobiz.hangupCall(token.callId).catch((error) => console.error(`[vobiz-live] hangup failed call=${token.callId}`, error.message));
+      }, 250);
+    }
+    async function endCallAfterGoodbye(call) {
+      if (call.name !== "end_call" || seenToolCalls.has(call.id)) return;
+      seenToolCalls.add(call.id);
+      console.info(`[vobiz-live] end_call requested call=${token.callId} generatedAudioParts=${generatedAudioParts} latestCheckpoint=${latestCheckpoint || "none"}`);
+      if (generatedAudioParts === 0 || !callerResponseObserved) {
+        const reason = callerResponseObserved ? "agent_audio_missing" : "employee_response_missing";
+        console.warn(`[vobiz-live] ignored premature end_call call=${token.callId} reason=${reason}`);
+        try {
+          await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: false, reason: "The employee has not answered yet. Keep the call open and wait for their response before ending." } } }] });
+          liveSession?.sendClientContent({
+            turns: [{ role: "user", parts: [{ text: callerResponseObserved
+              ? "The employee has answered. Continue the required verification checklist, speak to them, and do not end the call until the required details are collected."
+              : "Your greeting/question has been delivered, but the employee has not answered. Keep the call connected and wait for the employee to speak. If needed, repeat the question once, then wait again. Do not end the call." }] }],
+            turnComplete: true,
+          });
+        } catch (error) { console.error(`[vobiz-live] rejected early end_call call=${token.callId}`, error.message); }
+        return;
+      }
+      const minimumResponses = token.stage === "check_in" ? 5 : 3;
+      if (!inboundCall && !appointmentCall && employeeResponseTurns < minimumResponses) {
+        console.warn(`[vobiz-live] rejected incomplete end_call call=${token.callId} stage=${token.stage} employeeResponseTurns=${employeeResponseTurns}/${minimumResponses} transcriptChars=${employeeTranscriptChars}`);
+        try {
+          await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: false, reason: "The verification checklist is incomplete. Continue asking one question at a time and wait for the employee answer." } } }] });
+          liveSession?.sendClientContent({
+            turns: [{ role: "user", parts: [{ text: token.stage === "check_in"
+              ? "The check-in verification is incomplete. Ask the next unanswered question now. Do not say goodbye or call end_call."
+              : "The check-out verification is incomplete. Ask the next unanswered question now. Do not say goodbye or call end_call." }] }],
+            turnComplete: true,
+          });
+        } catch (error) { console.error(`[vobiz-live] incomplete end-call response failed call=${token.callId}`, error.message); }
+        return;
+      }
+      hangupRequested = true;
+      try {
+        await liveSession?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: { result: { success: true, ending: true } } }] });
+      } catch (error) { console.error(`[vobiz-live] end-call tool response failed call=${token.callId}`, error.message); }
       // end_call can arrive beside the final goodbye audio. Do not reuse the
       // previous turn's checkpoint while this turn still has uncheckpointed
       // frames, or its already-played acknowledgement can cut off the goodbye.
