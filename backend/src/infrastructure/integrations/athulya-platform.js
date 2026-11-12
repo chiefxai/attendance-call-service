@@ -82,6 +82,39 @@ function dateOnly(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
+function zonedParts(date, timeZone) {
+  const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date).map(({ type, value }) => [type, value]));
+  return values;
+}
+
+function localDateInTimeZone(date = new Date(), timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata") {
+  const parts = zonedParts(date, timeZone);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function localSlotToDate(year, month, day, hour, timeZone) {
+  const target = Date.UTC(Number(year), Number(month) - 1, Number(day), hour, 0, 0);
+  let candidate = target;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = zonedParts(new Date(candidate), timeZone);
+    const represented = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), 0);
+    candidate += target - represented;
+  }
+  return new Date(candidate);
+}
+
+function latestDueAthulyaSyncSlot(now = new Date(), { timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata", enabledAt = null } = {}) {
+  const local = zonedParts(now, timeZone);
+  const localMinute = Number(local.hour) * 60 + Number(local.minute);
+  const hour = localMinute >= 12 * 60 ? 12 : 0;
+  const at = localSlotToDate(local.year, local.month, local.day, hour, timeZone);
+  if (at > now || (enabledAt && new Date(enabledAt) > at)) return null;
+  return { key: `${local.year}-${local.month}-${local.day}T${String(hour).padStart(2, "0")}:00`, at };
+}
+
 async function fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters = {}, fetchImpl = fetch }) {
   if (!apiKey) throw new Error("Athulya API key is not configured");
   const base = validateBaseUrl(apiBaseUrl);
@@ -98,7 +131,12 @@ async function fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters = {}, fetchIm
     if (!response.ok) throw new Error(`Athulya returned HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ""}`);
     let payload;
     try { payload = JSON.parse(text); } catch { throw new Error("Athulya response was not valid JSON"); }
-    return sourceRecords(payload);
+    const records = sourceRecords(payload);
+    const fromDate = filters.from_date ? String(filters.from_date) : null;
+    const toDate = filters.to_date ? String(filters.to_date) : null;
+    return records.filter(({ scheduleDate }) => scheduleDate
+      && (!fromDate || scheduleDate >= fromDate)
+      && (!toDate || scheduleDate <= toDate));
   } finally { clearTimeout(timeout); }
 }
 
@@ -122,4 +160,4 @@ function createAthulyaScheduleSyncHandler({ repository }) {
   };
 }
 
-module.exports = { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, sourceRecords, caregiverRows, createAthulyaScheduleSyncHandler };
+module.exports = { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, sourceRecords, caregiverRows, localDateInTimeZone, latestDueAthulyaSyncSlot, createAthulyaScheduleSyncHandler };

@@ -10,7 +10,6 @@ import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
-import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import SupervisorAccountRoundedIcon from "@mui/icons-material/SupervisorAccountRounded";
@@ -19,10 +18,8 @@ import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { CareActivitiesPage } from "./pages/CareActivitiesPage";
 import { CallCenterPage } from "./pages/CallCenterPage";
 import { AssignmentStatusPage } from "./pages/AssignmentStatusPage";
-import { NewAssignmentPage } from "./pages/NewAssignmentPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
@@ -41,7 +38,6 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Enquiries", path: "/enquiries", icon: <ContactSupportRoundedIcon /> },
-  { label: "Care activities", path: "/care-activities", icon: <MedicalServicesRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Reports", path: "/reports", icon: <AssessmentRoundedIcon /> },
@@ -126,9 +122,9 @@ function App() {
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
           <Route path="/enquiries" element={<EnquiriesPage />} />
-          <Route path="/care-activities" element={<CareActivitiesPage />} />
+          <Route path="/care-activities" element={<Navigate to="/" replace />} />
           <Route path="/care-managers" element={user.role === "admin" ? <CareManagersPage /> : <Navigate to="/" replace />} />
-          <Route path="/assignments/new" element={<NewAssignmentPage />} />
+          <Route path="/assignments/new" element={<Navigate to="/attendance" replace />} />
           <Route path="/settings" element={user.role === "admin" ? <SettingsPage /> : <Navigate to="/" replace />} />
           <Route path="/api-access" element={<ApiAccessPage section="docs" />} />
           <Route path="/sessions/:sessionId" element={<AssignmentStatusPage />} />

@@ -103,14 +103,19 @@ processing separately from the number of live provider calls.
 
 `CALL_MAX_CONSECUTIVE_NO_ANSWER` defaults to 3. After three consecutive
 unanswered attempts for a stage, the service stops dialing that stage and
-records its status as `not_answered`. The assigned care manager receives an in-app notification by default; Settings can switch escalation to an automated Vobiz call. An answered call resets that streak if
-the employee requests a later callback. The host app can read
+records its status as `not_answered`. The assigned care manager receives an
+in-app alert by default. Settings can switch escalation to an automated Vobiz
+call. An answered call resets that streak if the employee requests a later callback. The host app can read
 `GET /assignments/:id/status`; its check-in and check-out results include a
 `flag: "not_answered"` when that limit is reached.
 
 `POST /assignments` accepts employee and patient details, agent, language,
-caller ID, and scheduled shift times. It schedules employee calls at check-in
-and check-out in one database transaction with the session record.
+caller ID, and scheduled shift times. It creates separate durable check-in and
+check-out tasks, each with its own ID, status, retry history, stage-only agent
+context, and platform delivery state. Each task runs independently; neither
+waits for nor is canceled by the other. A confirmed stage is POSTed to the host
+platform immediately as its own event. The assignment record groups both tasks
+for reporting, and its summary is complete only after both tasks are confirmed.
 
 Indian mobile numbers are accepted as 10 digits (`9876543210`), 12 digits with
 country code 91 (`919876543210`), or with an explicit `+91` prefix
@@ -122,14 +127,14 @@ the same request is idempotent and repairs missing queue entries; changing
 assignment details or times requires a new `scheduleVersion` (otherwise the
 API returns HTTP 409). The patient phone may be stored for future use, but is not
 dialed. Vobiz status events enqueue `process_call_result`; answered calls flow
-through `transcribe_call`, `extract_intent`, and `evaluate_attendance`. Once
-both stages are confirmed, the service queues a POST to `ATTENDANCE_BACKEND_URL`
-with the session, call attempts, and transcripts. The request uses
+through `transcribe_call`, `extract_intent`, and `evaluate_attendance`. Once a
+stage is confirmed, the service queues a separate POST to
+`ATTENDANCE_BACKEND_URL` with that task, its call attempt, and transcript. The request uses
 `ATTENDANCE_BACKEND_TOKEN` as a Bearer token when configured and includes an
 `Idempotency-Key` so the receiving platform can safely handle retries. Failed
 requests stay in the durable queue and retry. The receiver can use the service
-API key to fetch logs and recordings from the artifacts routes. It clears only
-the active cache entry after successful delivery; PostgreSQL history remains
+API key to fetch logs and recordings from the artifacts routes. PostgreSQL is
+the durable task state source, so workers can resume without sticky process memory.
 subject to the retention policy.
 
 The live call uses Vertex Gemini Live audio-to-audio. `/answer` returns VobizXML
@@ -234,7 +239,7 @@ left for a future workflow extension.
 
 Inbound calls use the Vertex AI Live audio runtime but have a dedicated patient-support agent persona, independent from the outbound employee attendance prompt. The handler validates the Vobiz request signature, performs an exact organization-scoped patient phone lookup, supplies only the matched patient context to the agent, records the caller and agent audio, and queues transcription after the call. The agent introduces itself as Athulya patient support and never describes an incoming patient call as attendance verification. Configure its name, optional voice override, and additional patient-support instructions with `INBOUND_PATIENT_AGENT_NAME`, `INBOUND_PATIENT_AGENT_VOICE`, and `INBOUND_PATIENT_AGENT_PROMPT`. Without a voice override, it uses the voice associated with the patient's language profile. The background worker stores the transcript and applies the configured retention period.
 
-After a patient enquiry has a clear activity, requested start time, and staff suggestions, the worker starts the appointment coordinator. This is a separate Vertex Live prompt from both patient support and attendance verification. It calls suggested staff in ranked order, records each attempt, and advances on no-answer or a clearly declined appointment. A call recording is stored in MinIO and transcribed asynchronously; the post-call extractor requires explicit staff acceptance of the care activity and requested time before the schedule tool can create an attendance session. That session queues the existing check-in and check-out attendance calls. When every suggested staff member is unanswered or declines, booking status becomes `not_answered` for operations follow-up; ambiguous responses become `needs_review`. Configure the optional coordinator persona with `APPOINTMENT_BOOKING_AGENT_NAME`, `APPOINTMENT_BOOKING_AGENT_VOICE`, and `APPOINTMENT_BOOKING_AGENT_PROMPT`.
+After a patient enquiry has a clear activity, requested start time, and staff suggestions, the worker starts the appointment coordinator. This is a separate Vertex Live prompt from both patient support and attendance verification. It calls suggested staff in ranked order, up to the configured unanswered-call limit (3 by default), records each attempt, and advances on no-answer or a clearly declined appointment. A call recording is stored in MinIO and transcribed asynchronously; the post-call extractor requires explicit staff acceptance of the care activity and requested time before the schedule tool can create an attendance session. That session queues the existing check-in and check-out attendance calls. When the call limit is reached, booking status becomes `not_answered` and the assigned care manager is notified or called according to Settings; ambiguous responses become `needs_review`. Configure the optional coordinator persona with `APPOINTMENT_BOOKING_AGENT_NAME`, `APPOINTMENT_BOOKING_AGENT_VOICE`, and `APPOINTMENT_BOOKING_AGENT_PROMPT`.
 
 Configure a Vobiz Voice Application:
 
@@ -264,7 +269,7 @@ Admin-only endpoints:
 
 - `GET/PUT /api/call-service/integrations/athulya` — read or update settings; a blank `apiKey` leaves the stored key unchanged.
 - `POST /api/call-service/integrations/athulya/test` — test the connection and return only the record count.
-- `POST /api/call-service/integrations/athulya/sync` — enqueue an asynchronous import. Accepts optional `fromDate`, `toDate`, `careManagerId`, `branchId`, and `clientId`.
+- `POST /api/call-service/integrations/athulya/sync` — enqueue an asynchronous import for one `scheduleDate` (`YYYY-MM-DD`), optionally scoped to `careManagerId`, `branchId`, or `clientId`. The selected day is sent as identical `from_date` and `to_date` values to Athulya; date ranges are rejected.
 - `GET /api/call-service/integrations/athulya/sync-status` — view sync runs and errors.
 - `GET /api/call-service/integrations/athulya/attendance-submissions` — view local attendance export state.
 - `GET /api/call-service/integrations/athulya/schedules` — view imported schedules.
@@ -272,11 +277,6 @@ Admin-only endpoints:
 - `POST /api/auth/login` — accepts an Admin email or Care Manager phone number and password.
 - `POST /api/auth/change-password` — verifies the current password, saves a new password (minimum 12 characters), and revokes other active sessions.
 
-Schedule sync is idempotent by organization and Athulya schedule identifiers. It preserves source date values as date-only fields, stores raw response JSON, and updates patient, caregiver, Care Manager, schedule, and caregiver-to-schedule records without deleting records absent from a filtered response. Imported profiles do not overwrite saved patient/staff addresses or language preferences.
+Schedule sync is idempotent by organization and Athulya schedule identifiers. Each sync requests exactly one scheduled service date and locally discards any returned record whose `schedule_date` is outside that day. In the API contract, this is `from_date=YYYY-MM-DD` and `to_date=YYYY-MM-DD` with the same value; conceptually the day runs from midnight on the selected date up to, but not including, midnight the next day. It does not use service allocation dates to select schedules. The service preserves source date values as date-only fields, stores raw response JSON, and updates patient, caregiver, Care Manager, schedule, and caregiver-to-schedule records without deleting records absent from a filtered response. Imported profiles do not overwrite saved patient/staff addresses or language preferences. In Settings, automatic sync can target **everyone**, **one branch**, or **one Care Manager**. Branch and Care Manager scopes are mutually exclusive; when either is selected, other branches or managers are excluded from the request. The worker runs at 12:00 AM and 12:00 PM in `APP_TIMEZONE` (defaults to `Asia/Kolkata`) and requests the date on which that local run occurs. Scheduling state is stored in PostgreSQL and claimed transactionally with the queue, preventing duplicate runs per time slot across worker instances. Automatic sync is off by default. Manual sync requires one schedule date and supports the same all/one-branch/one-Care-Manager selection while the integration is enabled. `ATHULYA_AUTO_SYNC_SCAN_INTERVAL_MS` controls how often the worker checks for due slots (default 60000 ms).
 
 Athulya has supplied only the schedule-fetching contract so far. Check-in and check-out events are recorded locally as `awaiting_api_specification` when an attendance session can be matched to an imported schedule and caregiver. The service does not send attendance data to Athulya, retry submissions, or claim successful delivery until the official attendance endpoints, payload, timestamp rules, and duplicate behavior are documented.
-
-
-### Unanswered call escalation
-
-After three consecutive unanswered attempts by default, the system marks the attendance stage or appointment booking as `not_answered` and alerts the care manager assigned to that patient in the Athulya schedule. Admins can change the attempt limit and choose **Notify care manager in this app** (default) or **Call the care manager** in Settings. App notifications are visible to that Care Manager on the operations dashboard. The optional phone escalation uses the configured Vobiz caller ID and reads a short alert; its signed answer endpoint is `POST /api/call-service/care-manager-alert/answer`.

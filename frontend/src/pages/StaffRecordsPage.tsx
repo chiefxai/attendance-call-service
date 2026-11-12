@@ -2,21 +2,18 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
-import PersonAddAltRoundedIcon from "@mui/icons-material/PersonAddAltRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
-import { createStaff, fetchAttendance, fetchStaff, updateStaff, type AttendanceRecord, type CreateStaffPayload, type StaffRecord } from "../api/client";
+import { fetchAttendance, fetchStaff, updateStaff, type AttendanceRecord, type CreateStaffPayload, type StaffRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
-
-const createStaffForm = (): CreateStaffPayload => ({ id: crypto.randomUUID(), name: "", companyName: "ATHULYA", phoneNumber: "", address: "", language: "ta" });
 
 function formatDutyDateTime(value: string) {
   const date = new Date(value);
@@ -36,9 +33,8 @@ export function StaffRecordsPage() {
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<StaffRecord | null>(null);
-  const [editing, setEditing] = useState<StaffRecord | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [newStaff, setNewStaff] = useState<CreateStaffPayload>(createStaffForm);
+  const [editOpen, setEditOpen] = useState(false);
+  const [staffForm, setStaffForm] = useState<CreateStaffPayload>({ id: "", name: "", companyName: "ATHULYA", phoneNumber: "", address: "", language: "ta" });
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), refetchInterval: 30_000 });
@@ -47,12 +43,10 @@ export function StaffRecordsPage() {
     queryFn: () => fetchAttendance({ limit: 500 }),
     enabled: Boolean(selected),
   });
-  const createMutation = useMutation({
-    mutationFn: ({ payload, id, update }: { payload: CreateStaffPayload; id: string; update: boolean }) => update ? updateStaff(id, payload) : createStaff(payload),
+  const updateMutation = useMutation({
+    mutationFn: ({ payload, id }: { payload: CreateStaffPayload; id: string }) => updateStaff(id, payload),
     onSuccess: async () => {
-      setAddOpen(false);
-      setEditing(null);
-      setNewStaff(createStaffForm());
+      setEditOpen(false);
       setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["staff"] });
     },
@@ -70,33 +64,25 @@ export function StaffRecordsPage() {
     .sort((a, b) => new Date(a.scheduledStartAt).getTime() - new Date(b.scheduledStartAt).getTime());
   const contacts = records.filter((row) => row.phoneMasked).length;
   const saveStaff = () => {
-    const phoneNumber = normalizeIndianMobile(newStaff.phoneNumber);
+    const phoneNumber = normalizeIndianMobile(staffForm.phoneNumber);
     if (!phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
-    const payload = { ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), companyName: newStaff.companyName?.trim() || "ATHULYA", phoneNumber, address: newStaff.address.trim() };
-    createMutation.mutate({ payload, id: payload.id, update: Boolean(editing) });
+    const payload = { ...staffForm, id: staffForm.id.trim(), name: staffForm.name.trim(), companyName: staffForm.companyName?.trim() || "ATHULYA", phoneNumber, address: staffForm.address.trim() };
+    updateMutation.mutate({ payload, id: payload.id });
   };
   const activeFilters = Number(language !== "all") + Number(status !== "all");
-  const openAdd = () => {
-    setEditing(null);
-    setNewStaff(createStaffForm());
-    setPhoneError("");
-    setAddOpen(true);
-  };
   const openEdit = (record: StaffRecord) => {
-    setEditing(record);
-    setNewStaff({ id: record.id, name: record.name, companyName: record.companyName || "ATHULYA", phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
+    setStaffForm({ id: record.id, name: record.name, companyName: record.companyName || "ATHULYA", phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
     setPhoneError("");
-    setAddOpen(true);
+    setEditOpen(true);
   };
   const closeEditDialog = () => {
-    if (createMutation.isPending) return;
-    setAddOpen(false);
-    setEditing(null);
+    if (updateMutation.isPending) return;
+    setEditOpen(false);
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="WORKFORCE / ATTENDANCE ASSIGNMENTS" title="Staff records" description="Manage saved staff profiles and review their attendance assignments. View registered employee contact details." actions={<><Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled={!records.length}>Export</Button><Button variant="contained" startIcon={<PersonAddAltRoundedIcon />} onClick={openAdd}>Add staff</Button></>} />
+    <PageHeader eyebrow="WORKFORCE / ATTENDANCE ASSIGNMENTS" title="Staff records" description="Manage saved staff profiles and review their attendance assignments. View registered employee contact details." actions={<Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled={!records.length}>Export</Button>} />
     {query.isError && <Alert severity="error">Could not load staff records from the backend.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Staff records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned employees" icon={<GroupRoundedIcon />} /></Grid>
@@ -133,22 +119,22 @@ export function StaffRecordsPage() {
       </Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No staff records match these filters.</Typography>}
     </Card>
-    <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
-      <DialogTitle>{editing ? "Edit staff record" : "Add staff"}</DialogTitle>
+    <Dialog open={editOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
+      <DialogTitle>Edit staff record</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
+          {updateMutation.isError && <Alert severity="error">{errorMessage(updateMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} InputProps={{ readOnly: true }} helperText="Generated automatically" /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={newStaff.companyName || "ATHULYA"} onChange={(event) => setNewStaff((current) => ({ ...current, companyName: event.target.value }))} helperText="Defaults to ATHULYA. Enter another name for a vendor." /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={newStaff.phoneNumber} onChange={(event) => { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(newStaff.phoneNumber); if (!newStaff.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Calling language</InputLabel><Select label="Calling language" value={newStaff.language} onChange={(event) => setNewStaff((current) => ({ ...current, language: event.target.value }))}><MenuItem value="ta">Tamil</MenuItem><MenuItem value="en">English</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
-            <Grid size={12}><AddressFields required value={newStaff.address} onChange={(address) => setNewStaff((current) => ({ ...current, address }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={staffForm.id} InputProps={{ readOnly: true }} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={staffForm.name} onChange={(event) => setStaffForm((current) => ({ ...current, name: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={staffForm.companyName || "ATHULYA"} onChange={(event) => setStaffForm((current) => ({ ...current, companyName: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={staffForm.phoneNumber} onChange={(event) => { setPhoneError(""); setStaffForm((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(staffForm.phoneNumber); if (!staffForm.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setStaffForm((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Calling language</InputLabel><Select label="Calling language" value={staffForm.language} onChange={(event) => setStaffForm((current) => ({ ...current, language: event.target.value }))}><MenuItem value="ta">Tamil</MenuItem><MenuItem value="en">English</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
+            <Grid size={12}><AddressFields required value={staffForm.address} onChange={(address) => setStaffForm((current) => ({ ...current, address }))} /></Grid>
           </Grid>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={saveStaff} disabled={createMutation.isPending || !newStaff.id.trim() || !newStaff.name.trim() || !newStaff.phoneNumber.trim() || !newStaff.address.trim()}>{editing ? "Update staff" : "Save staff"}</Button></DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={updateMutation.isPending}>Cancel</Button><Button variant="contained" onClick={saveStaff} disabled={updateMutation.isPending || !staffForm.id.trim() || !staffForm.name.trim() || !staffForm.phoneNumber.trim() || !staffForm.address.trim()}>Update staff</Button></DialogActions>
     </Dialog>
     <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="md" scroll="paper">{selected && <><DialogTitle>Staff profile · {selected.name}</DialogTitle><DialogContent dividers><Stack spacing={2.5} sx={{ pt: 1 }}>
       <Grid container spacing={1.5}>

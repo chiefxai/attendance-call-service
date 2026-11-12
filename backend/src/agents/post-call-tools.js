@@ -10,6 +10,7 @@ const operationSchemas = [
     description: "Place one scheduled outbound employee call through the existing guarded call workflow.",
     schema: z.object({
       sessionId: z.string(),
+      taskId: z.string().optional(),
       stage: z.enum(["check_in", "check_out"]),
       attemptNumber: z.number().int().positive(),
       capacityWaitCount: z.number().int().nonnegative().optional(),
@@ -67,14 +68,14 @@ const operationSchemas = [
   {
     key: "evaluate_session",
     name: "evaluate_session_completion",
-    description: "Reconcile both check-in and check-out stages and mark an exception when both are terminal but incomplete.",
-    schema: z.object({ sessionId: z.string() }),
+    description: "Reconcile the independent attendance tasks and mark the assignment exception only after both tasks are terminal and at least one is incomplete.",
+    schema: z.object({ sessionId: z.string(), stage: z.enum(["check_in", "check_out"]).optional() }),
   },
   {
     key: "deliver_attendance",
-    name: "deliver_confirmed_session",
-    description: "Send a session to the configured platform only after both check-in and check-out are confirmed.",
-    schema: z.object({ sessionId: z.string(), callAttemptId: z.string().optional() }),
+    name: "deliver_confirmed_attendance_event",
+    description: "Send one confirmed check-in or check-out event separately to the configured platform as soon as that task is confirmed.",
+    schema: z.object({ sessionId: z.string(), stage: z.enum(["check_in", "check_out"]), callAttemptId: z.string() }),
   },
 ];
 

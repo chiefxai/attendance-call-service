@@ -22,6 +22,7 @@ const repositoryMethods = Object.freeze([
   "assertEmployeeScheduleAvailable(assignment, client)",
   "createAttendanceSession(assignment)",
   "getAttendanceSession(sessionId)",
+  "getAttendanceStageTask(taskId)",
   "listAttendanceSessions(organizationId, filters)",
   "getOperationsSummary(organizationId)",
   "createStaffDirectoryRecord(organizationId, staff)",
@@ -45,6 +46,8 @@ const repositoryMethods = Object.freeze([
   "resetCareManagerPassword(organizationId, id, passwordSalt, passwordHash)",
   "getAthulyaIntegration(organizationId)",
   "saveAthulyaIntegration(organizationId, settings)",
+  "listAutoSyncAthulyaIntegrations()",
+  "enqueueScheduledAthulyaSync(input)",
   "createAthulyaSyncRun(organizationId, options)",
   "finishAthulyaSyncRun(runId, result)",
   "upsertAthulyaSchedules(organizationId, records)",
@@ -95,8 +98,8 @@ const repositoryMethods = Object.freeze([
   "nextAttemptNumber(sessionId, stage)",
   "markSessionCompleted(sessionId)",
   "markSessionException(sessionId)",
-  "buildBackendAttendancePayload(sessionId)",
-  "markBackendDelivered(sessionId, response)",
+  "buildBackendAttendancePayload(sessionId, stage, callAttemptId)",
+  "markBackendDelivered(sessionId, stage, response)",
 ]);
 
 function assertRepository(repository) {

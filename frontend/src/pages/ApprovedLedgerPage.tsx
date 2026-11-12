@@ -1,4 +1,3 @@
-import { Link as RouterLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, Chip, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
 import VerifiedUserRoundedIcon from "@mui/icons-material/VerifiedUserRounded";
@@ -36,7 +35,6 @@ export function ApprovedLedgerPage() {
     <Card sx={{ p: { xs: 2, sm: 2.75 } }}>
       <Typography variant="h6">Session delivery flow</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2 }}>This is the service's actual completion and delivery sequence.</Typography>
       <Grid container spacing={1.5}>{[{ n: "01", title: "Check-in confirmed", text: "Employee and assigned patient are verified; reported arrival time is stored." }, { n: "02", title: "Check-out confirmed", text: "Duty completion and reported departure time are stored." }, { n: "03", title: "Deliver to host", text: "The backend adapter sends one session payload using an idempotency key." }].map((step) => <Grid key={step.n} size={{ xs: 12, md: 4 }}><Card variant="outlined" sx={{ p: 1.75, boxShadow: "none", borderColor: "#e6ebf2", height: "100%" }}><Chip size="small" label={step.n} color="primary" variant="outlined" /><Typography variant="body2" fontWeight={700} sx={{ mt: 1.2 }}>{step.title}</Typography><Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .6, lineHeight: 1.55 }}>{step.text}</Typography></Card></Grid>)}</Grid>
-      <Button component={RouterLink} to="/assignments/new" variant="outlined" sx={{ mt: 2 }}>Create assignment</Button>
     </Card>
     <Card>
       {query.isLoading && <LinearProgress />}

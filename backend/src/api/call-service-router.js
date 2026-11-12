@@ -7,7 +7,7 @@ const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { verifyVobizWebhookSignature } = require("../infrastructure/telephony/vobiz-signature");
 const { createVobizLiveRuntime } = require("../realtime/vobiz-live-runtime");
-const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules } = require("../infrastructure/integrations/athulya-platform");
+const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
 
 const AGENT_DEFAULTS = {
   active: true,
@@ -102,9 +102,9 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       allowInboundCalls: stored.allowInboundCalls ?? true,
       allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
       requireHumanVerificationForStaffBooking: stored.requireHumanVerificationForStaffBooking ?? false,
+      unansweredCallEscalation: stored.unansweredCallEscalation ?? "platform_notification",
       retry: {
         maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 3),
-      unansweredCallEscalation: stored.unansweredCallEscalation ?? "platform_notification",
         initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 5),
         multiplier: storedRetry.multiplier ?? envNumber("CALL_RETRY_MULTIPLIER", 1.2),
         maxMinutes: storedRetry.maxMinutes ?? envNumber("CALL_RETRY_MAX_MINUTES", 30),
@@ -115,6 +115,21 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       },
     };
   };
+
+  router.post("/api-keys", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const label = String(req.body?.label || "").trim();
+      if (!label || label.length > 80) return res.status(400).json({ error: "label must contain 1 to 80 characters" });
+      const secret = `athulya_live_${crypto.randomBytes(32).toString("base64url")}`;
+      const key = await repository.createApiKey(req.orgId, {
+        label,
+        prefix: secret.slice(0, 17),
+        hash: crypto.createHash("sha256").update(secret).digest("hex"),
+      });
+      res.status(201).json({ ...key, apiKey: secret });
+    } catch (error) { fail(res, error); }
+  });
 
   router.get("/care-manager/notifications", async (req, res) => {
     try {
@@ -131,21 +146,6 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const updated = await repository.markCareManagerNotificationRead(org(req), userId, req.params.id);
       if (!updated) return res.status(404).json({ error: "Notification not found." });
       res.json({ id: req.params.id, read: true });
-    } catch (error) { fail(res, error); }
-  });
-
-  router.post("/api-keys", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const label = String(req.body?.label || "").trim();
-      if (!label || label.length > 80) return res.status(400).json({ error: "label must contain 1 to 80 characters" });
-      const secret = `athulya_live_${crypto.randomBytes(32).toString("base64url")}`;
-      const key = await repository.createApiKey(req.orgId, {
-        label,
-        prefix: secret.slice(0, 17),
-        hash: crypto.createHash("sha256").update(secret).digest("hex"),
-      });
-      res.status(201).json({ ...key, apiKey: secret });
     } catch (error) { fail(res, error); }
   });
 
@@ -228,6 +228,9 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     try {
       const value = await repository.getAthulyaIntegration(org(req));
       res.json({ integrationName: value.integrationName, apiBaseUrl: value.apiBaseUrl || DEFAULT_BASE_URL, enabled: value.enabled,
+        autoSyncEnabled: value.autoSyncEnabled === true, autoSyncEnabledAt: value.autoSyncEnabledAt || null,
+        lastAutoSyncSlot: value.lastAutoSyncSlot || null, autoSyncTimeZone: process.env.APP_TIMEZONE || "Asia/Kolkata",
+        autoSyncScope: value.autoSyncScope || "all", autoSyncScopeId: value.autoSyncScopeId || "",
         keyConfigured: Boolean(value.encryptedApiKey), apiKeyMasked: value.encryptedApiKey ? "••••••••" : "", updatedAt: value.updatedAt || null,
         lastSuccessfulScheduleSync: value.lastSuccessfulScheduleSync || null,
         lastSuccessfulAttendanceSubmission: value.lastSuccessfulAttendanceSubmission || null,
@@ -242,12 +245,23 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const integrationName = String(body.integrationName || "Athulya Platform").trim().slice(0, 100);
       const apiBaseUrl = validateBaseUrl(body.apiBaseUrl || DEFAULT_BASE_URL);
       const enabled = body.enabled === true;
+      if (body.autoSyncEnabled != null && typeof body.autoSyncEnabled !== "boolean") return res.status(400).json({ error: "autoSyncEnabled must be a boolean." });
+      const autoSyncEnabled = body.autoSyncEnabled === true;
+      const autoSyncScope = String(body.autoSyncScope || "all");
+      const autoSyncScopeId = String(body.autoSyncScopeId || "").trim();
+      if (!["all", "branch", "care_manager"].includes(autoSyncScope)) return res.status(400).json({ error: "autoSyncScope must be all, branch, or care_manager." });
+      if (autoSyncScopeId.length > 100) return res.status(400).json({ error: "autoSyncScopeId must be at most 100 characters." });
       const old = await repository.getAthulyaIntegration(org(req));
       const apiKeyInput = String(body.apiKey || "").trim();
       const encryptedApiKey = apiKeyInput ? encryptSecret(apiKeyInput) : null;
       if (enabled && !(encryptedApiKey || old.encryptedApiKey)) return res.status(400).json({ error: "Enter the Athulya API key before enabling the integration." });
-      const saved = await repository.saveAthulyaIntegration(org(req), { integrationName, apiBaseUrl, encryptedApiKey, enabled, updatedBy: req.webUser?.id });
+      if (autoSyncEnabled && !enabled) return res.status(400).json({ error: "Enable the Athulya integration before enabling automatic sync." });
+      if (autoSyncEnabled && autoSyncScope !== "all" && !autoSyncScopeId) return res.status(400).json({ error: "Enter the branch or Care Manager ID for the selected automatic sync scope." });
+      const saved = await repository.saveAthulyaIntegration(org(req), { integrationName, apiBaseUrl, encryptedApiKey, enabled, autoSyncEnabled, autoSyncScope, autoSyncScopeId, updatedBy: req.webUser?.id });
       res.json({ integrationName: saved.integrationName, apiBaseUrl: saved.apiBaseUrl, enabled: saved.enabled,
+        autoSyncEnabled: saved.autoSyncEnabled === true, autoSyncEnabledAt: saved.autoSyncEnabledAt || null,
+        lastAutoSyncSlot: saved.lastAutoSyncSlot || null, autoSyncTimeZone: process.env.APP_TIMEZONE || "Asia/Kolkata",
+        autoSyncScope: saved.autoSyncScope || "all", autoSyncScopeId: saved.autoSyncScopeId || "",
         keyConfigured: Boolean(saved.encryptedApiKey), apiKeyMasked: saved.encryptedApiKey ? "••••••••" : "", updatedAt: saved.updatedAt,
         lastSuccessfulScheduleSync: saved.lastSuccessfulScheduleSync || null,
         lastSuccessfulAttendanceSubmission: saved.lastSuccessfulAttendanceSubmission || null,
@@ -261,8 +275,9 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const settings = await repository.getAthulyaIntegration(org(req));
       const apiBaseUrl = validateBaseUrl(req.body?.apiBaseUrl || settings.apiBaseUrl);
       const apiKey = String(req.body?.apiKey || "").trim() || decryptSecret(settings.encryptedApiKey);
-      const records = await fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters: {} });
-      res.json({ connected: true, recordsReceived: records.length });
+      const scheduleDate = localDateInTimeZone(new Date(), process.env.APP_TIMEZONE || "Asia/Kolkata");
+      const records = await fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters: { from_date: scheduleDate, to_date: scheduleDate } });
+      res.json({ connected: true, scheduleDate, recordsReceived: records.length });
     } catch (error) { res.status(502).json({ connected: false, error: error.message }); }
   });
 
@@ -274,14 +289,28 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const body = req.body || {};
       const fromDate = body.fromDate ? String(body.fromDate) : "";
       const toDate = body.toDate ? String(body.toDate) : "";
+      const scheduleDate = String(body.scheduleDate || body.date || fromDate || toDate
+        || localDateInTimeZone(new Date(), process.env.APP_TIMEZONE || "Asia/Kolkata"));
       const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-      if ((fromDate && !datePattern.test(fromDate)) || (toDate && !datePattern.test(toDate))) return res.status(400).json({ error: "Dates must use YYYY-MM-DD format." });
-      const filters = { from_date: fromDate || undefined, to_date: toDate || undefined,
+      const validDate = (value) => {
+        if (!datePattern.test(value)) return false;
+        const parsed = new Date(`${value}T00:00:00.000Z`);
+        return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+      };
+      if (!validDate(scheduleDate) || (fromDate && fromDate !== scheduleDate) || (toDate && toDate !== scheduleDate)) {
+        return res.status(400).json({ error: "Sync exactly one schedule date using YYYY-MM-DD. Date ranges are not supported." });
+      }
+      const filters = { from_date: scheduleDate, to_date: scheduleDate,
         care_manager_id: body.careManagerId || undefined, branch_id: body.branchId || undefined, client_id: body.clientId || undefined };
-      if (fromDate && toDate && toDate < fromDate) return res.status(400).json({ error: "toDate must be on or after fromDate." });
-      const runId = await repository.createAthulyaSyncRun(org(req), { fromDate, toDate, filters });
+      if (filters.care_manager_id && filters.branch_id) return res.status(400).json({ error: "Choose either one branch or one Care Manager for sync, not both." });
+      const selectedScope = filters.branch_id ? "branch" : filters.care_manager_id ? "care_manager" : "all";
+      const selectedScopeId = filters.branch_id || filters.care_manager_id || "";
+      if (selectedScopeId.length > 100) return res.status(400).json({ error: "Branch and Care Manager IDs must be at most 100 characters." });
+      filters.sync_scope = selectedScope;
+      filters.sync_scope_id = selectedScopeId;
+      const runId = await repository.createAthulyaSyncRun(org(req), { fromDate: scheduleDate, toDate: scheduleDate, filters });
       await queue.enqueue("sync_athulya_schedules", { runId, organizationId: org(req), filters }, { idempotencyKey: `athulya-sync:${runId}` });
-      res.status(202).json({ runId, status: "running" });
+      res.status(202).json({ runId, status: "running", scheduleDate });
     } catch (error) { fail(res, error); }
   });
 
@@ -567,10 +596,10 @@ router.get("/activities", async (req, res) => {
         const session = await repository.saveAppointmentAttendanceSchedule({
           inboundCallId: req.params.id, organizationId, staff, attendanceAgent, fromNumber,
         });
-        await queue.enqueue("place_call", { sessionId: session.id, stage: "check_in", attemptNumber: 1 }, {
+        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkInTask?.id, stage: "check_in", attemptNumber: 1 }, {
           idempotencyKey: `call:${session.id}:check_in:1`, runAt: new Date(session.scheduledStartAt),
         });
-        await queue.enqueue("place_call", { sessionId: session.id, stage: "check_out", attemptNumber: 1 }, {
+        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkOutTask?.id, stage: "check_out", attemptNumber: 1 }, {
           idempotencyKey: `call:${session.id}:check_out:1`, runAt: new Date(session.scheduledEndAt),
         });
         const updated = await repository.getInboundCall(req.params.id, organizationId);
@@ -636,7 +665,9 @@ router.get("/activities", async (req, res) => {
       if (body.requireHumanVerificationForStaffBooking !== undefined && typeof body.requireHumanVerificationForStaffBooking !== "boolean") {
         return res.status(400).json({ error: "requireHumanVerificationForStaffBooking must be a boolean" });
       }
-      if (body.unansweredCallEscalation !== undefined && !["platform_notification", "call_care_manager"].includes(body.unansweredCallEscalation)) return res.status(400).json({ error: "Choose a valid care manager escalation option." });
+      if (body.unansweredCallEscalation !== undefined && !["platform_notification", "call_care_manager"].includes(body.unansweredCallEscalation)) {
+        return res.status(400).json({ error: "unansweredCallEscalation must be platform_notification or call_care_manager" });
+      }
       const maxConsecutiveNoAnswer = Number(retry.maxConsecutiveNoAnswer);
       const initialMinutes = Number(retry.initialMinutes);
       const multiplier = Number(retry.multiplier);
@@ -720,15 +751,23 @@ router.get("/activities", async (req, res) => {
           patient: { ...body.patient, phoneNumber: patientPhone || undefined }, scheduledStartAt: startAt,
           scheduledEndAt: endAt, metadata: body.metadata || {},
         }, client);
-        await queue.enqueue("place_call", { sessionId: created.id, stage: "check_in", attemptNumber: 1 }, {
+        await queue.enqueue("place_call", { sessionId: created.id, taskId: created.checkInTask?.id, stage: "check_in", attemptNumber: 1 }, {
           idempotencyKey: `call:${created.id}:check_in:1`, runAt: created.scheduledStartAt, client,
         });
-        await queue.enqueue("place_call", { sessionId: created.id, stage: "check_out", attemptNumber: 1 }, {
+        await queue.enqueue("place_call", { sessionId: created.id, taskId: created.checkOutTask?.id, stage: "check_out", attemptNumber: 1 }, {
           idempotencyKey: `call:${created.id}:check_out:1`, runAt: created.scheduledEndAt, client,
         });
         return created;
       });
-      res.status(202).json({ sessionId: session.id, status: session.sessionStatus, queued: ["check_in", "check_out"] });
+      res.status(202).json({
+        sessionId: session.id,
+        status: session.sessionStatus,
+        tasks: {
+          checkIn: { taskId: session.checkInTask?.id || null, scheduledAt: session.checkInTask?.scheduledAt || session.scheduledStartAt },
+          checkOut: { taskId: session.checkOutTask?.id || null, scheduledAt: session.checkOutTask?.scheduledAt || session.scheduledEndAt },
+        },
+        queued: ["check_in", "check_out"],
+      });
     } catch (error) { fail(res, error); }
   });
 
@@ -744,6 +783,8 @@ router.get("/activities", async (req, res) => {
         sessionStatus: session.sessionStatus,
         timeZone: session.metadata?.timeZone || process.env.APP_TIMEZONE || "Asia/Kolkata",
         checkIn: {
+          taskId: session.checkInTask?.id || null,
+          deliveryStatus: session.checkInTask?.deliveryStatus || "pending",
           status: session.checkInStatus,
           flag: session.checkInStatus === "not_answered" ? "not_answered" : null,
           reportedAt: context.checkIn?.reportedAt || null,
@@ -751,6 +792,8 @@ router.get("/activities", async (req, res) => {
           nextCallAt: context.checkIn?.nextCallAt || null,
         },
         checkOut: {
+          taskId: session.checkOutTask?.id || null,
+          deliveryStatus: session.checkOutTask?.deliveryStatus || "pending",
           status: session.checkOutStatus,
           flag: session.checkOutStatus === "not_answered" ? "not_answered" : null,
           reportedAt: context.checkOut?.reportedAt || null,
@@ -770,6 +813,7 @@ router.get("/activities", async (req, res) => {
       res.set("Cache-Control", "private, no-store");
       res.json({
         session: artifacts.session,
+        tasks: artifacts.tasks,
         callAttempts: artifacts.callAttempts.map((attempt) => ({
           id: attempt.id,
           stage: attempt.stage,
@@ -788,6 +832,15 @@ router.get("/activities", async (req, res) => {
         transcripts: artifacts.transcripts,
         logs: artifacts.logs,
       });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/attendance-tasks/:id", async (req, res) => {
+    try {
+      const task = await repository.getAttendanceStageTask(req.params.id);
+      if (!task || task.organizationId !== org(req)) return res.status(404).json({ error: "Attendance task not found" });
+      res.set("Cache-Control", "private, no-store");
+      res.json(task);
     } catch (error) { fail(res, error); }
   });
 

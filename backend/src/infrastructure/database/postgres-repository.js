@@ -231,33 +231,67 @@ class PostgresRepository {
   async getAthulyaIntegration(organizationId) {
     const { rows } = await this.pool.query(
       `SELECT integration_name AS "integrationName",api_base_url AS "apiBaseUrl",encrypted_api_key AS "encryptedApiKey",
-        enabled,updated_at AS "updatedAt",
+        enabled,auto_sync_enabled AS "autoSyncEnabled",auto_sync_enabled_at AS "autoSyncEnabledAt",
+        last_auto_sync_slot AS "lastAutoSyncSlot",auto_sync_scope AS "autoSyncScope",
+        auto_sync_scope_id AS "autoSyncScopeId",updated_at AS "updatedAt",
         (SELECT MAX(completed_at) FROM athulya_sync_runs WHERE organization_id=$1 AND status='succeeded') AS "lastSuccessfulScheduleSync",
         (SELECT MAX(updated_at) FROM athulya_attendance_submissions WHERE organization_id=$1 AND status='synced') AS "lastSuccessfulAttendanceSubmission"
        FROM athulya_integration_settings WHERE organization_id=$1`, [organizationId],
     );
-    return rows[0] || { integrationName: "Athulya Platform", apiBaseUrl: "https://homecare.athulyaliving.net/api", encryptedApiKey: null, enabled: false, lastSuccessfulScheduleSync: null, lastSuccessfulAttendanceSubmission: null };
+    return rows[0] || { integrationName: "Athulya Platform", apiBaseUrl: "https://homecare.athulyaliving.net/api", encryptedApiKey: null, enabled: false, autoSyncEnabled: false, autoSyncEnabledAt: null, lastAutoSyncSlot: null, autoSyncScope: "all", autoSyncScopeId: "", lastSuccessfulScheduleSync: null, lastSuccessfulAttendanceSubmission: null };
   }
 
-  async saveAthulyaIntegration(organizationId, { integrationName, apiBaseUrl, encryptedApiKey, enabled, updatedBy }) {
+  async saveAthulyaIntegration(organizationId, { integrationName, apiBaseUrl, encryptedApiKey, enabled, autoSyncEnabled = false, autoSyncScope = "all", autoSyncScopeId = "", updatedBy }) {
     const { rows } = await this.pool.query(
-      `INSERT INTO athulya_integration_settings (organization_id,integration_name,api_base_url,encrypted_api_key,enabled,updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (organization_id) DO UPDATE SET
+      `INSERT INTO athulya_integration_settings (organization_id,integration_name,api_base_url,encrypted_api_key,enabled,auto_sync_enabled,auto_sync_enabled_at,auto_sync_scope,auto_sync_scope_id,updated_by)
+       VALUES ($1,$2,$3,$4,$5,$7,CASE WHEN $7 THEN NOW() ELSE NULL END,$8,$9,$6) ON CONFLICT (organization_id) DO UPDATE SET
        integration_name=EXCLUDED.integration_name,api_base_url=EXCLUDED.api_base_url,
        encrypted_api_key=COALESCE(EXCLUDED.encrypted_api_key,athulya_integration_settings.encrypted_api_key),
-       enabled=EXCLUDED.enabled,updated_by=EXCLUDED.updated_by,updated_at=NOW()
-       RETURNING integration_name AS "integrationName",api_base_url AS "apiBaseUrl",encrypted_api_key AS "encryptedApiKey",enabled,updated_at AS "updatedAt",
+       enabled=EXCLUDED.enabled,
+       auto_sync_enabled_at=CASE WHEN EXCLUDED.auto_sync_enabled AND NOT athulya_integration_settings.auto_sync_enabled THEN NOW() WHEN EXCLUDED.auto_sync_enabled THEN athulya_integration_settings.auto_sync_enabled_at ELSE NULL END,
+       auto_sync_enabled=EXCLUDED.auto_sync_enabled,auto_sync_scope=EXCLUDED.auto_sync_scope,
+       auto_sync_scope_id=EXCLUDED.auto_sync_scope_id,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+       RETURNING integration_name AS "integrationName",api_base_url AS "apiBaseUrl",encrypted_api_key AS "encryptedApiKey",enabled,
+       auto_sync_enabled AS "autoSyncEnabled",auto_sync_enabled_at AS "autoSyncEnabledAt",last_auto_sync_slot AS "lastAutoSyncSlot",
+       auto_sync_scope AS "autoSyncScope",auto_sync_scope_id AS "autoSyncScopeId",updated_at AS "updatedAt",
        (SELECT MAX(completed_at) FROM athulya_sync_runs WHERE organization_id=$1 AND status='succeeded') AS "lastSuccessfulScheduleSync",
        (SELECT MAX(updated_at) FROM athulya_attendance_submissions WHERE organization_id=$1 AND status='synced') AS "lastSuccessfulAttendanceSubmission"`,
-      [organizationId, integrationName, apiBaseUrl, encryptedApiKey || null, enabled, updatedBy || null],
+      [organizationId, integrationName, apiBaseUrl, encryptedApiKey || null, enabled, updatedBy || null, autoSyncEnabled, autoSyncScope, autoSyncScopeId],
     );
     return rows[0];
+  }
+
+  async listAutoSyncAthulyaIntegrations() {
+    const { rows } = await this.pool.query(
+      `SELECT organization_id AS "organizationId",auto_sync_enabled_at AS "autoSyncEnabledAt",last_auto_sync_slot AS "lastAutoSyncSlot",
+        auto_sync_scope AS "autoSyncScope",auto_sync_scope_id AS "autoSyncScopeId"
+       FROM athulya_integration_settings WHERE enabled=TRUE AND auto_sync_enabled=TRUE AND encrypted_api_key IS NOT NULL`,
+    );
+    return rows;
+  }
+
+  async enqueueScheduledAthulyaSync({ organizationId, slotKey, slotAt, filters = {}, scope = "all", scopeId = "", client }) {
+    if (!client?.query) throw new Error("A database transaction client is required");
+    const claimed = await client.query(
+      `UPDATE athulya_integration_settings SET last_auto_sync_slot=$2,updated_at=NOW()
+       WHERE organization_id=$1 AND enabled=TRUE AND auto_sync_enabled=TRUE
+         AND auto_sync_enabled_at <= $3 AND (last_auto_sync_slot IS NULL OR last_auto_sync_slot < $2)
+       RETURNING organization_id`, [organizationId, slotKey, slotAt],
+    );
+    if (!claimed.rowCount) return null;
+    const run = await client.query(
+      `INSERT INTO athulya_sync_runs (organization_id,status,from_date,to_date,filters)
+       VALUES ($1,'running',$2,$3,$4::jsonb) RETURNING id`,
+      [organizationId, filters.from_date || null, filters.to_date || null,
+        JSON.stringify({ sync_source: "automatic", slot: slotKey, sync_scope: scope, sync_scope_id: scopeId, ...filters })],
+    );
+    return run.rows[0].id;
   }
 
   async createAthulyaSyncRun(organizationId, { fromDate, toDate, filters }) {
     const { rows } = await this.pool.query(
       `INSERT INTO athulya_sync_runs (organization_id,status,from_date,to_date,filters) VALUES ($1,'running',$2,$3,$4::jsonb) RETURNING id`,
-      [organizationId, fromDate || null, toDate || null, JSON.stringify(filters || {})],
+      [organizationId, fromDate || null, toDate || null, JSON.stringify({ ...(filters || {}), sync_source: "manual" })],
     );
     return rows[0].id;
   }
@@ -359,7 +393,9 @@ class PostgresRepository {
 
   async listAthulyaSyncRuns(organizationId, limit = 100) {
     const { rows } = await this.pool.query(
-      `SELECT id,status,from_date AS "fromDate",to_date AS "toDate",filters,records_received AS "recordsReceived",records_upserted AS "recordsUpserted",error_message AS "errorMessage",started_at AS "startedAt",completed_at AS "completedAt"
+      `SELECT id,status,from_date AS "fromDate",to_date AS "toDate",filters,filters->>'sync_source' AS "syncSource",
+        filters->>'sync_scope' AS "syncScope",filters->>'sync_scope_id' AS "syncScopeId",
+        records_received AS "recordsReceived",records_upserted AS "recordsUpserted",error_message AS "errorMessage",started_at AS "startedAt",completed_at AS "completedAt"
        FROM athulya_sync_runs WHERE organization_id=$1 ORDER BY started_at DESC LIMIT $2`, [organizationId, Math.min(Number(limit) || 100,500)],
     );
     return rows;
@@ -440,11 +476,11 @@ class PostgresRepository {
           AND cm.active=TRUE AND cm.app_user_id IS NOT NULL
         ORDER BY s.schedule_date DESC NULLS LAST,s.updated_at DESC LIMIT 1
       ), inserted AS (
-        INSERT INTO care_manager_notifications
-          (organization_id,user_id,care_manager_id,notification_type,title,message,reference_type,reference_id)
-        SELECT $1,app_user_id,care_manager_id,$8,$4,$5,$6,$7 FROM managers
-        ON CONFLICT (user_id,reference_type,reference_id) DO NOTHING
-        RETURNING id,user_id,care_manager_id,created_at
+      INSERT INTO care_manager_notifications
+        (organization_id,user_id,care_manager_id,notification_type,title,message,reference_type,reference_id)
+      SELECT $1,app_user_id,care_manager_id,$8,$4,$5,$6,$7 FROM managers
+      ON CONFLICT (user_id,reference_type,reference_id) DO NOTHING
+      RETURNING id,user_id,care_manager_id,created_at
       )
       SELECT ins.*,cm.name AS "careManagerName",cm.phone AS "careManagerPhone"
       FROM inserted ins JOIN athulya_care_managers cm ON cm.id=ins.care_manager_id`,
@@ -691,7 +727,7 @@ class PostgresRepository {
     const national = digits.length > 10 && digits.startsWith("91") ? digits.slice(-10) : digits;
     if (national.length !== 10) return null;
     const { rows } = await this.pool.query(
-      `SELECT external_id,name,phone_number,address,language,care_category,hub
+      `SELECT external_id,name,phone_number,address,language,care_category,hub,athulya_patient_uhid
        FROM patient_directory WHERE organization_id=$1 AND active=TRUE
          AND RIGHT(regexp_replace(COALESCE(phone_number,''), '[^0-9]', '', 'g'),10)=$2
        ORDER BY updated_at DESC LIMIT 2`, [organizationId, national],
@@ -699,7 +735,7 @@ class PostgresRepository {
     if (rows.length !== 1) return null;
     const row = rows[0];
     return { id: row.external_id, name: row.name, phoneNumber: row.phone_number,
-      address: row.address, language: row.language || "en", careCategory: row.care_category || "", hub: row.hub || "" };
+      address: row.address, language: row.language || "en", careCategory: row.care_category || "", hub: row.hub || "", patientUhid: row.athulya_patient_uhid || "" };
   }
 
   async createInboundCall(call) {
@@ -1048,7 +1084,38 @@ class PostgresRepository {
         throw error;
       }
     }
-    return this.mapSession(row);
+    await this.ensureAttendanceStageTasks(row, client);
+    const tasks = await client.query(
+      `SELECT id,stage,status,scheduled_at AS "scheduledAt",delivery_status AS "deliveryStatus"
+       FROM attendance_stage_tasks WHERE assignment_session_id=$1`, [row.id],
+    );
+    return this.attachStageTasks(this.mapSession(row), tasks.rows);
+  }
+
+  async ensureAttendanceStageTasks(row, client = this.pool) {
+    const context = json(row.active_context) || {};
+    const retentionDays = Math.min(Math.max(Number(process.env.DATA_RETENTION_DAYS) || 90, 1), 3650);
+    await client.query(
+      `INSERT INTO attendance_stage_tasks
+       (organization_id,assignment_session_id,stage,status,scheduled_at,active_context,retention_expires_at)
+       VALUES ($1,$2,'check_in',$3,$4,$5::jsonb,NOW()+($6 * INTERVAL '1 day')),
+              ($1,$2,'check_out',$7,$8,$9::jsonb,NOW()+($6 * INTERVAL '1 day'))
+       ON CONFLICT (assignment_session_id,stage) DO NOTHING`,
+      [row.organization_id, row.id, row.check_in_status, row.scheduled_start_at,
+        JSON.stringify(context.checkIn || {}), retentionDays, row.check_out_status,
+        row.scheduled_end_at, JSON.stringify(context.checkOut || {})],
+    );
+  }
+
+  attachStageTasks(session, tasks = []) {
+    if (!session) return null;
+    const byStage = new Map(tasks.map((task) => [task.stage, task]));
+    const mapTask = (stage) => {
+      const task = byStage.get(stage);
+      return task ? { id: task.id, stage: task.stage, status: task.status,
+        scheduledAt: task.scheduledAt, deliveryStatus: task.deliveryStatus || "pending" } : null;
+    };
+    return { ...session, checkInTask: mapTask("check_in"), checkOutTask: mapTask("check_out") };
   }
 
   mapSession(row) {
@@ -1064,7 +1131,51 @@ class PostgresRepository {
   }
   async getAttendanceSession(id) {
     const r = await this.pool.query("SELECT * FROM attendance_sessions WHERE id=$1", [id]);
-    return this.mapSession(r.rows[0]);
+    if (!r.rows[0]) return null;
+    const tasks = await this.pool.query(
+      `SELECT id,stage,status,scheduled_at AS "scheduledAt",delivery_status AS "deliveryStatus"
+       FROM attendance_stage_tasks WHERE assignment_session_id=$1`, [id],
+    );
+    return this.attachStageTasks(this.mapSession(r.rows[0]), tasks.rows);
+  }
+  async getAttendanceStageTask(id) {
+    const result = await this.pool.query(
+      `SELECT t.id,t.assignment_session_id,t.organization_id,t.stage,t.status,t.scheduled_at,
+              t.active_context,t.delivery_status,t.delivery_response,t.delivered_at,
+              s.external_assignment_id,s.session_status,s.language,s.metadata
+       FROM attendance_stage_tasks t JOIN attendance_sessions s ON s.id=t.assignment_session_id
+       WHERE t.id=$1`, [id],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const attempts = await this.pool.query(
+      `SELECT id,status,attempt_number,scheduled_at,answered_at,ended_at,recording_object_key
+       FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 ORDER BY attempt_number`,
+      [row.assignment_session_id, row.stage],
+    );
+    const context = json(row.active_context) || {};
+    return {
+      id: row.id,
+      assignmentSessionId: row.assignment_session_id,
+      organizationId: row.organization_id,
+      assignmentId: row.external_assignment_id,
+      stage: row.stage,
+      status: row.status,
+      scheduledAt: row.scheduled_at,
+      nextCallAt: context.nextCallAt || null,
+      reportedAt: context.reportedAt || null,
+      deliveryStatus: row.delivery_status,
+      deliveryResponse: json(row.delivery_response),
+      deliveredAt: row.delivered_at,
+      sessionStatus: row.session_status,
+      language: row.language,
+      timeZone: json(row.metadata)?.timeZone || process.env.APP_TIMEZONE || "Asia/Kolkata",
+      callAttempts: attempts.rows.map((attempt) => ({
+        id: attempt.id, status: attempt.status, attemptNumber: attempt.attempt_number,
+        scheduledAt: attempt.scheduled_at, answeredAt: attempt.answered_at,
+        endedAt: attempt.ended_at, recordingAvailable: Boolean(attempt.recording_object_key),
+      })),
+    };
   }
   maskPhone(value) {
     const phone = String(value || "");
@@ -1355,11 +1466,10 @@ class PostgresRepository {
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const sql = [
       "WITH followups AS (",
-      "SELECT id AS session_id, organization_id, 'check_in' AS stage, active_context->'checkIn' AS stage_context FROM attendance_sessions WHERE check_in_status='follow_up' AND session_status <> 'completed'",
-      "UNION ALL",
-      "SELECT id AS session_id, organization_id, 'check_out' AS stage, active_context->'checkOut' AS stage_context FROM attendance_sessions WHERE check_out_status='follow_up' AND session_status <> 'completed'",
+      "SELECT t.id AS task_id,t.assignment_session_id AS session_id,t.organization_id,t.stage,t.active_context AS stage_context",
+      "FROM attendance_stage_tasks t WHERE t.status='follow_up'",
       ")",
-      "SELECT f.session_id, f.organization_id, f.stage, f.stage_context->>'reason' AS reason, f.stage_context->>'nextCallAt' AS due_at,",
+      "SELECT f.task_id, f.session_id, f.organization_id, f.stage, f.stage_context->>'reason' AS reason, f.stage_context->>'nextCallAt' AS due_at,",
       "COALESCE((SELECT MAX(a.attempt_number) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage),0)::int AS max_call_attempt,",
       "COALESCE((SELECT MAX((j.payload->>'attemptNumber')::int) FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage),0)::int AS max_job_attempt,",
       "(SELECT j.id FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_job_id,",
@@ -1374,6 +1484,7 @@ class PostgresRepository {
     ].join(" ");
     const { rows } = await this.pool.query(sql, [safeLimit]);
     return rows.map((row) => ({
+      taskId: row.task_id,
       sessionId: row.session_id,
       organizationId: row.organization_id,
       stage: row.stage,
@@ -1429,14 +1540,18 @@ class PostgresRepository {
     if (!session) return null;
     const attempts = await this.pool.query(
       `SELECT stage,status,attempt_number,scheduled_at,answered_at,ended_at,outcome
-       FROM attendance_call_attempts WHERE session_id=$1 ORDER BY created_at`, [id],
+       FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 ORDER BY created_at`, [id, stage],
     );
     const history = attempts.rows.map((row) => ({
       stage: row.stage, status: row.status, attemptNumber: row.attempt_number,
       scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
       outcome: json(row.outcome),
     }));
-    const context = session.activeContext || {};
+    const task = stage === "check_in" ? session.checkInTask : session.checkOutTask;
+    const taskResult = await this.pool.query(
+      `SELECT active_context FROM attendance_stage_tasks WHERE assignment_session_id=$1 AND stage=$2`, [id, stage],
+    );
+    const context = json(taskResult.rows[0]?.active_context) || {};
     return {
       assignment: { id: session.assignmentId, scheduleVersion: session.scheduleVersion, ...(session.metadata || {}) },
       employee: session.employee,
@@ -1445,11 +1560,11 @@ class PostgresRepository {
       scheduledStartAt: session.scheduledStartAt,
       scheduledEndAt: session.scheduledEndAt,
       priorCallStatus: history,
-      factsConfirmed: {
-        checkIn: context.checkIn || (session.checkInStatus === "confirmed" ? { status: "confirmed" } : {}),
-        checkOut: context.checkOut || (session.checkOutStatus === "confirmed" ? { status: "confirmed" } : {}),
-      },
-      requestedCallbackAt: context.checkIn?.nextCallAt || context.checkOut?.nextCallAt || null,
+      stageTask: task,
+      factsConfirmed: stage === "check_in"
+        ? { checkIn: task?.status === "confirmed" ? context : {} }
+        : { checkOut: task?.status === "confirmed" ? context : {} },
+      requestedCallbackAt: context.nextCallAt || null,
       unresolvedQuestions: context.unresolvedQuestions || [],
     };
   }
@@ -1633,6 +1748,7 @@ class PostgresRepository {
   async setStageStatus(sessionId, stage, status, contextPatch = {}) {
     const column = stage === "check_in" ? "check_in_status" : "check_out_status";
     const stageKey = stage === "check_in" ? "checkIn" : "checkOut";
+    const persistedContextPatch = { status, ...contextPatch };
     await this.pool.query(
       `WITH updated AS (
          UPDATE attendance_sessions SET ${column}=$2,
@@ -1641,9 +1757,29 @@ class PostgresRepository {
        )
        INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
        SELECT organization_id,$1,'attendance.stage_status',$5::jsonb FROM updated`,
-      [sessionId, status, stageKey, JSON.stringify(contextPatch), JSON.stringify({ stage, status, ...contextPatch })],
+      [sessionId, status, stageKey, JSON.stringify(persistedContextPatch), JSON.stringify({ stage, status, ...contextPatch })],
     );
+    const taskResult = await this.pool.query(
+      `UPDATE attendance_stage_tasks SET status=$3,
+        delivery_status=CASE WHEN $3='confirmed' AND delivery_status<>'delivered' THEN 'queued' ELSE delivery_status END,
+        active_context=active_context || $4::jsonb,updated_at=NOW()
+       WHERE assignment_session_id=$1 AND stage=$2 RETURNING id`,
+      [sessionId, stage, status, JSON.stringify(persistedContextPatch)],
+    );
+    if (!taskResult.rowCount) throw new Error(`Independent ${stage} task is missing for assignment ${sessionId}`);
     if (status === "confirmed") {
+      await this.pool.query(
+        `UPDATE attendance_sessions s SET
+           backend_delivery_status=CASE WHEN EXISTS (
+             SELECT 1 FROM attendance_stage_tasks t WHERE t.assignment_session_id=s.id
+               AND t.status='confirmed' AND t.delivery_status<>'delivered'
+           ) THEN 'queued' ELSE 'delivered' END,
+           backend_delivered_at=CASE WHEN EXISTS (
+             SELECT 1 FROM attendance_stage_tasks t WHERE t.assignment_session_id=s.id
+               AND t.status='confirmed' AND t.delivery_status<>'delivered'
+           ) THEN NULL ELSE backend_delivered_at END,
+           updated_at=NOW() WHERE s.id=$1`, [sessionId],
+      );
       await this.pool.query(
         `INSERT INTO athulya_attendance_submissions (organization_id,schedule_id,caregiver_id,event_type,event_at,status,idempotency_key)
          SELECT s.organization_id,source.id,s.employee->>'id',$2,COALESCE($3::timestamptz,NOW()),'awaiting_api_specification',
@@ -1697,6 +1833,7 @@ class PostgresRepository {
     ]);
     return {
       session,
+      tasks: [session.checkInTask, session.checkOutTask].filter(Boolean),
       callAttempts: attempts.rows.map((row) => this.mapAttempt(row)),
       transcripts: transcripts.rows.map((row) => ({
         id: row.id,
@@ -1713,27 +1850,51 @@ class PostgresRepository {
       })),
     };
   }
-  async buildBackendAttendancePayload(sessionId) {
+  async buildBackendAttendancePayload(sessionId, stage, callAttemptId) {
     const artifacts = await this.getSessionArtifacts(sessionId);
     if (!artifacts) return null;
+    const task = artifacts.tasks.find((item) => item.stage === stage);
+    if (!task || task.status !== "confirmed") return null;
+    const callAttempt = artifacts.callAttempts.find((item) => item.id === callAttemptId && item.stage === stage);
+    if (!callAttempt) return null;
+    const transcript = artifacts.transcripts.find((item) => item.callAttemptId === callAttemptId) || null;
     return {
-      session: artifacts.session,
-      callAttempts: artifacts.callAttempts,
-      transcripts: artifacts.transcripts,
+      eventType: stage,
+      task,
+      assignment: artifacts.session,
+      callAttempt,
+      transcript,
     };
   }
-  async markBackendDelivered(sessionId, response) {
-    await this.pool.query(
-      `WITH updated AS (
-         UPDATE attendance_sessions SET backend_delivery_status='delivered',backend_delivery_response=$2::jsonb,
-          backend_delivered_at=NOW(),updated_at=NOW()
-          WHERE id=$1 AND session_status='completed' AND check_in_status='confirmed' AND check_out_status='confirmed'
-          RETURNING organization_id
-       )
-       INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
-       SELECT organization_id,$1,'attendance.backend_delivered',$3::jsonb FROM updated`,
-      [sessionId, JSON.stringify(response || {}), JSON.stringify({ status: response?.status || null })],
+  async markBackendDelivered(sessionId, stage, response) {
+    const updated = await this.pool.query(
+      `UPDATE attendance_stage_tasks SET delivery_status='delivered',delivery_response=$3::jsonb,
+          delivered_at=NOW(),updated_at=NOW()
+       WHERE assignment_session_id=$1 AND stage=$2 AND status='confirmed' RETURNING organization_id`,
+      [sessionId, stage, JSON.stringify(response || {})],
     );
+    if (!updated.rowCount) return false;
+    if (updated.rowCount) await this.pool.query(
+      `UPDATE attendance_sessions s SET
+         backend_delivery_status=CASE WHEN NOT EXISTS (
+           SELECT 1 FROM attendance_stage_tasks t WHERE t.assignment_session_id=s.id
+             AND t.status='confirmed' AND t.delivery_status<>'delivered'
+         ) THEN 'delivered' ELSE 'queued' END,
+         backend_delivery_response=$2::jsonb,
+         backend_delivered_at=CASE WHEN NOT EXISTS (
+           SELECT 1 FROM attendance_stage_tasks t WHERE t.assignment_session_id=s.id
+             AND t.status='confirmed' AND t.delivery_status<>'delivered'
+         ) THEN NOW() ELSE backend_delivered_at END,
+         updated_at=NOW()
+       WHERE s.id=$1`, [sessionId, JSON.stringify(response || {})],
+    );
+    await this.pool.query(
+      `INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+       SELECT organization_id,$1,'attendance.stage_backend_delivered',$2::jsonb
+       FROM attendance_sessions WHERE id=$1`,
+      [sessionId, JSON.stringify({ stage, status: response?.status || null })],
+    );
+    return true;
   }
 }
 

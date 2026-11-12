@@ -42,6 +42,12 @@ export interface AthulyaIntegrationSettings {
   integrationName: string;
   apiBaseUrl: string;
   enabled: boolean;
+  autoSyncEnabled: boolean;
+  autoSyncEnabledAt: string | null;
+  lastAutoSyncSlot: string | null;
+  autoSyncTimeZone: string;
+  autoSyncScope: "all" | "branch" | "care_manager";
+  autoSyncScopeId: string;
   keyConfigured: boolean;
   apiKeyMasked: string;
   updatedAt: string | null;
@@ -52,6 +58,9 @@ export interface AthulyaIntegrationSettings {
 
 export interface AthulyaSyncRun {
   id: string;
+  syncSource: "manual" | "automatic" | null;
+  syncScope: "all" | "branch" | "care_manager" | null;
+  syncScopeId: string | null;
   status: "running" | "succeeded" | "failed";
   fromDate: string | null;
   toDate: string | null;
@@ -126,18 +135,18 @@ export async function fetchAthulyaIntegration() {
   return response.data;
 }
 
-export async function saveAthulyaIntegration(payload: { integrationName: string; apiBaseUrl: string; apiKey?: string; enabled: boolean }) {
+export async function saveAthulyaIntegration(payload: { integrationName: string; apiBaseUrl: string; apiKey?: string; enabled: boolean; autoSyncEnabled: boolean }) {
   const response = await api.put<AthulyaIntegrationSettings>("/integrations/athulya", payload);
   return response.data;
 }
 
 export async function testAthulyaIntegration(payload: { apiKey?: string; apiBaseUrl?: string } = {}) {
-  const response = await api.post<{ connected: boolean; recordsReceived: number }>("/integrations/athulya/test", payload);
+  const response = await api.post<{ connected: boolean; scheduleDate: string; recordsReceived: number }>("/integrations/athulya/test", payload);
   return response.data;
 }
 
-export async function startAthulyaSync(payload: { fromDate?: string; toDate?: string; careManagerId?: string; branchId?: string; clientId?: string }) {
-  const response = await api.post<{ runId: string; status: string }>("/integrations/athulya/sync", payload);
+export async function startAthulyaSync(payload: { scheduleDate: string; careManagerId?: string; branchId?: string; clientId?: string }) {
+  const response = await api.post<{ runId: string; status: string; scheduleDate: string }>("/integrations/athulya/sync", payload);
   return response.data;
 }
 
@@ -195,6 +204,8 @@ export interface ServiceApiKey {
 
 
 export interface AttendanceStageStatus {
+  taskId?: string | null;
+  deliveryStatus?: string;
   status: string;
   flag: "not_answered" | null;
   reportedAt: string | null;
@@ -243,6 +254,7 @@ export interface SessionAuditLog {
 
 export interface SessionArtifacts {
   session: { id: string; assignmentId: string; sessionStatus: string };
+  tasks: Array<{ id: string; stage: "check_in" | "check_out"; status: string; scheduledAt: string; deliveryStatus: string }>;
   callAttempts: SessionCallAttempt[];
   transcripts: SessionTranscript[];
   logs: SessionAuditLog[];
@@ -369,6 +381,27 @@ export interface CallingSettings {
     maxMinutes: number;
   };
   source: { defaultFromNumber: "settings" | "environment"; retry: "settings" | "environment" };
+}
+
+export interface CareManagerNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  referenceType: string;
+  referenceId: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export async function fetchCareManagerNotifications() {
+  const response = await api.get<CareManagerNotification[]>("/care-manager/notifications");
+  return response.data;
+}
+
+export async function markCareManagerNotificationRead(id: string) {
+  const response = await api.post(`/care-manager/notifications/${encodeURIComponent(id)}/read`);
+  return response.data;
 }
 
 export interface OperationsSummary {
@@ -623,7 +656,15 @@ export async function fetchEmployeeScheduleOverlap(params: {
 }
 
 export async function createAssignment(payload: AssignmentPayload) {
-  const response = await api.post<{ sessionId: string; status: string; queued: string[] }>("/assignments", payload);
+  const response = await api.post<{
+    sessionId: string;
+    status: string;
+    queued: string[];
+    tasks: {
+      checkIn: { taskId: string | null; scheduledAt: string };
+      checkOut: { taskId: string | null; scheduledAt: string };
+    };
+  }>("/assignments", payload);
   return response.data;
 }
 
@@ -639,27 +680,5 @@ export async function fetchServiceApiKeys() {
 
 export async function revokeServiceApiKey(id: string) {
   const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`);
-  return response.data;
-}
-
-
-export interface CareManagerNotification {
-  id: string;
-  type: string;
-  title: string;
-  message: string;
-  referenceType: string;
-  referenceId: string;
-  createdAt: string;
-  readAt: string | null;
-}
-
-export async function fetchCareManagerNotifications() {
-  const response = await api.get<CareManagerNotification[]>("/care-manager/notifications");
-  return response.data;
-}
-
-export async function markCareManagerNotificationRead(id: string) {
-  const response = await api.post<{ id: string; read: boolean }>(`/care-manager/notifications/${encodeURIComponent(id)}/read`);
   return response.data;
 }

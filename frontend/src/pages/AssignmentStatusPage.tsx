@@ -115,6 +115,10 @@ export function AssignmentStatusPage() {
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25 }}>
                   <Typography variant="subtitle1" fontWeight={750}>{stage === "check_in" ? "Check-in" : "Check-out"}</Typography>
                   <Chip size="small" label={`${attempts.length} ${attempts.length === 1 ? "call" : "calls"}`} />
+                  {(() => {
+                    const task = artifacts.data.tasks.find((item) => item.stage === stage);
+                    return task ? <Chip size="small" variant="outlined" label={`Task ${task.id.slice(0, 8)} · ${task.deliveryStatus}`} /> : null;
+                  })()}
                 </Stack>
                 {attempts.length === 0 ? <Typography variant="body2" color="text.secondary">No calls have been placed for this stage yet.</Typography> : <Stack spacing={1.5}>
                   {attempts.map((attempt) => {
@@ -156,7 +160,7 @@ export function AssignmentStatusPage() {
             </Box>
           </Stack>}
         </CardContent></Card>
-        <Card><CardContent sx={{ p: 3 }}><Typography variant="h6" sx={{ mb: 2 }}>Session delivery</Typography><Stack direction={{ xs: "column", sm: "row" }} spacing={4}><Box><Typography variant="caption" color="text.secondary">Overall session</Typography><Typography fontWeight={650} textTransform="capitalize">{query.data.sessionStatus}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Backend delivery</Typography><Typography fontWeight={650} textTransform="capitalize">{query.data.backendDeliveryStatus}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Assignment</Typography><Typography fontWeight={650}>{query.data.assignmentId}</Typography></Box></Stack></CardContent></Card>
+        <Card><CardContent sx={{ p: 3 }}><Typography variant="h6" sx={{ mb: 2 }}>Attendance task delivery</Typography><Stack direction={{ xs: "column", sm: "row" }} spacing={4}><Box><Typography variant="caption" color="text.secondary">Check-in event</Typography><Typography fontWeight={650} textTransform="capitalize">{query.data.checkIn.deliveryStatus || "pending"}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Check-out event</Typography><Typography fontWeight={650} textTransform="capitalize">{query.data.checkOut.deliveryStatus || "pending"}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Assignment progress</Typography><Typography fontWeight={650} textTransform="capitalize">{query.data.sessionStatus}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Assignment</Typography><Typography fontWeight={650}>{query.data.assignmentId}</Typography></Box></Stack></CardContent></Card>
         <Typography variant="caption" color="text.secondary">Active sessions refresh every 8 seconds.</Typography>
       </>}
     </Stack>

@@ -16,6 +16,7 @@ const {
   startWorkers,
   createAttendanceBackendClient,
   createAthulyaScheduleSyncHandler,
+  latestDueAthulyaSyncSlot,
 } = require("../index");
 
 async function main() {
@@ -55,6 +56,57 @@ async function main() {
     },
   });
   const worker = startWorkers({ queue, handlers, ...config.worker });
+  let stopping = false;
+  const autoSyncIntervalMs = Math.max(15_000, Number(process.env.ATHULYA_AUTO_SYNC_SCAN_INTERVAL_MS) || 60_000);
+  let schedulingAthulyaSync = false;
+  async function scheduleAthulyaSyncs() {
+    if (schedulingAthulyaSync || stopping) return;
+    schedulingAthulyaSync = true;
+    try {
+      const organizations = await repository.listAutoSyncAthulyaIntegrations();
+      for (const integration of organizations) {
+        const slot = latestDueAthulyaSyncSlot(new Date(), {
+          timeZone: process.env.APP_TIMEZONE || "Asia/Kolkata",
+          enabledAt: integration.autoSyncEnabledAt,
+        });
+        if (!slot || (integration.lastAutoSyncSlot && integration.lastAutoSyncSlot >= slot.key)) continue;
+        const scope = integration.autoSyncScope || "all";
+        const scopeId = String(integration.autoSyncScopeId || "").trim();
+        const scheduleDate = slot.key.slice(0, 10);
+        if (scope !== "all" && !scopeId) {
+          console.error(`[attendance-worker] skipping automatic Athulya sync: missing ${scope} ID organization=${integration.organizationId}`);
+          continue;
+        }
+        const filters = {
+          from_date: scheduleDate,
+          to_date: scheduleDate,
+          ...(scope === "branch" ? { branch_id: scopeId }
+            : scope === "care_manager" ? { care_manager_id: scopeId } : {}),
+        };
+        await queue.transaction(async (client) => {
+          const runId = await repository.enqueueScheduledAthulyaSync({
+            organizationId: integration.organizationId, slotKey: slot.key, slotAt: slot.at,
+            filters, scope, scopeId, client,
+          });
+          if (!runId) return;
+          await queue.enqueue("sync_athulya_schedules", {
+            runId, organizationId: integration.organizationId, filters,
+          }, {
+            idempotencyKey: `athulya-auto-sync:${integration.organizationId}:${slot.key}`,
+            client,
+          });
+          console.info(`[attendance-worker] queued Athulya schedule sync organization=${integration.organizationId} scope=${scope}${scopeId ? `:${scopeId}` : ""} slot=${slot.key}`);
+        });
+      }
+    } catch (error) {
+      console.error("[attendance-worker] Athulya automatic sync scheduling failed", error.message);
+    } finally {
+      schedulingAthulyaSync = false;
+    }
+  }
+  const autoSyncTimer = setInterval(() => { void scheduleAthulyaSyncs(); }, autoSyncIntervalMs);
+  autoSyncTimer.unref?.();
+  void scheduleAthulyaSyncs();
   async function purgeExpiredInboundCalls() {
     const expired = await repository.listExpiredInboundCalls(100);
     for (const call of expired) {
@@ -76,7 +128,6 @@ async function main() {
   void purgeExpiredInboundCalls().catch((error) => console.error("[attendance-worker] inbound retention scan failed", error.message));
   pool.on("error", (error) => console.error("[attendance-worker] postgres pool error", error.message));
   console.log(`[attendance-worker] started ${worker.workerIds.length} consumers`);
-  let stopping = false;
   const reconcileIntervalMs = Math.max(1_000, Number(process.env.OVERDUE_CALL_RECONCILE_INTERVAL_MS) || 15_000);
   let reconcilingOverdueCalls = false;
   async function reconcileOverdueCalls() {
@@ -92,7 +143,7 @@ async function main() {
           await repository.setStageStatus(due.sessionId, due.stage, "not_answered", {
             reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: noAnswerCount,
           });
-          await queue.enqueue("evaluate_session", { sessionId: due.sessionId }, {
+          await queue.enqueue("evaluate_session", { sessionId: due.sessionId, stage: due.stage }, {
             idempotencyKey: `evaluate:${due.sessionId}:not-answered:${due.stage}`,
           });
           console.warn(`[attendance-worker] stopped overdue retries at no-answer limit session=${due.sessionId} stage=${due.stage} count=${noAnswerCount}`);
@@ -105,6 +156,7 @@ async function main() {
           : due.lastAttemptStatus === "noanswer" ? due.lastNoAnswerBefore + 1 : due.lastNoAnswerBefore;
         const payload = {
           sessionId: due.sessionId,
+          taskId: due.taskId,
           stage: due.stage,
           attemptNumber,
           consecutiveNoAnswer,
@@ -134,6 +186,7 @@ async function main() {
     if (stopping) return;
     stopping = true;
     clearInterval(overdueCallTimer);
+    clearInterval(autoSyncTimer);
     console.log(`[attendance-worker] received ${signal}; shutting down`);
     clearInterval(retentionTimer);
     await worker.stop();

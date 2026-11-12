@@ -207,9 +207,11 @@ address verification, and the reported arrival time. A late arrival or requested
 callback keeps the stage pending; on a later answered call the agent captures the
 actual arrival time. Check-out asks only about duty completion and actual departure
 time, without repeating patient-detail questions. Check-in and check-out are
-scheduled together in the same session; a failure in one stage does not silently
-complete or discard the other. The session completes and is delivered to the host
-only when both stages are confirmed. The overdue-call reconciler recovers a missed
+separate durable tasks under a shared assignment reference. Each has its own
+call history, retry schedule, status, and agent context; one task does not wait
+for or cancel the other. Each confirmed stage is delivered to the host
+independently. The assignment summary completes only when both stages are
+confirmed. The overdue-call reconciler recovers a missed
 due job, while the configured retry limit eventually raises an exception for
 human handling.
 
@@ -266,10 +268,12 @@ before using completed-session delivery; if unset, delivery jobs retry and
 eventually enter the queue's dead-letter state.
 
 Creating an assignment queues both check-in and check-out in the same session.
-The check-out call waits until `scheduledEndAt`; a terminal result for check-in
-does not cancel it. The session is `completed` only after both stages are
-confirmed. If either stage exhausts its configured retries or needs review, the
-session becomes an exception after both stages have settled.
+Check-in and check-out are independent attendance tasks with separate IDs,
+retry histories, agent context, and host callbacks. Each runs at its own
+scheduled time without waiting for or canceling the other, and each confirmed
+event is sent to the platform separately. The assignment summary is marked
+`completed` only after both tasks are confirmed; if both tasks settle and either
+is incomplete, the summary becomes an exception.
 
 Compose runs `backend-migrate` before starting the API and worker.
 

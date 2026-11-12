@@ -78,14 +78,14 @@ function buildOverviewCharts(records: AttendanceRecord[]) {
 
 export function OverviewPage({ showAgents = false, userRole = "admin" }: { showAgents?: boolean; userRole?: "admin" | "care_manager" }) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const notificationsQuery = useQuery({ queryKey: ["care-manager-notifications"], queryFn: fetchCareManagerNotifications, enabled: userRole === "care_manager", refetchInterval: 30_000 });
-  const markNotificationRead = useMutation({ mutationFn: markCareManagerNotificationRead, onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["care-manager-notifications"] }); } });
   const [sessionId, setSessionId] = useState("");
   const [drilldown, setDrilldown] = useState<{ title: string; records: AttendanceRecord[] } | null>(null);
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
   const summaryQuery = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary, refetchInterval: 15_000 });
   const attendanceQuery = useQuery({ queryKey: ["attendance", "recent"], queryFn: () => fetchAttendance({ limit: 500 }), refetchInterval: 15_000 });
+  const queryClient = useQueryClient();
+  const careManagerAlerts = useQuery({ queryKey: ["care-manager-notifications"], queryFn: fetchCareManagerNotifications, enabled: userRole === "care_manager", refetchInterval: 30_000 });
+  const markAlertRead = useMutation({ mutationFn: markCareManagerNotificationRead, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["care-manager-notifications"] }) });
   const summary: OperationsSummary | undefined = summaryQuery.data;
   const chartData = useMemo(() => buildOverviewCharts(attendanceQuery.data || []), [attendanceQuery.data]);
   const openRecords = (title: string, predicate: (record: AttendanceRecord) => boolean) => {
@@ -129,13 +129,12 @@ export function OverviewPage({ showAgents = false, userRole = "admin" }: { showA
   return <Stack spacing={2.5}>
     <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Operations dashboard" description="Monitor scheduled employee check-in and check-out calls from the live attendance service."
       actions={<><Chip label={new Date().toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })} variant="outlined" /><Button component={RouterLink} to="/attendance" variant="contained" endIcon={<ArrowForwardRoundedIcon />}>Open attendance</Button></>} />
-    {(summaryQuery.isError || attendanceQuery.isError) && <Alert severity="error">Could not load live operations data. Check backend availability and authenticated organization access.</Alert>}
-    {userRole === "care_manager" && (notificationsQuery.data?.length ?? 0) > 0 && <SectionCard title="Care manager alerts" subtitle="Follow up on attendance and staff availability calls that were not answered.">
-      <Stack spacing={1.2}>{notificationsQuery.data?.map((item) => <Stack key={item.id} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ borderTop: "1px solid #edf0f4", py: 1.2 }}>
-        <Box><Typography fontWeight={700}>{item.title}</Typography><Typography variant="body2" color="text.secondary">{item.message}</Typography><Typography variant="caption" color="text.secondary">{new Date(item.createdAt).toLocaleString()}</Typography></Box>
-        {!item.readAt && <Button size="small" disabled={markNotificationRead.isPending} onClick={() => markNotificationRead.mutate(item.id)}>Mark reviewed</Button>}
-      </Stack>)}</Stack>
+    {userRole === "care_manager" && <SectionCard title="Care manager alerts" subtitle="Attendance calls that reached the unanswered-call limit need follow-up.">
+      {careManagerAlerts.isError && <Alert severity="error">Could not load care manager alerts.</Alert>}
+      {careManagerAlerts.data?.length === 0 && <Alert severity="success">No new care manager alerts.</Alert>}
+      <Stack spacing={1}>{careManagerAlerts.data?.map((alert) => <Card key={alert.id} variant="outlined" sx={{ p: 1.5, boxShadow: "none", borderColor: alert.readAt ? "divider" : "warning.light" }}><Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ sm: "center" }}><Box><Typography variant="body2" fontWeight={700}>{alert.title}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4 }}>{alert.message}</Typography><Typography variant="caption" color="text.secondary">{new Date(alert.createdAt).toLocaleString()}</Typography></Box>{!alert.readAt && <Button size="small" onClick={() => markAlertRead.mutate(alert.id)} disabled={markAlertRead.isPending}>Mark reviewed</Button>}</Stack></Card>)}</Stack>
     </SectionCard>}
+    {(summaryQuery.isError || attendanceQuery.isError) && <Alert severity="error">Could not load live operations data. Check backend availability and authenticated organization access.</Alert>}
     <Grid container spacing={1.75}>
       {metrics.map((metric) => <Grid key={metric.label} size={{ xs: 12, sm: 6, md: 3 }}><MetricCard {...metric} /></Grid>)}
     </Grid>

@@ -33,9 +33,11 @@ const recordingExample = [
 ].join("\n");
 const completionPayloadExample = [
   "{",
-  '  "session": { "id": "<SESSION_ID>", "assignmentId": "SHIFT-2026-001", "sessionStatus": "completed", "checkInStatus": "confirmed", "checkOutStatus": "confirmed" },',
-  '  "callAttempts": [{ "id": "<ATTEMPT_ID>", "stage": "check_in", "status": "completed", "durationSeconds": 42 }],',
-  '  "transcripts": [{ "callAttemptId": "<ATTEMPT_ID>", "language": "ta", "text": "...", "extraction": { "employeeIntent": "arrived" } }]',
+  '  "eventType": "check_in",',
+  '  "task": { "id": "<TASK_ID>", "stage": "check_in", "status": "confirmed", "scheduledAt": "2026-11-10T08:00:00Z" },',
+  '  "assignment": { "id": "<ASSIGNMENT_SESSION_ID>", "assignmentId": "SHIFT-2026-001" },',
+  '  "callAttempt": { "id": "<ATTEMPT_ID>", "stage": "check_in", "status": "completed", "durationSeconds": 42 },',
+  '  "transcript": { "callAttemptId": "<ATTEMPT_ID>", "language": "ta", "text": "...", "extraction": { "employeeIntent": "arrived" } }',
   "}",
 ].join("\n");
 const callbackEnvironment = [
@@ -171,7 +173,7 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
     </Box>
 
     <Box id="assignments" sx={{ scrollMarginTop: 100 }}>
-    <SectionCard title="Create an assignment from your platform" subtitle="POST an assignment payload. A 202 response returns the durable session ID; the service schedules both stages and retries asynchronously.">
+    <SectionCard title="Create an assignment from your platform" subtitle="POST a duty assignment. The service creates separate check-in and check-out tasks and retries each asynchronously.">
       <Stack spacing={1.5}>
         <Typography variant="body2">Endpoint: <Box component="code">POST /api/call-service/assignments</Box></Typography>
         <Typography variant="body2">Headers: <Box component="code">Authorization: Bearer &lt;API_KEY&gt;</Box> and <Box component="code">Content-Type: application/json</Box>.</Typography>
@@ -180,7 +182,7 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
           <IconButton size="small" aria-label="Copy API example" onClick={() => copy(example)} sx={{ position: "absolute", right: 8, top: 8, zIndex: 1 }}><ContentCopyRoundedIcon fontSize="small" /></IconButton>
           <Box component="pre" sx={{ m: 0, pr: 5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{example}</Box>
         </Paper>
-        <Typography variant="body2">Accepted response: <Box component="code">202</Box> with <Box component="code">sessionId</Box>, status, and queued check-in/check-out stages. Staff and patient records are created from the assignment details.</Typography>
+        <Typography variant="body2">Accepted response: <Box component="code">202</Box> with an assignment reference, separate <Box component="code">tasks.checkIn.taskId</Box> and <Box component="code">tasks.checkOut.taskId</Box>, and their scheduled times. Read each independently at <Box component="code">GET /api/call-service/attendance-tasks/&#123;TASK_ID&#125;</Box>. Staff and patient records are created from the assignment details.</Typography>
         <Typography variant="caption" color="text.secondary">Use the active agent UUID from the Agents endpoint. Times must include a timezone. Replace example IDs and phone numbers with your platform data. Store API keys in your backend secret manager and never put them in mobile or browser code.</Typography>
       </Stack>
     </SectionCard>
@@ -195,17 +197,25 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
     <Box id="session-data" sx={{ scrollMarginTop: 100 }}>
     <Grid container spacing={2}>
       <Grid size={{ xs: 12 }}>
-        <SectionCard title="Read assignment status" subtitle="Poll this endpoint to monitor both required stages and the host delivery state.">
+        <SectionCard title="Read assignment status" subtitle="Poll this endpoint for a combined overview of the independent attendance tasks.">
           <Stack spacing={1.25}>
             <Typography variant="body2">Endpoint: <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/status</Box></Typography>
             <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{`{
   "sessionId": "<SESSION_ID>",
   "sessionStatus": "in_progress",
-  "checkIn": { "status": "confirmed", "reportedAt": "2026-11-10T02:35:00.000Z" },
-  "checkOut": { "status": "scheduled", "reportedAt": null },
+  "checkIn": { "taskId": "<CHECK_IN_TASK_ID>", "status": "confirmed", "reportedAt": "2026-11-10T02:35:00.000Z", "deliveryStatus": "delivered" },
+  "checkOut": { "taskId": "<CHECK_OUT_TASK_ID>", "status": "scheduled", "reportedAt": null, "deliveryStatus": "pending" },
   "backendDeliveryStatus": "pending"
 }`}</Box></Paper>
-            <Typography variant="caption" color="text.secondary">A session is complete only after check-in and check-out are confirmed. If a stage reaches its retry limit or needs review, the session remains an exception and is not sent as a confirmed completion.</Typography>
+            <Typography variant="caption" color="text.secondary">Check-in and check-out are separate task records with independent retries, call history, agent context, and delivery status. Each confirmed event is sent immediately; the assignment summary is complete when both stages are confirmed.</Typography>
+          </Stack>
+        </SectionCard>
+      </Grid>
+      <Grid size={{ xs: 12 }}>
+        <SectionCard title="Read one attendance task" subtitle="Use a check-in or check-out task ID to retrieve only that task's state and call attempts.">
+          <Stack spacing={1.25}>
+            <Typography variant="body2">Endpoint: <Box component="code">GET /api/call-service/attendance-tasks/&#123;TASK_ID&#125;</Box></Typography>
+            <Typography variant="body2">The response includes the task stage, its scheduled/reported time, retry attempts, and independent platform delivery status. Check-in and check-out can be tracked without waiting for the other task.</Typography>
           </Stack>
         </SectionCard>
       </Grid>
@@ -250,18 +260,18 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
     </Box>
 
     <Box id="callbacks" sx={{ scrollMarginTop: 100 }}>
-    <SectionCard title="Send completed attendance to your platform" subtitle="Configure your platform's receiving POST endpoint in the service VM environment.">
+    <SectionCard title="Send confirmed attendance events to your platform" subtitle="Configure your platform's receiving POST endpoint in the service VM environment.">
       <Stack spacing={1.5}>
-        <Typography variant="body2">On completion, the service sends a POST when both check-in and check-out are confirmed. The request contains the session, call attempts, and transcripts.</Typography>
+        <Typography variant="body2">The service sends a separate POST as soon as each check-in or check-out task is confirmed. It does not wait for the other task. Each event includes its task, assignment reference, confirming call attempt, and transcript.</Typography>
         <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}>
           <Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{callbackEnvironment}</Box>
         </Paper>
-        <Typography variant="body2">The request uses <Box component="code">Content-Type: application/json</Box>, <Box component="code">Authorization: Bearer &lt;ATTENDANCE_BACKEND_TOKEN&gt;</Box>, and an <Box component="code">Idempotency-Key</Box> of <Box component="code">attendance-session:&lt;SESSION_ID&gt;</Box>. The token header is omitted if no token is configured; set it in production.</Typography>
+        <Typography variant="body2">The request uses <Box component="code">Content-Type: application/json</Box>, <Box component="code">Authorization: Bearer &lt;ATTENDANCE_BACKEND_TOKEN&gt;</Box>, and a stage-specific <Box component="code">Idempotency-Key</Box> so a retry cannot duplicate the same check-in or check-out event. The token header is omitted if no token is configured; set it in production.</Typography>
         <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}>
           <Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{completionPayloadExample}</Box>
         </Paper>
-        <Typography variant="body2">If the receiver returns a non-2xx response or times out, the durable worker retries the POST. Check delivery using <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/status</Box> and its <Box component="code">backendDeliveryStatus</Box> field.</Typography>
-        <Typography variant="caption" color="text.secondary">The receiver should persist the idempotency key and return a 2xx response for duplicate requests without applying attendance twice. Recordings are retrieved separately using the session artifacts and recording endpoints above.</Typography>
+        <Typography variant="body2">If the receiver returns a non-2xx response or times out, the durable worker retries that event. Check each stage's <Box component="code">deliveryStatus</Box> using <Box component="code">GET /api/call-service/assignments/&#123;SESSION_ID&#125;/status</Box>.</Typography>
+        <Typography variant="caption" color="text.secondary">The receiver should persist the idempotency key and return a 2xx response for duplicate requests without applying attendance twice. Recordings are retrieved separately using the task artifacts and recording endpoints above.</Typography>
       </Stack>
     </SectionCard>
     </Box>

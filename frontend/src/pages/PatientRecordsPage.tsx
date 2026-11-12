@@ -2,20 +2,17 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
-import PersonAddAltRoundedIcon from "@mui/icons-material/PersonAddAltRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
-import { createPatient, fetchAttendance, fetchPatients, updatePatient, type AttendanceRecord, type CreatePatientPayload, type PatientRecord } from "../api/client";
+import { fetchAttendance, fetchPatients, updatePatient, type AttendanceRecord, type CreatePatientPayload, type PatientRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
-
-const createPatientForm = (): CreatePatientPayload => ({ id: crypto.randomUUID(), name: "", phoneNumber: "", address: "", language: "ta", careCategory: "", hub: "" });
 
 export function PatientRecordsPage() {
   const [search, setSearch] = useState("");
@@ -23,10 +20,9 @@ export function PatientRecordsPage() {
   const [category, setCategory] = useState("all");
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
-  const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [viewPatient, setViewPatient] = useState<PatientRecord | null>(null);
-  const [editing, setEditing] = useState<PatientRecord | null>(null);
-  const [newPatient, setNewPatient] = useState<CreatePatientPayload>(createPatientForm);
+  const [newPatient, setNewPatient] = useState<CreatePatientPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "ta", careCategory: "", hub: "" });
   const [phoneError, setPhoneError] = useState("");
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), refetchInterval: 30_000 });
@@ -35,12 +31,10 @@ export function PatientRecordsPage() {
     queryFn: () => fetchAttendance({ limit: 500 }),
     enabled: Boolean(viewPatient),
   });
-  const createMutation = useMutation({
-    mutationFn: ({ payload, id, update }: { payload: CreatePatientPayload; id: string; update: boolean }) => update ? updatePatient(id, payload) : createPatient(payload),
+  const updateMutation = useMutation({
+    mutationFn: ({ payload, id }: { payload: CreatePatientPayload; id: string }) => updatePatient(id, payload),
     onSuccess: async () => {
-      setAddOpen(false);
-      setEditing(null);
-      setNewPatient(createPatientForm());
+      setEditOpen(false);
       setPhoneError("");
       await queryClient.invalidateQueries({ queryKey: ["patients"] });
     },
@@ -61,31 +55,23 @@ export function PatientRecordsPage() {
     if (phoneInput && !phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
     const payload = { ...newPatient, id: newPatient.id.trim(), name: newPatient.name.trim(), phoneNumber: phoneNumber || undefined, address: newPatient.address.trim(), careCategory: newPatient.careCategory?.trim(), hub: newPatient.hub?.trim() };
-    createMutation.mutate({ payload, id: payload.id, update: Boolean(editing) });
+    updateMutation.mutate({ payload, id: payload.id });
   };
   const categories = [...new Set(records.map((row) => row.careCategory).filter((value) => value !== "Not specified"))];
   const hubs = [...new Set(records.map((row) => row.hub).filter((value) => value !== "Not specified"))];
   const activeFilters = Number(hub !== "all") + Number(category !== "all") + Number(language !== "all") + Number(status !== "all");
-  const openAdd = () => {
-    setEditing(null);
-    setNewPatient(createPatientForm());
-    setPhoneError("");
-    setAddOpen(true);
-  };
   const openEdit = (record: PatientRecord) => {
-    setEditing(record);
     setNewPatient({ id: record.id, name: record.name, phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en", careCategory: record.careCategory === "Not specified" ? "" : record.careCategory, hub: record.hub === "Not specified" ? "" : record.hub });
     setPhoneError("");
-    setAddOpen(true);
+    setEditOpen(true);
   };
   const closeEditDialog = () => {
-    if (createMutation.isPending) return;
-    setAddOpen(false);
-    setEditing(null);
+    if (updateMutation.isPending) return;
+    setEditOpen(false);
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="HOME HEALTH / ASSIGNMENT DIRECTORY" title="Patient records" description="Manage saved patient profiles, addresses, and assignment details." actions={<><Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled>Export</Button><Button variant="contained" startIcon={<PersonAddAltRoundedIcon />} onClick={openAdd}>Add patient</Button></>} />
+    <PageHeader eyebrow="HOME HEALTH / ASSIGNMENT DIRECTORY" title="Patient records" description="Manage saved patient profiles, addresses, and assignment details." actions={<Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled>Export</Button>} />
     {query.isError && <Alert severity="error">Could not load patient assignment records from the backend.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Patient records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned patients" icon={<ElderlyRoundedIcon />} /></Grid>
@@ -124,11 +110,11 @@ export function PatientRecordsPage() {
       </Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>No patient records match these filters.</Typography>}
     </Card>
-    <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
-      <DialogTitle>{editing ? "Edit patient record" : "Add patient"}</DialogTitle>
+    <Dialog open={editOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
+      <DialogTitle>Edit patient record</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          {createMutation.isError && <Alert severity="error">{errorMessage(createMutation.error)}</Alert>}
+          {updateMutation.isError && <Alert severity="error">{errorMessage(updateMutation.error)}</Alert>}
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Patient ID" value={newPatient.id} InputProps={{ readOnly: true }} helperText="Generated automatically" /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newPatient.name} onChange={(event) => setNewPatient((current) => ({ ...current, name: event.target.value }))} /></Grid>
@@ -140,7 +126,7 @@ export function PatientRecordsPage() {
           </Grid>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={createMutation.isPending}>Cancel</Button><Button variant="contained" onClick={savePatient} disabled={createMutation.isPending || !newPatient.id.trim() || !newPatient.name.trim() || !newPatient.address.trim()}>{editing ? "Update patient" : "Save patient"}</Button></DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={closeEditDialog} disabled={updateMutation.isPending}>Cancel</Button><Button variant="contained" onClick={savePatient} disabled={updateMutation.isPending || !newPatient.id.trim() || !newPatient.name.trim() || !newPatient.address.trim()}>Update patient</Button></DialogActions>
     </Dialog>
     <Dialog open={Boolean(viewPatient)} onClose={() => setViewPatient(null)} fullWidth maxWidth="md" scroll="paper">{viewPatient && <><DialogTitle>Patient profile · {viewPatient.name}</DialogTitle><DialogContent dividers><Stack spacing={2.5} sx={{ pt: 1 }}>
       <Grid container spacing={1.5}>
