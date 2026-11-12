@@ -940,7 +940,7 @@ class PostgresRepository {
       assignmentId: session.assignmentId,
       scheduleVersion: session.scheduleVersion,
       language: session.language,
-      employee: { id: employee.id || null, name: employee.name || "Unknown staff", phoneMasked: this.maskPhone(employee.phoneNumber) },
+      employee: { id: employee.id || null, name: employee.name || "Unknown staff", companyName: employee.companyName || "ATHULYA", phoneMasked: this.maskPhone(employee.phoneNumber) },
       patient: { id: patient.id || null, name: patient.name || "Unknown patient" },
       scheduledStartAt: session.scheduledStartAt,
       scheduledEndAt: session.scheduledEndAt,

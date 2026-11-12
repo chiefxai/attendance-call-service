@@ -10,7 +10,7 @@ import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
 import { createStaff, fetchAttendance, fetchStaff, updateStaff, type AttendanceRecord, type CreateStaffPayload, type StaffRecord } from "../api/client";
-import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
+import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 

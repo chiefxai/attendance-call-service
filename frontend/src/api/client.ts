@@ -334,7 +334,7 @@ export interface AttendanceRecord {
   assignmentId: string;
   scheduleVersion: string;
   language: string;
-  employee: { id: string | null; name: string; phoneMasked: string | null };
+  employee: { id: string | null; name: string; companyName?: string; phoneMasked: string | null };
   patient: { id: string | null; name: string };
   scheduledStartAt: string;
   scheduledEndAt: string;

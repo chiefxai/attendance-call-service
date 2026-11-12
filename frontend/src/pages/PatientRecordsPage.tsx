@@ -9,7 +9,7 @@ import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
 import { createPatient, fetchAttendance, fetchPatients, updatePatient, type AttendanceRecord, type CreatePatientPayload, type PatientRecord } from "../api/client";
-import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
+import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 
