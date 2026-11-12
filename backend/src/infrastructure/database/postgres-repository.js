@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 25225)
-Total output lines: 1697
-
 "use strict";
 
 function json(value) { return typeof value === "string" ? JSON.parse(value) : value; }
@@ -710,7 +707,366 @@ class PostgresRepository {
     );
     return rows.map((row) => ({ id: row.id, candidateIndex: row.candidate_index, staff: json(row.staff_context),
       providerCallId: row.provider_call_id, status: row.status, answeredAt: row.answered_at, endedAt: row.ended_at,
-      durationSeconds: row.duration_seconds, transcr…5225 tokens truncated…       GROUP BY s.id ORDER BY s.scheduled_start_at DESC LIMIT $4 OFFSET $5`,
+      durationSeconds: row.duration_seconds, transcript: row.transcript, outcome: json(row.outcome), recordingObjectKey: row.recording_object_key }));
+  }
+
+  async getAppointmentCallAttempt(id) {
+    const { rows } = await this.pool.query("SELECT * FROM appointment_call_attempts WHERE id=$1", [id]);
+    const row = rows[0];
+    return row ? { id: row.id, organizationId: row.organization_id, inboundCallId: row.inbound_call_id,
+      candidateIndex: row.candidate_index, staff: json(row.staff_context), agentId: row.agent_id, providerCallId: row.provider_call_id,
+      status: row.status, answeredAt: row.answered_at, endedAt: row.ended_at, durationSeconds: row.duration_seconds,
+      recordingObjectKey: row.recording_object_key, recordingContentType: row.recording_content_type,
+      transcript: row.transcript, outcome: json(row.outcome), streamClaimedAt: row.stream_claimed_at } : null;
+  }
+
+  async createAppointmentCallAttempt({ inboundCallId, organizationId, candidateIndex, staff, agentId }) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO appointment_call_attempts (organization_id,inbound_call_id,candidate_index,staff_context,agent_id,status)
+       VALUES ($1,$2,$3,$4::jsonb,$5,'placing') ON CONFLICT (inbound_call_id,candidate_index)
+       DO UPDATE SET updated_at=NOW() WHERE appointment_call_attempts.status IN ('placing','failed')
+       RETURNING *`, [organizationId, inboundCallId, candidateIndex, JSON.stringify(staff), agentId],
+    );
+    if (!rows[0]) return null;
+    const row = rows[0];
+    return { id: row.id, organizationId: row.organization_id, inboundCallId: row.inbound_call_id,
+      candidateIndex: row.candidate_index, staff: json(row.staff_context), agentId: row.agent_id, providerCallId: row.provider_call_id, status: row.status };
+  }
+
+  async attachAppointmentProviderCallId(id, providerCallId) {
+    await this.pool.query("UPDATE appointment_call_attempts SET provider_call_id=$2,status=CASE WHEN status='placing' THEN 'ringing' ELSE status END,updated_at=NOW() WHERE id=$1", [id, providerCallId]);
+  }
+
+  async markAppointmentCallFailed(id, reason) {
+    await this.pool.query("UPDATE appointment_call_attempts SET status='failed',outcome=outcome || $2::jsonb,updated_at=NOW() WHERE id=$1",
+      [id, JSON.stringify({ placementError: String(reason || "call placement failed").slice(0, 300) })]);
+  }
+
+  async markAppointmentCallNoAnswer(id) {
+    await this.pool.query("UPDATE appointment_call_attempts SET status='no_answer',ended_at=COALESCE(ended_at,NOW()),updated_at=NOW() WHERE id=$1 AND status IN ('ringing','in_progress')", [id]);
+  }
+
+  async claimAppointmentCallStream(id) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE appointment_call_attempts SET stream_claimed_at=NOW(),status='in_progress',answered_at=COALESCE(answered_at,NOW()),updated_at=NOW()
+       WHERE id=$1 AND stream_claimed_at IS NULL AND status IN ('placing','ringing','in_progress')`, [id]);
+    return rowCount === 1;
+  }
+
+  async saveAppointmentCallRecording(id, objectKey, contentType = "audio/wav") {
+    await this.pool.query("UPDATE appointment_call_attempts SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1", [id, objectKey, contentType]);
+  }
+
+  async saveAppointmentCallTranscript(id, transcript, outcome = {}) {
+    const status = outcome?.outcome === "available_confirmed" ? "confirmed"
+      : outcome?.outcome === "unavailable" ? "unavailable" : "completed";
+    await this.pool.query("UPDATE appointment_call_attempts SET transcript=$2,outcome=$3::jsonb,status=$4,updated_at=NOW() WHERE id=$1",
+      [id, transcript, JSON.stringify(outcome || {}), status]);
+  }
+
+  async getAppointmentCallContext(id) {
+    const { rows } = await this.pool.query(
+      `SELECT a.*, i.organization_id AS enquiry_org, i.patient_context, i.patient_id, i.from_number AS caller_number,
+              i.language AS enquiry_language, i.enquiry_analysis, i.agent_id AS patient_agent_id, i.staff_suggestions,
+              i.retention_expires_at
+       FROM appointment_call_attempts a JOIN inbound_calls i ON i.id=a.inbound_call_id
+       WHERE a.id=$1 AND i.retention_expires_at>NOW()`, [id],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return { id: row.id, organizationId: row.organization_id, inboundCallId: row.inbound_call_id, agentId: row.agent_id,
+      candidateIndex: row.candidate_index, staff: json(row.staff_context), providerCallId: row.provider_call_id,
+      status: row.status, recordingObjectKey: row.recording_object_key, recordingContentType: row.recording_content_type,
+      patient: json(row.patient_context) || {}, patientId: row.patient_id, callerNumber: row.caller_number,
+      language: row.enquiry_language || "en", analysis: json(row.enquiry_analysis) || {},
+      patientAgentId: row.patient_agent_id, staffSuggestions: json(row.staff_suggestions) || [] };
+  }
+
+  async getActiveAppointmentCallAttemptByProvider(provider, providerCallId) {
+    const { rows } = await this.pool.query(
+      "SELECT id FROM appointment_call_attempts WHERE provider=$1 AND provider_call_id=$2", [provider, providerCallId]);
+    return rows[0] ? this.getAppointmentCallContext(rows[0].id) : null;
+  }
+
+  async saveAppointmentAttendanceSchedule({ inboundCallId, organizationId, staff, attendanceAgent, fromNumber }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        "SELECT * FROM inbound_calls WHERE id=$1 AND organization_id=$2 AND retention_expires_at>NOW() FOR UPDATE",
+        [inboundCallId, organizationId]);
+      const enquiry = rows[0];
+      if (!enquiry) throw Object.assign(new Error("Enquiry not found"), { status: 404 });
+      if (enquiry.booking_schedule_session_id) {
+        const existing = await client.query("SELECT * FROM attendance_sessions WHERE id=$1", [enquiry.booking_schedule_session_id]);
+        await client.query("COMMIT");
+        return this.mapSession(existing.rows[0]);
+      }
+      const analysis = json(enquiry.enquiry_analysis) || {};
+      const start = new Date(analysis.requestedStartAt);
+      const suppliedEnd = new Date(analysis.requestedEndAt);
+      const end = Number.isFinite(suppliedEnd.getTime())
+        ? suppliedEnd
+        : Number(analysis.durationMinutes) > 0 && Number.isFinite(start.getTime())
+          ? new Date(start.getTime() + Number(analysis.durationMinutes) * 60_000)
+          : suppliedEnd;
+      if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) {
+        throw Object.assign(new Error("Enquiry does not have a valid requested care window"), { status: 409 });
+      }
+      const patient = json(enquiry.patient_context) || {};
+      const employee = { id: staff.id, name: staff.name, companyName: staff.companyName?.trim() || "ATHULYA", phoneNumber: staff.phoneNumber, address: staff.address || "" };
+      await this.assertEmployeeScheduleAvailable({ organizationId, employee, scheduledStartAt: start, scheduledEndAt: end }, client);
+      await this.createStaffDirectoryRecord(organizationId, { ...employee, language: staff.language || enquiry.language }, client);
+      const session = await this.createAttendanceSession({
+        organizationId, assignmentId: `enquiry-${inboundCallId}`, scheduleVersion: "1", agentId: attendanceAgent.id,
+        language: staff.language || enquiry.language || attendanceAgent.language || "en", fromNumber,
+        employee, patient: { ...patient, id: patient.id || enquiry.patient_id, name: patient.name || "Caller", phoneNumber: enquiry.caller_number },
+        scheduledStartAt: start, scheduledEndAt: end,
+        metadata: { source: "patient_enquiry_appointment_booking", inboundCallId, activityId: analysis.activityId,
+          activityName: analysis.activityName, needsSummary: analysis.needsSummary },
+      }, client);
+      await client.query(
+        `UPDATE inbound_calls SET booking_status='scheduled',booking_staff=$3::jsonb,booking_schedule_session_id=$4,
+         booking_updated_at=NOW(),enquiry_status='resolved',resolved_staff=$3::jsonb,resolved_at=NOW(),updated_at=NOW()
+         WHERE id=$1 AND organization_id=$2`, [inboundCallId, organizationId, JSON.stringify(employee), session.id]);
+      await client.query("COMMIT");
+      return session;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async setEnquiryBookingStatus(id, organizationId, status, { staff = null, sessionId = null } = {}) {
+    const allowed = new Set(["not_started", "calling", "scheduled", "not_answered", "no_staff_available", "needs_review"]);
+    if (!allowed.has(status)) throw new Error("Invalid appointment booking status");
+    const { rows } = await this.pool.query(
+      `UPDATE inbound_calls SET booking_status=$3,booking_staff=COALESCE($4::jsonb,booking_staff),
+       booking_schedule_session_id=COALESCE($5::uuid,booking_schedule_session_id),booking_updated_at=NOW(),updated_at=NOW()
+       WHERE id=$1 AND organization_id=$2 RETURNING *`,
+      [id, organizationId, status, staff ? JSON.stringify(staff) : null, sessionId],
+    );
+    return this.mapInboundCall(rows[0]);
+  }
+
+  async getActiveStaffDirectoryRecord(organizationId, staffId) {
+    const { rows } = await this.pool.query(
+      `SELECT external_id,name,company_name,phone_number,address,language
+       FROM staff_directory WHERE organization_id=$1 AND external_id=$2 AND active=TRUE`,
+      [organizationId, staffId],
+    );
+    const row = rows[0];
+    return row ? { id: row.external_id, name: row.name, companyName: row.company_name?.trim() || "ATHULYA",
+      phoneNumber: row.phone_number, address: row.address || "", language: row.language || "en" } : null;
+  }
+
+  async listInboundCalls(organizationId, limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const { rows } = await this.pool.query(
+      "SELECT * FROM inbound_calls WHERE organization_id=$1 AND retention_expires_at>NOW() ORDER BY started_at DESC LIMIT $2",
+      [organizationId, safeLimit],
+    );
+    return rows.map((row) => this.mapInboundCall(row));
+  }
+
+  async claimInboundCallStream(id) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE inbound_calls SET stream_claimed_at=NOW(),answered_at=COALESCE(answered_at,NOW()),status='in_progress'
+       WHERE id=$1 AND stream_claimed_at IS NULL AND status IN ('ringing','in_progress')`, [id],
+    );
+    return rowCount === 1;
+  }
+
+  async finishInboundCall(id, { status = "completed", endedAt = new Date(), durationSeconds = null } = {}) {
+    await this.pool.query(
+      `UPDATE inbound_calls SET status=$2,ended_at=COALESCE(ended_at,$3),duration_seconds=COALESCE($4,duration_seconds),updated_at=NOW() WHERE id=$1`,
+      [id, status, endedAt, durationSeconds],
+    );
+  }
+
+  async saveInboundCallRecording(id, objectKey, contentType) {
+    await this.pool.query(
+      "UPDATE inbound_calls SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1",
+      [id, objectKey, contentType || "audio/wav"],
+    );
+  }
+
+  async saveInboundCallTranscript(id, transcript, organizationId) {
+    await this.pool.query(
+      "UPDATE inbound_calls SET transcript=$2,transcript_language=$3,transcribed_at=NOW(),enquiry_analysis_status='processing',enquiry_status='processing',updated_at=NOW() WHERE id=$1 AND organization_id=$4",
+      [id, transcript.text, transcript.language || null, organizationId],
+    );
+  }
+
+  async saveInboundEnquiryAnalysis(id, { organizationId, status = "processing", analysis = {}, staffSuggestions = [] } = {}) {
+    const allowedStatuses = new Set(["processing", "need_review", "suggestion", "shortage", "resolved"]);
+    if (!allowedStatuses.has(status)) throw new Error("Invalid enquiry status");
+    await this.pool.query(
+      `UPDATE inbound_calls SET enquiry_status=$2,enquiry_analysis_status=$3,enquiry_analysis=$4::jsonb,
+       staff_suggestions=$5::jsonb,updated_at=NOW() WHERE id=$1 AND organization_id=$6 AND enquiry_status<>'resolved'`,
+      [id, status, status === "processing" ? "processing" : status === "need_review" ? "needs_details" : "complete",
+        JSON.stringify(analysis || {}), JSON.stringify(staffSuggestions || []), organizationId],
+    );
+  }
+
+  async resolveInboundEnquiry(id, organizationId, staffId) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const enquiryResult = await client.query(
+        "SELECT enquiry_status FROM inbound_calls WHERE id=$1 AND organization_id=$2 AND retention_expires_at>NOW() FOR UPDATE",
+        [id, organizationId],
+      );
+      if (!enquiryResult.rowCount) {
+        await client.query("COMMIT");
+        return null;
+      }
+      if (!["need_review", "suggestion", "shortage"].includes(enquiryResult.rows[0].enquiry_status)) {
+        const error = new Error("Only enquiries needing review or staff assignment can be resolved");
+        error.status = 409;
+        throw error;
+      }
+      const staffResult = await client.query(
+        `SELECT external_id,name,company_name,phone_number,address,language,branch FROM staff_directory
+         WHERE organization_id=$1 AND external_id=$2 AND active=TRUE FOR SHARE`, [organizationId, staffId],
+      );
+      if (!staffResult.rowCount) {
+        const error = new Error("Selected staff member is not active in this organization");
+        error.status = 400;
+        throw error;
+      }
+      const staff = staffResult.rows[0];
+      const result = await client.query(
+        `UPDATE inbound_calls SET enquiry_status='resolved',resolved_staff=$3::jsonb,resolved_at=NOW(),updated_at=NOW()
+         WHERE id=$1 AND organization_id=$2
+         RETURNING *`,
+        [id, organizationId, JSON.stringify({ id: staff.external_id, name: staff.name, companyName: staff.company_name?.trim() || "ATHULYA", phoneNumber: staff.phone_number,
+          address: staff.address || "", language: staff.language || "en" })],
+      );
+      await client.query("COMMIT");
+      return this.mapInboundCall(result.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listExpiredInboundCalls(limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const { rows } = await this.pool.query(
+      `SELECT i.id,i.recording_object_key,COALESCE(array_agg(a.recording_object_key) FILTER (WHERE a.recording_object_key IS NOT NULL),'{}') AS appointment_recording_keys
+       FROM inbound_calls i LEFT JOIN appointment_call_attempts a ON a.inbound_call_id=i.id
+       WHERE i.retention_expires_at<=NOW() GROUP BY i.id ORDER BY MIN(i.retention_expires_at) LIMIT $1`,
+      [safeLimit],
+    );
+    return rows.map((row) => ({ id: row.id, recordingObjectKey: row.recording_object_key, appointmentRecordingKeys: row.appointment_recording_keys || [] }));
+  }
+
+  async deleteExpiredInboundCall(id) {
+    const { rowCount } = await this.pool.query("DELETE FROM inbound_calls WHERE id=$1 AND retention_expires_at<=NOW()", [id]);
+    return rowCount === 1;
+  }
+
+  async createAttendanceSession(assignment, client = this.pool) {
+    const r = await client.query(
+      `INSERT INTO attendance_sessions
+       (organization_id,external_assignment_id,schedule_version,agent_id,language,employee,patient,assignment_metadata,from_number,scheduled_start_at,scheduled_end_at,active_context)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12::jsonb)
+       ON CONFLICT (organization_id,external_assignment_id,schedule_version) DO NOTHING
+       RETURNING *`,
+      [assignment.organizationId, assignment.assignmentId, String(assignment.scheduleVersion || "1"), assignment.agentId,
+        assignment.language, JSON.stringify(assignment.employee), JSON.stringify(assignment.patient), JSON.stringify(assignment.metadata || {}),
+        assignment.fromNumber, assignment.scheduledStartAt, assignment.scheduledEndAt,
+        JSON.stringify({ assignmentId: assignment.assignmentId, language: assignment.language, stage: "check_in", factsConfirmed: {}, priorCallStatus: [] })],
+    );
+    let row = r.rows[0];
+    if (!row) {
+      const existing = await client.query(
+        `SELECT * FROM attendance_sessions
+         WHERE organization_id=$1 AND external_assignment_id=$2 AND schedule_version=$3
+         FOR UPDATE`,
+        [assignment.organizationId, assignment.assignmentId, String(assignment.scheduleVersion || "1")],
+      );
+      row = existing.rows[0];
+      if (!row) throw new Error("Assignment session conflicted but could not be loaded");
+      const same = row.agent_id === assignment.agentId
+        && row.language === assignment.language
+        && row.from_number === assignment.fromNumber
+        && new Date(row.scheduled_start_at).getTime() === new Date(assignment.scheduledStartAt).getTime()
+        && new Date(row.scheduled_end_at).getTime() === new Date(assignment.scheduledEndAt).getTime()
+        && stableJson(json(row.employee)) === stableJson(assignment.employee)
+        && stableJson(json(row.patient)) === stableJson(assignment.patient)
+        && stableJson(json(row.assignment_metadata)) === stableJson(assignment.metadata || {});
+      if (!same) {
+        const error = new Error("This assignment already exists with different details. Increment scheduleVersion to create a revised session.");
+        error.status = 409;
+        throw error;
+      }
+    }
+    return this.mapSession(row);
+  }
+
+  mapSession(row) {
+    if (!row) return null;
+    return {
+      id: row.id, organizationId: row.organization_id, assignmentId: row.external_assignment_id,
+      scheduleVersion: row.schedule_version, agentId: row.agent_id, language: row.language,
+      employee: json(row.employee), patient: json(row.patient), metadata: json(row.assignment_metadata),
+      fromNumber: row.from_number, scheduledStartAt: row.scheduled_start_at, scheduledEndAt: row.scheduled_end_at,
+      checkInStatus: row.check_in_status, checkOutStatus: row.check_out_status, sessionStatus: row.session_status,
+      activeContext: json(row.active_context), backendDeliveryStatus: row.backend_delivery_status,
+    };
+  }
+  async getAttendanceSession(id) {
+    const r = await this.pool.query("SELECT * FROM attendance_sessions WHERE id=$1", [id]);
+    return this.mapSession(r.rows[0]);
+  }
+  maskPhone(value) {
+    const phone = String(value || "");
+    if (!phone) return null;
+    const last = phone.replace(/\D/g, "").slice(-4);
+    return last ? `•••• ${last}` : "••••";
+  }
+  mapAttendanceSummary(row) {
+    const session = this.mapSession(row);
+    const context = session.activeContext || {};
+    const employee = session.employee || {};
+    const patient = session.patient || {};
+    return {
+      sessionId: session.id,
+      assignmentId: session.assignmentId,
+      scheduleVersion: session.scheduleVersion,
+      language: session.language,
+      employee: { id: employee.id || null, name: employee.name || "Unknown staff", companyName: employee.companyName || "ATHULYA", phoneMasked: this.maskPhone(employee.phoneNumber) },
+      patient: { id: patient.id || null, name: patient.name || "Unknown patient" },
+      scheduledStartAt: session.scheduledStartAt,
+      scheduledEndAt: session.scheduledEndAt,
+      checkIn: { status: session.checkInStatus, reportedAt: context.checkIn?.reportedAt || null, nextCallAt: context.checkIn?.nextCallAt || null },
+      checkOut: { status: session.checkOutStatus, reportedAt: context.checkOut?.reportedAt || null, nextCallAt: context.checkOut?.nextCallAt || null },
+      stageReasons: { checkIn: context.checkIn?.reason || null, checkOut: context.checkOut?.reason || null },
+      sessionStatus: session.sessionStatus,
+      backendDeliveryStatus: session.backendDeliveryStatus,
+      callAttemptCount: Number(row.call_attempt_count || 0),
+      metadata: session.metadata || {},
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+  async listAttendanceSessions(organizationId, { search = "", status = "all", limit = 100, offset = 0 } = {}) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const r = await this.pool.query(
+      `SELECT s.*, COUNT(a.id)::int AS call_attempt_count
+       FROM attendance_sessions s
+       LEFT JOIN attendance_call_attempts a ON a.session_id=s.id
+       WHERE s.organization_id=$1
+         AND ($2='' OR s.id::text ILIKE '%'||$2||'%' OR s.external_assignment_id ILIKE '%'||$2||'%'
+              OR COALESCE(s.employee->>'name','') ILIKE '%'||$2||'%' OR COALESCE(s.employee->>'id','') ILIKE '%'||$2||'%'
+              OR COALESCE(s.patient->>'name','') ILIKE '%'||$2||'%' OR COALESCE(s.patient->>'id','') ILIKE '%'||$2||'%')
+         AND ($3='all' OR s.check_in_status=$3 OR s.check_out_status=$3 OR s.session_status=$3)
+       GROUP BY s.id ORDER BY s.scheduled_start_at DESC LIMIT $4 OFFSET $5`,
       [organizationId, String(search || "").trim(), status, safeLimit, safeOffset],
     );
     return r.rows.map((row) => this.mapAttendanceSummary(row));
