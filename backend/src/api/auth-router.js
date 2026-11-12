@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 
 const COOKIE_NAME = "attendance_session";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -29,6 +30,17 @@ function checkPassword(password, salt, expectedHex) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
+function userPayload(user) {
+  return {
+    id: user.id,
+    email: user.email || null,
+    phone: user.phone || null,
+    displayName: user.displayName,
+    role: user.role || "admin",
+    mustChangePassword: user.mustChangePassword === true,
+  };
+}
+
 function createAuthRouter({ express, repository }) {
   const router = express.Router();
   router.use(express.json({ limit: "16kb" }));
@@ -41,27 +53,29 @@ function createAuthRouter({ express, repository }) {
       res.set("Retry-After", String(Math.ceil((prior.until - now) / 1000)));
       return res.status(429).json({ error: "Too many sign-in attempts. Try again later." });
     }
-    const email = String(req.body?.email || "").trim().toLowerCase();
+    const identifier = String(req.body?.identifier || req.body?.email || "").trim();
     const password = String(req.body?.password || "");
-    if (!email || !password || email.length > 254 || password.length > 1024) {
-      return res.status(400).json({ error: "Enter your email and password." });
+    const isEmail = /^\S+@\S+\.\S+$/.test(identifier);
+    const normalizedPhone = normalizeIndianMobile(identifier);
+    if (!identifier || !password || identifier.length > 254 || password.length > 1024 || (!isEmail && !normalizedPhone)) {
+      return res.status(400).json({ error: "Enter a valid phone number or email and your password." });
     }
     try {
-      const user = await repository.findWebUserByEmail(email);
+      const user = await repository.findWebUserByLogin(isEmail ? identifier.toLowerCase() : normalizedPhone);
       const passwordValid = user
         ? checkPassword(password, user.passwordSalt, user.passwordHash)
         : checkPassword(password, "attendance-auth-dummy-salt", "0".repeat(128));
       if (!user || !user.active || !passwordValid) {
         const next = prior && prior.until > now ? { count: prior.count + 1, until: prior.until } : { count: 1, until: now + LOGIN_WINDOW_MS };
         loginFailures.set(ip, next);
-        return res.status(401).json({ error: "Email or password is incorrect." });
+        return res.status(401).json({ error: "Phone/email or password is incorrect." });
       }
       loginFailures.delete(ip);
       const token = crypto.randomBytes(32).toString("base64url");
       const expiresAt = new Date(now + SESSION_TTL_MS);
       await repository.createWebSession(user.id, hash(token), expiresAt);
       res.set("Set-Cookie", sessionCookie(token, SESSION_TTL_MS / 1000));
-      return res.json({ user: { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin" } });
+      return res.json({ user: userPayload(user) });
     } catch (error) {
       console.error("[attendance-auth] login failed", error.message);
       return res.status(500).json({ error: "Sign-in is temporarily unavailable." });
@@ -77,10 +91,40 @@ function createAuthRouter({ express, repository }) {
         res.set("Set-Cookie", sessionCookie("", 0));
         return res.status(401).json({ error: "Session expired. Sign in again." });
       }
-      return res.json({ user: { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin" } });
+      return res.json({ user: userPayload(user) });
     } catch (error) {
       console.error("[attendance-auth] session lookup failed", error.message);
       return res.status(500).json({ error: "Session validation is temporarily unavailable." });
+    }
+  });
+
+  router.post("/change-password", async (req, res) => {
+    const token = cookieToken(req);
+    if (!token) return res.status(401).json({ error: "Sign in before changing your password." });
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+    if (newPassword.length < 12 || newPassword.length > 1024) {
+      return res.status(400).json({ error: "Your new password must contain at least 12 characters." });
+    }
+    if (currentPassword === newPassword) return res.status(400).json({ error: "Choose a new password different from your current one." });
+    try {
+      const tokenHash = hash(token);
+      const sessionUser = await repository.resolveWebSession(tokenHash);
+      if (!sessionUser) return res.status(401).json({ error: "Session expired. Sign in again." });
+      const user = await repository.getWebUserById(sessionUser.id);
+      if (!user || !checkPassword(currentPassword, user.passwordSalt, user.passwordHash)) {
+        return res.status(401).json({ error: "Current password is incorrect." });
+      }
+      const salt = crypto.randomBytes(16).toString("hex");
+      const passwordHash = crypto.scryptSync(newPassword, salt, 64).toString("hex");
+      if (!await repository.updateWebUserPassword(user.id, salt, passwordHash, tokenHash)) {
+        return res.status(401).json({ error: "Account is unavailable. Sign in again." });
+      }
+      const updated = await repository.resolveWebSession(tokenHash);
+      return res.json({ user: userPayload(updated) });
+    } catch (error) {
+      console.error("[attendance-auth] password change failed", error.message);
+      return res.status(500).json({ error: "Password change is temporarily unavailable." });
     }
   });
 

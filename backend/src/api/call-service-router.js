@@ -41,8 +41,9 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       if (sessionToken) {
         const user = await repository.resolveWebSession(crypto.createHash("sha256").update(sessionToken).digest("hex"));
         if (user) {
+          if (user.mustChangePassword) return res.status(403).json({ error: "Change your temporary password before using the application." });
           req.orgId = user.organizationId;
-          req.webUser = { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin" };
+          req.webUser = { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin", mustChangePassword: false };
           return next();
         }
       }

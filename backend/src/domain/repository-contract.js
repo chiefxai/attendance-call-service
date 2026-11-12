@@ -4,6 +4,10 @@
 // Every lookup and write must include organizationId except provider webhook
 // lookup, which must resolve providerCallId to exactly one tenant-owned call.
 const repositoryMethods = Object.freeze([
+  "findWebUserByLogin(identifier)",
+  "getWebUserById(userId)",
+  "updateWebUserPassword(userId, passwordSalt, passwordHash, currentTokenHash)",
+  "provisionCareManagerAccounts(input)",
   "listAgents(organizationId)",
   "getAgent(organizationId, agentId)",
   "createAgent(organizationId, agent)",

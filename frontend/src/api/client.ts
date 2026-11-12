@@ -18,9 +18,11 @@ api.interceptors.response.use(
 
 export interface WebUser {
   id: string;
-  email: string;
+  email: string | null;
+  phone?: string | null;
   displayName: string;
   role: "admin" | "care_manager";
+  mustChangePassword?: boolean;
 }
 
 export interface CareManager {
@@ -161,8 +163,13 @@ const authApi = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-export async function signIn(email: string, password: string) {
-  const response = await authApi.post<{ user: WebUser }>("/login", { email, password });
+export async function signIn(identifier: string, password: string) {
+  const response = await authApi.post<{ user: WebUser }>("/login", { identifier, password });
+  return response.data;
+}
+
+export async function changePassword(currentPassword: string, newPassword: string) {
+  const response = await authApi.post<{ user: WebUser }>("/change-password", { currentPassword, newPassword });
   return response.data;
 }
 

@@ -256,7 +256,7 @@ Set `DATA_RETENTION_DAYS=90`, `RETENTION_SCAN_INTERVAL_MS=3600000`, and `INBOUND
 
 ## Athulya workforce integration
 
-The web application supports `admin` and `care_manager` login roles. Existing provisioned accounts remain Admin accounts after migration. Care Managers can view organization-wide staff and patient records and operate assignments; backend authorization prevents them from managing users, application settings, calling agents, API keys, or Athulya credentials.
+The web application supports `admin` and `care_manager` login roles. Existing provisioned accounts remain Admin accounts after migration. Care Managers sign in with their Indian mobile number and can view organization-wide staff and patient records and operate assignments; backend authorization prevents them from managing users, application settings, calling agents, API keys, or Athulya credentials. Bulk-provisioned Care Manager accounts receive a temporary password and must change it before using the service. Admin accounts are created from the VM console with `scripts/create-web-user.js`.
 
 The documented schedule source is `GET https://homecare.athulyaliving.net/api/caremanager/clients`, authenticated with the `x-api-key` header. Configure it under **Settings → Athulya integration**. The API key is AES-256-GCM encrypted in PostgreSQL and is never returned by the configuration API. Set `ATHULYA_CREDENTIALS_ENCRYPTION_KEY` to a stable 32-byte hex value before saving the key; losing or rotating this value makes the stored credential unreadable. Generate a key with `openssl rand -hex 32` and keep it in the VM `.env`.
 
@@ -269,6 +269,8 @@ Admin-only endpoints:
 - `GET /api/call-service/integrations/athulya/attendance-submissions` — view local attendance export state.
 - `GET /api/call-service/integrations/athulya/schedules` — view imported schedules.
 - `GET/POST /api/call-service/care-managers`, `PUT/PATCH /api/call-service/care-managers/:id`, and `POST /api/call-service/care-managers/:id/reset-password` — manage Care Manager accounts. Password reset revokes their active sessions.
+- `POST /api/auth/login` — accepts an Admin email or Care Manager phone number and password.
+- `POST /api/auth/change-password` — verifies the current password, saves a new password (minimum 12 characters), and revokes other active sessions.
 
 Schedule sync is idempotent by organization and Athulya schedule identifiers. It preserves source date values as date-only fields, stores raw response JSON, and updates patient, caregiver, Care Manager, schedule, and caregiver-to-schedule records without deleting records absent from a filtered response. Imported profiles do not overwrite saved patient/staff addresses or language preferences.
 

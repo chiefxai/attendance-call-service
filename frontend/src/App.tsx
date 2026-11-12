@@ -16,6 +16,7 @@ import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import SupervisorAccountRoundedIcon from "@mui/icons-material/SupervisorAccountRounded";
 import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { CareActivitiesPage } from "./pages/CareActivitiesPage";
@@ -31,6 +32,7 @@ import { PageHeaderTargetContext } from "./components/OperationsUI";
 import { LoginPage } from "./pages/LoginPage";
 import { CareManagersPage } from "./pages/CareManagersPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { fetchCurrentUser, signOut, type WebUser } from "./api/client";
 
 const drawerWidth = 252;
@@ -69,6 +71,7 @@ function App() {
     queryClient.clear();
   };
   const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const drawer = (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%", px: 2, py: 2.5, overflowY: "auto" }}>
       <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 1, mb: 4 }}>
@@ -88,8 +91,9 @@ function App() {
       <Box sx={{ flexGrow: 1 }} />
       <Divider sx={{ my: 2 }} />
       <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 1 }}>
-        <Avatar sx={{ width: 34, height: 34, bgcolor: "#dcebe5", color: "primary.dark", fontSize: 13, fontWeight: 700 }}>{(user?.displayName || user?.email || "U").slice(0, 2).toUpperCase()}</Avatar>
-        <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="body2" fontWeight={650} noWrap>{user?.displayName || "Operations user"}</Typography><Typography variant="caption" color="text.secondary" noWrap>{user?.email}</Typography></Box>
+        <Avatar sx={{ width: 34, height: 34, bgcolor: "#dcebe5", color: "primary.dark", fontSize: 13, fontWeight: 700 }}>{(user?.displayName || user?.email || user?.phone || "U").slice(0, 2).toUpperCase()}</Avatar>
+        <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="body2" fontWeight={650} noWrap>{user?.displayName || "Operations user"}</Typography><Typography variant="caption" color="text.secondary" noWrap>{user?.email || user?.phone}</Typography></Box>
+        <IconButton aria-label="Change password" title="Change password" onClick={() => setChangePasswordOpen(true)} size="small"><LockResetRoundedIcon fontSize="small" /></IconButton>
         <IconButton aria-label="Sign out" title="Sign out" onClick={() => void logout()} size="small"><LogoutRoundedIcon fontSize="small" /></IconButton>
       </Stack>
     </Box>
@@ -97,6 +101,7 @@ function App() {
 
   if (!authChecked) return <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center" }}><Typography color="text.secondary">Checking sign-in…</Typography></Box>;
   if (!user) return <LoginPage onSignedIn={setUser} />;
+  if (user.mustChangePassword || changePasswordOpen) return <ChangePasswordPage user={user} required={user.mustChangePassword === true} onChanged={(updatedUser) => { setUser(updatedUser); setChangePasswordOpen(false); }} onCancel={user.mustChangePassword ? undefined : () => setChangePasswordOpen(false)} onSignOut={() => void logout()} />;
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", width: "100%", overflowX: "hidden" }}>

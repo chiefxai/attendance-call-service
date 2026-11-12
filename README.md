@@ -275,7 +275,7 @@ Compose runs `backend-migrate` before starting the API and worker.
 
 ## Dashboard sign-in and account provisioning
 
-The dashboard now requires an email and password. Accounts are created on the VM by an administrator; there is no account-creation page. Sign-in uses a 12-hour HttpOnly, SameSite session cookie, while platform integrations continue using service API keys.
+The dashboard accepts a phone number for Care Manager accounts and email for Admin accounts. Accounts are created on the VM by an administrator; there is no public account-creation page. Sign-in uses a 12-hour HttpOnly, SameSite session cookie, while platform integrations continue using service API keys. Bulk-provisioned Care Managers must replace the administrator-supplied temporary password with a password of at least 12 characters before they can use the application. The temporary password is hashed with a unique salt, supplied privately at provisioning time, and never printed or stored in the repository.
 
 After deployment and database migrations, provision an account interactively:
 
@@ -288,9 +288,24 @@ printf '%s\n%s\n%s\n' "$web_email" "$web_name" "$web_password" | sudo docker com
 unset web_password
 ```
 
-Run the same command to provision additional Admin accounts. The account is scoped to `DEFAULT_ORGANIZATION_ID` and password material is stored as a salted scrypt hash. No API key or admin secret needs to be entered in the dashboard. Use the UI's **Sign out** control to revoke the current session.
+Run the same command to provision additional Admin accounts. The account is scoped to `DEFAULT_ORGANIZATION_ID` and password material is stored as a salted scrypt hash. Admin accounts are created only from the VM console. No API key or admin secret needs to be entered in the dashboard.
 
-Admins create Care Manager accounts in **Care Managers**; Care Manager access is enforced in backend routes as well as the navigation. Configure the Athulya schedule integration in **Settings → Athulya integration**. Before entering an API key, add a stable `ATHULYA_CREDENTIALS_ENCRYPTION_KEY` to the VM `.env` (generate a 32-byte hex value with `openssl rand -hex 32`). The key is encrypted at rest and masked in the UI. See [backend integration details](backend/README.md#athulya-workforce-integration).
+To provision Care Manager accounts from a JSON file on the VM, prepare records with `athulyaCareManagerId`, `name`, and `phone` fields, restrict the file to the service user, and pass the approved record count into the script. It creates and links accounts in one database transaction; if any ID or phone is already linked, the whole batch stops without partial creation:
+
+```sh
+sudo chmod 600 /tmp/care-managers.json
+read -r -s -p "Temporary Care Manager password: " cm_temp_password
+printf '\n'
+sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.vertex-credentials.yml exec -T \
+  -e CARE_MANAGER_PROVISION_EXPECTED_COUNT=16 -e CARE_MANAGER_DEFAULT_PASSWORD="$cm_temp_password" backend-api \
+  node scripts/provision-care-manager-accounts.js < /tmp/care-managers.json
+unset cm_temp_password
+sudo rm -f /tmp/care-managers.json
+```
+
+Replace `16` with the count you have approved. Phone numbers may be entered as 10 digits or with the `+91` country code. The sign-in form accepts either form. After signing in with the temporary password, each Care Manager must set a new password; backend API access stays blocked until the change is complete. Later, an Admin can reset an account from the **Care Managers** screen, which again requires the Care Manager to change the temporary password.
+
+Admins manage Care Manager account status and password resets in **Care Managers**; Care Manager access is enforced in backend routes as well as the navigation. Configure the Athulya schedule integration in **Settings → Athulya integration**. Before entering an API key, add a stable `ATHULYA_CREDENTIALS_ENCRYPTION_KEY` to the VM `.env` (generate a 32-byte hex value with `openssl rand -hex 32`). The key is encrypted at rest and masked in the UI. See [backend integration details](backend/README.md#athulya-workforce-integration).
 
 Only the schedule fetch endpoint is documented. Attendance export remains `Awaiting API Specification` and is intentionally not sent until Athulya provides the official check-in/check-out API contract.
 

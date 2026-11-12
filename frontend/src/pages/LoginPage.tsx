@@ -11,7 +11,7 @@ function errorText(error: unknown) {
 }
 
 export function LoginPage({ onSignedIn }: { onSignedIn: (user: WebUser) => void }) {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -21,7 +21,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: WebUser) => void 
     setError("");
     setBusy(true);
     try {
-      const result = await signIn(email.trim(), password);
+      const result = await signIn(identifier.trim(), password);
       setPassword("");
       onSignedIn(result.user);
     } catch (reason) {
@@ -43,7 +43,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: WebUser) => void 
             <Typography color="text.secondary" sx={{ mt: 0.75 }}>Use the account provided by your system administrator.</Typography>
           </Box>
           {error && <Alert severity="error">{error}</Alert>}
-          <TextField autoFocus fullWidth required type="email" label="Email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <TextField autoFocus fullWidth required label="Phone number or email" autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} />
           <TextField fullWidth required type="password" label="Password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
           <Button fullWidth type="submit" size="large" variant="contained" disabled={busy}>
             {busy ? <CircularProgress size={22} color="inherit" /> : "Sign in"}
