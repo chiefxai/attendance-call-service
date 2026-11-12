@@ -16,7 +16,8 @@ const emptySettings: CallingForm = {
   allowInboundCalls: true,
   allowNonPatientInboundCalls: false,
   requireHumanVerificationForStaffBooking: false,
-  retry: { maxConsecutiveNoAnswer: 5, initialMinutes: 5, multiplier: 1.2, maxMinutes: 30 },
+  unansweredCallEscalation: "platform_notification",
+  retry: { maxConsecutiveNoAnswer: 3, initialMinutes: 5, multiplier: 1.2, maxMinutes: 30 },
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 
@@ -34,7 +35,7 @@ export function SettingsPage() {
   const schedules = useQuery({ queryKey: ["athulya-schedules", syncFilters.fromDate, syncFilters.toDate], queryFn: () => fetchAthulyaSchedules({ fromDate: syncFilters.fromDate || undefined, toDate: syncFilters.toDate || undefined }), enabled: tab === "athulya", retry: false });
   useEffect(() => {
     if (!settings.data) return;
-    setForm({ defaultFromNumber: settings.data.defaultFromNumber, allowInboundCalls: settings.data.allowInboundCalls, allowNonPatientInboundCalls: settings.data.allowNonPatientInboundCalls, requireHumanVerificationForStaffBooking: settings.data.requireHumanVerificationForStaffBooking, retry: settings.data.retry });
+    setForm({ defaultFromNumber: settings.data.defaultFromNumber, allowInboundCalls: settings.data.allowInboundCalls, allowNonPatientInboundCalls: settings.data.allowNonPatientInboundCalls, requireHumanVerificationForStaffBooking: settings.data.requireHumanVerificationForStaffBooking, unansweredCallEscalation: settings.data.unansweredCallEscalation || "platform_notification", retry: settings.data.retry });
   }, [settings.data]);
   useEffect(() => {
     if (integration.data) setIntegrationForm({ integrationName: integration.data.integrationName, apiBaseUrl: integration.data.apiBaseUrl, enabled: integration.data.enabled, apiKey: "" });
@@ -104,6 +105,14 @@ export function SettingsPage() {
             />
           </Box>
           <Box><Typography variant="h6">No-answer retry policy</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>The retry delay grows exponentially and stops at the configured attempt limit. {settings.data.source.retry === "settings" ? "Workspace override is active." : "Values currently come from .env."}</Typography></Box>
+          <FormControl fullWidth size="small">
+            <InputLabel id="unanswered-escalation-label">After unanswered calls</InputLabel>
+            <Select labelId="unanswered-escalation-label" label="After unanswered calls" value={form.unansweredCallEscalation} onChange={(event) => setForm((current) => ({ ...current, unansweredCallEscalation: event.target.value as CallingForm["unansweredCallEscalation"] }))}>
+              <MenuItem value="platform_notification">Notify care manager in this app</MenuItem>
+              <MenuItem value="call_care_manager">Call the care manager</MenuItem>
+            </Select>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: .75 }}>The assigned care manager is matched from the patient’s Athulya schedule. The default is an in-app notification.</Typography>
+          </FormControl>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="number" label="Maximum consecutive unanswered calls" value={form.retry.maxConsecutiveNoAnswer} onChange={(event) => updateRetry("maxConsecutiveNoAnswer", event.target.value)} inputProps={{ min: 1, max: 20, step: 1 }} helperText="Allowed range: 1–20 calls" /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="number" label="First retry delay (minutes)" value={form.retry.initialMinutes} onChange={(event) => updateRetry("initialMinutes", event.target.value)} inputProps={{ min: 1, max: 1440, step: 1 }} helperText="Allowed range: 1–1440 minutes" /></Grid>

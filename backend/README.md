@@ -101,9 +101,9 @@ status events release slots. `CALL_SLOT_TTL_MINUTES` is a safety expiry for
 lost terminal callbacks. Queue worker concurrency controls background job
 processing separately from the number of live provider calls.
 
-`CALL_MAX_CONSECUTIVE_NO_ANSWER` defaults to 5. After five consecutive
+`CALL_MAX_CONSECUTIVE_NO_ANSWER` defaults to 3. After three consecutive
 unanswered attempts for a stage, the service stops dialing that stage and
-records its status as `not_answered`. An answered call resets that streak if
+records its status as `not_answered`. The assigned care manager receives an in-app notification by default; Settings can switch escalation to an automated Vobiz call. An answered call resets that streak if
 the employee requests a later callback. The host app can read
 `GET /assignments/:id/status`; its check-in and check-out results include a
 `flag: "not_answered"` when that limit is reached.
@@ -275,3 +275,8 @@ Admin-only endpoints:
 Schedule sync is idempotent by organization and Athulya schedule identifiers. It preserves source date values as date-only fields, stores raw response JSON, and updates patient, caregiver, Care Manager, schedule, and caregiver-to-schedule records without deleting records absent from a filtered response. Imported profiles do not overwrite saved patient/staff addresses or language preferences.
 
 Athulya has supplied only the schedule-fetching contract so far. Check-in and check-out events are recorded locally as `awaiting_api_specification` when an attendance session can be matched to an imported schedule and caregiver. The service does not send attendance data to Athulya, retry submissions, or claim successful delivery until the official attendance endpoints, payload, timestamp rules, and duplicate behavior are documented.
+
+
+### Unanswered call escalation
+
+After three consecutive unanswered attempts by default, the system marks the attendance stage or appointment booking as `not_answered` and alerts the care manager assigned to that patient in the Athulya schedule. Admins can change the attempt limit and choose **Notify care manager in this app** (default) or **Call the care manager** in Settings. App notifications are visible to that Care Manager on the operations dashboard. The optional phone escalation uses the configured Vobiz caller ID and reads a short alert; its signed answer endpoint is `POST /api/call-service/care-manager-alert/answer`.

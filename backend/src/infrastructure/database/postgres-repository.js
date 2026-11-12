@@ -428,6 +428,49 @@ class PostgresRepository {
     return json(rows[0].settings) || {};
   }
 
+  async notifyCareManagerForPatient({ organizationId, patientId, patientUhid, title, message, referenceType, referenceId, type = "unanswered_call" }) {
+    if (!organizationId || (!patientId && !patientUhid) || !referenceType || !referenceId) return [];
+    const { rows } = await this.pool.query(
+      `WITH managers AS (
+        SELECT cm.id AS care_manager_id,cm.app_user_id
+        FROM athulya_schedules s
+        JOIN athulya_care_managers cm ON cm.organization_id=s.organization_id
+          AND cm.athulya_care_manager_id=s.care_manager_external_id
+        WHERE s.organization_id=$1 AND (s.patient_external_id=$2 OR ($3<>'' AND s.patient_uhid=$3))
+          AND cm.active=TRUE AND cm.app_user_id IS NOT NULL
+        ORDER BY s.schedule_date DESC NULLS LAST,s.updated_at DESC LIMIT 1
+      ), inserted AS (
+        INSERT INTO care_manager_notifications
+          (organization_id,user_id,care_manager_id,notification_type,title,message,reference_type,reference_id)
+        SELECT $1,app_user_id,care_manager_id,$8,$4,$5,$6,$7 FROM managers
+        ON CONFLICT (user_id,reference_type,reference_id) DO NOTHING
+        RETURNING id,user_id,care_manager_id,created_at
+      )
+      SELECT ins.*,cm.name AS "careManagerName",cm.phone AS "careManagerPhone"
+      FROM inserted ins JOIN athulya_care_managers cm ON cm.id=ins.care_manager_id`,
+      [organizationId,String(patientId || ""),String(patientUhid || ""),String(title).slice(0,160),String(message).slice(0,2000),referenceType,referenceId,type],
+    );
+    return rows;
+  }
+
+  async listCareManagerNotifications(organizationId, userId, limit = 100) {
+    const { rows } = await this.pool.query(
+      `SELECT id,notification_type AS "type",title,message,reference_type AS "referenceType",
+        reference_id AS "referenceId",created_at AS "createdAt",read_at AS "readAt"
+       FROM care_manager_notifications WHERE organization_id=$1 AND user_id=$2 AND notification_type='unanswered_call'
+       ORDER BY created_at DESC LIMIT $3`, [organizationId,userId,Math.min(Math.max(Number(limit) || 100,1),200)],
+    );
+    return rows;
+  }
+
+  async markCareManagerNotificationRead(organizationId, userId, notificationId) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE care_manager_notifications SET read_at=COALESCE(read_at,NOW())
+       WHERE organization_id=$1 AND user_id=$2 AND id=$3`, [organizationId,userId,notificationId],
+    );
+    return rowCount > 0;
+  }
+
   async listCareActivities(organizationId, { includeInactive = false } = {}) {
     const { rows } = await this.pool.query(
       `SELECT id,name,aliases,description,duration_minutes,active,created_at,updated_at

@@ -75,6 +75,31 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
 
+  async function notifyCareManager({ organizationId, patientId, patientUhid, title, message, referenceType, referenceId, settings, callType }) {
+    const escalation = settings.unansweredCallEscalation || "platform_notification";
+    const recipients = await repository.notifyCareManagerForPatient({
+      organizationId, patientId, patientUhid, title, message, referenceType, referenceId,
+      type: escalation === "call_care_manager" ? "care_manager_call_log" : "unanswered_call",
+    });
+    if (!recipients.length || escalation !== "call_care_manager") return;
+    const from = settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER;
+    if (!from) {
+      console.error(`[attendance-worker] care-manager escalation call skipped: no caller ID reference=${referenceId}`);
+      return;
+    }
+    const answer = new URL("/api/call-service/care-manager-alert/answer", process.env.PUBLIC_BASE_URL || "https://localhost");
+    answer.searchParams.set("message", `Athulya ${callType === "appointment" ? "care" : "attendance"} alert. ${message}`);
+    for (const manager of recipients) {
+      if (!manager.careManagerPhone) continue;
+      try {
+        await vobiz.createCall({ to: manager.careManagerPhone, from, answerUrl: answer.toString() });
+        console.info(`[attendance-worker] care-manager escalation call placed reference=${referenceId}`);
+      } catch (error) {
+        console.error(`[attendance-worker] care-manager escalation call failed reference=${referenceId}: ${error.message}`);
+      }
+    }
+  }
+
   async function settleCheckoutIfCheckInFailed(sessionId) {
     let current = await repository.getAttendanceSession(sessionId);
     if (!current || !["missed", "not_answered", "review"].includes(current.checkInStatus)) return false;
@@ -171,7 +196,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 5;
       const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
       const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
-      const maxConsecutiveNoAnswer = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 5;
+      const maxConsecutiveNoAnswer = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
       const config = { initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000 };
       if (noAnswerCount >= maxConsecutiveNoAnswer) {
         await repository.setStageStatus(attempt.sessionId, attempt.stage, "not_answered", {
@@ -313,8 +338,17 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       return;
     }
     const candidates = call.staffSuggestions || [];
-    if (candidateIndex >= candidates.length) {
+    const maxAttempts = bookingSettings.callRetry?.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
+    if (candidateIndex >= candidates.length || candidateIndex >= maxAttempts) {
+      const attempts = await repository.listAppointmentCallAttempts(inboundCallId, call.organizationId);
+      const noAnswerCount = attempts.filter((item) => ["noanswer", "no_answer", "busy", "failed", "timeout"].includes(String(item.status || "").toLowerCase().replace(/[\\s-]+/g, "_"))).length;
       await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "not_answered");
+      if (noAnswerCount >= maxAttempts) await notifyCareManager({
+        organizationId: call.organizationId, patientId: call.patient?.id || call.patientId,
+        patientUhid: call.patient?.patientUhid || call.patient?.uhid, title: "Staff availability calls unanswered",
+        message: `No suggested staff member answered ${noAnswerCount} calls for ${call.patient?.name || "this patient"}. Please contact the patient to arrange care.`,
+        referenceType: "incoming_enquiry", referenceId: inboundCallId, settings: bookingSettings, callType: "appointment",
+      });
       return;
     }
     const staff = candidates[candidateIndex];
@@ -522,6 +556,20 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     await settleCheckoutIfCheckInFailed(sessionId);
     const session = await repository.getAttendanceSession(sessionId);
     if (!session) return;
+    for (const stage of ["check_in", "check_out"]) {
+      const status = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
+      if (status !== "not_answered") continue;
+      const patient = session.patient || {};
+      const label = stage === "check_in" ? "check-in" : "check-out";
+      const settings = await repository.getOrganizationCallSettings(session.organizationId);
+      const maxNoAnswer = settings.callRetry?.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
+      await notifyCareManager({
+        organizationId: session.organizationId, patientId: patient.id, patientUhid: patient.patientUhid || patient.uhid,
+        title: `Unanswered ${label} calls`,
+        message: `${session.employee?.name || "Assigned staff"} did not answer ${maxNoAnswer} ${label} calls for ${patient.name || "the assigned patient"}. Please follow up.`,
+        referenceType: "attendance_stage", referenceId: `${session.id}:${stage}`, settings, callType: "attendance",
+      });
+    }
     const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
     const bothStagesSettled = terminal.has(session.checkInStatus) && terminal.has(session.checkOutStatus);
     if (bothStagesSettled && (session.checkInStatus !== "confirmed" || session.checkOutStatus !== "confirmed")) {

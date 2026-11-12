@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, TextField, Typography } from "@mui/material";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
@@ -8,7 +8,7 @@ import HowToRegRoundedIcon from "@mui/icons-material/HowToRegRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import CrisisAlertRoundedIcon from "@mui/icons-material/CrisisAlertRounded";
 import CallRoundedIcon from "@mui/icons-material/CallRounded";
-import { fetchAgents, fetchAttendance, fetchOperationsSummary, type AttendanceRecord, type OperationsSummary } from "../api/client";
+import { fetchAgents, fetchAttendance, fetchCareManagerNotifications, fetchOperationsSummary, markCareManagerNotificationRead, type AttendanceRecord, type OperationsSummary } from "../api/client";
 import { AttendanceStatusChart, AttendanceTrendChart, LanguageOutcomeChart, RetryVolumeChart, type AttendanceChartStatus } from "../components/BusinessCharts";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 
@@ -78,6 +78,9 @@ function buildOverviewCharts(records: AttendanceRecord[]) {
 
 export function OverviewPage({ showAgents = false, userRole = "admin" }: { showAgents?: boolean; userRole?: "admin" | "care_manager" }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const notificationsQuery = useQuery({ queryKey: ["care-manager-notifications"], queryFn: fetchCareManagerNotifications, enabled: userRole === "care_manager", refetchInterval: 30_000 });
+  const markNotificationRead = useMutation({ mutationFn: markCareManagerNotificationRead, onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["care-manager-notifications"] }); } });
   const [sessionId, setSessionId] = useState("");
   const [drilldown, setDrilldown] = useState<{ title: string; records: AttendanceRecord[] } | null>(null);
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
@@ -127,6 +130,12 @@ export function OverviewPage({ showAgents = false, userRole = "admin" }: { showA
     <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Operations dashboard" description="Monitor scheduled employee check-in and check-out calls from the live attendance service."
       actions={<><Chip label={new Date().toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })} variant="outlined" /><Button component={RouterLink} to="/attendance" variant="contained" endIcon={<ArrowForwardRoundedIcon />}>Open attendance</Button></>} />
     {(summaryQuery.isError || attendanceQuery.isError) && <Alert severity="error">Could not load live operations data. Check backend availability and authenticated organization access.</Alert>}
+    {userRole === "care_manager" && (notificationsQuery.data?.length ?? 0) > 0 && <SectionCard title="Care manager alerts" subtitle="Follow up on attendance and staff availability calls that were not answered.">
+      <Stack spacing={1.2}>{notificationsQuery.data?.map((item) => <Stack key={item.id} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ borderTop: "1px solid #edf0f4", py: 1.2 }}>
+        <Box><Typography fontWeight={700}>{item.title}</Typography><Typography variant="body2" color="text.secondary">{item.message}</Typography><Typography variant="caption" color="text.secondary">{new Date(item.createdAt).toLocaleString()}</Typography></Box>
+        {!item.readAt && <Button size="small" disabled={markNotificationRead.isPending} onClick={() => markNotificationRead.mutate(item.id)}>Mark reviewed</Button>}
+      </Stack>)}</Stack>
+    </SectionCard>}
     <Grid container spacing={1.75}>
       {metrics.map((metric) => <Grid key={metric.label} size={{ xs: 12, sm: 6, md: 3 }}><MetricCard {...metric} /></Grid>)}
     </Grid>

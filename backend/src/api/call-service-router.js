@@ -32,7 +32,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     return expected.length > 0 && expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
   };
   router.use(async (req, res, next) => {
-    if (req.method === "POST" && ["/answer", "/incoming/answer", "/webhooks/call-status"].includes(req.path)) return next();
+    if (req.method === "POST" && ["/answer", "/incoming/answer", "/care-manager-alert/answer", "/webhooks/call-status"].includes(req.path)) return next();
 
     try {
       const cookieHeader = String(req.headers.cookie || "");
@@ -69,6 +69,13 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   const liveRuntime = createVobizLiveRuntime({ repository, vobiz, verifyWebhook: validateWebhook, getClientForOrg, recordings, queue });
   router.post("/answer", liveRuntime.answerHandler);
   router.post("/incoming/answer", liveRuntime.incomingAnswerHandler);
+  router.post("/care-manager-alert/answer", async (req, res) => {
+    if (!await validateWebhook(req)) return res.status(401).send("Invalid Vobiz signature");
+    const message = String(req.query.message || "").trim().slice(0, 500);
+    if (!message) return res.status(400).send("Missing alert message");
+    const xml = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+    res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Speak>${xml(message)}</Speak><Hangup/></Response>`);
+  });
   router.handleVobizUpgrade = liveRuntime.handleUpgrade;
   router.closeVobizLiveRuntime = liveRuntime.close;
 
@@ -96,7 +103,8 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
       requireHumanVerificationForStaffBooking: stored.requireHumanVerificationForStaffBooking ?? false,
       retry: {
-        maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 5),
+        maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 3),
+      unansweredCallEscalation: stored.unansweredCallEscalation ?? "platform_notification",
         initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 5),
         multiplier: storedRetry.multiplier ?? envNumber("CALL_RETRY_MULTIPLIER", 1.2),
         maxMinutes: storedRetry.maxMinutes ?? envNumber("CALL_RETRY_MAX_MINUTES", 30),
@@ -107,6 +115,24 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       },
     };
   };
+
+  router.get("/care-manager/notifications", async (req, res) => {
+    try {
+      const userId = req.webUser?.id;
+      if (!userId) return res.status(403).json({ error: "Care manager sign-in is required." });
+      res.set("Cache-Control", "private, no-store").json(await repository.listCareManagerNotifications(org(req), userId));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.post("/care-manager/notifications/:id/read", async (req, res) => {
+    try {
+      const userId = req.webUser?.id;
+      if (!userId) return res.status(403).json({ error: "Care manager sign-in is required." });
+      const updated = await repository.markCareManagerNotificationRead(org(req), userId, req.params.id);
+      if (!updated) return res.status(404).json({ error: "Notification not found." });
+      res.json({ id: req.params.id, read: true });
+    } catch (error) { fail(res, error); }
+  });
 
   router.post("/api-keys", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -610,6 +636,7 @@ router.get("/activities", async (req, res) => {
       if (body.requireHumanVerificationForStaffBooking !== undefined && typeof body.requireHumanVerificationForStaffBooking !== "boolean") {
         return res.status(400).json({ error: "requireHumanVerificationForStaffBooking must be a boolean" });
       }
+      if (body.unansweredCallEscalation !== undefined && !["platform_notification", "call_care_manager"].includes(body.unansweredCallEscalation)) return res.status(400).json({ error: "Choose a valid care manager escalation option." });
       const maxConsecutiveNoAnswer = Number(retry.maxConsecutiveNoAnswer);
       const initialMinutes = Number(retry.initialMinutes);
       const multiplier = Number(retry.multiplier);
@@ -627,6 +654,7 @@ router.get("/activities", async (req, res) => {
         allowInboundCalls: body.allowInboundCalls ?? existingSettings.allowInboundCalls ?? true,
         allowNonPatientInboundCalls: body.allowNonPatientInboundCalls ?? existingSettings.allowNonPatientInboundCalls ?? false,
         requireHumanVerificationForStaffBooking: body.requireHumanVerificationForStaffBooking ?? existingSettings.requireHumanVerificationForStaffBooking ?? false,
+        unansweredCallEscalation: body.unansweredCallEscalation ?? existingSettings.unansweredCallEscalation ?? "platform_notification",
       });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
@@ -636,7 +664,7 @@ router.get("/activities", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowInboundCalls: true, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowInboundCalls: true, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false, unansweredCallEscalation: "platform_notification" });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });

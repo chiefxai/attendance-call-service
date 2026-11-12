@@ -8,13 +8,13 @@ function createVobizClient({
   hangupUrl = process.env.VOBIZ_HANGUP_URL,
   fetchImpl = globalThis.fetch,
 } = {}) {
-  async function createCall({ to, from, agentId, campaignId, contactId, sessionId, stage, callAttemptId, appointmentCallId }) {
+  async function createCall({ to, from, agentId, campaignId, contactId, sessionId, stage, callAttemptId, appointmentCallId, answerUrl: customAnswerUrl }) {
     if (!authId || !authToken) throw new Error("VOBIZ_AUTH_ID and VOBIZ_AUTH_TOKEN must be configured");
-    if (!answerUrl) throw new Error("VOBIZ_ANSWER_URL must be configured");
+    if (!customAnswerUrl && !answerUrl) throw new Error("VOBIZ_ANSWER_URL must be configured");
     if (typeof fetchImpl !== "function") throw new Error("A Fetch API implementation is required");
 
-    const answer = new URL(answerUrl);
-    answer.searchParams.set("agentId", agentId);
+    const answer = new URL(customAnswerUrl || answerUrl);
+    if (agentId) answer.searchParams.set("agentId", agentId);
     if (campaignId) answer.searchParams.set("campaignId", campaignId);
     if (contactId) answer.searchParams.set("contactId", contactId);
     if (sessionId) answer.searchParams.set("sessionId", sessionId);

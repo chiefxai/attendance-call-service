@@ -361,6 +361,7 @@ export interface CallingSettings {
   allowInboundCalls: boolean;
   allowNonPatientInboundCalls: boolean;
   requireHumanVerificationForStaffBooking: boolean;
+  unansweredCallEscalation: "platform_notification" | "call_care_manager";
   retry: {
     maxConsecutiveNoAnswer: number;
     initialMinutes: number;
@@ -638,5 +639,27 @@ export async function fetchServiceApiKeys() {
 
 export async function revokeServiceApiKey(id: string) {
   const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`);
+  return response.data;
+}
+
+
+export interface CareManagerNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  referenceType: string;
+  referenceId: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export async function fetchCareManagerNotifications() {
+  const response = await api.get<CareManagerNotification[]>("/care-manager/notifications");
+  return response.data;
+}
+
+export async function markCareManagerNotificationRead(id: string) {
+  const response = await api.post<{ id: string; read: boolean }>(`/care-manager/notifications/${encodeURIComponent(id)}/read`);
   return response.data;
 }
