@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
-import { Alert, Box, Button, Card, CardContent, Chip, Grid, LinearProgress, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, TextField, Typography } from "@mui/material";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import HowToRegRoundedIcon from "@mui/icons-material/HowToRegRounded";
@@ -76,14 +76,30 @@ function buildOverviewCharts(records: AttendanceRecord[]) {
   };
 }
 
-export function OverviewPage({ showAgents = false }: { showAgents?: boolean }) {
+export function OverviewPage({ showAgents = false, userRole = "admin" }: { showAgents?: boolean; userRole?: "admin" | "care_manager" }) {
   const navigate = useNavigate();
   const [sessionId, setSessionId] = useState("");
+  const [drilldown, setDrilldown] = useState<{ title: string; records: AttendanceRecord[] } | null>(null);
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
   const summaryQuery = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary, refetchInterval: 15_000 });
   const attendanceQuery = useQuery({ queryKey: ["attendance", "recent"], queryFn: () => fetchAttendance({ limit: 500 }), refetchInterval: 15_000 });
   const summary: OperationsSummary | undefined = summaryQuery.data;
   const chartData = useMemo(() => buildOverviewCharts(attendanceQuery.data || []), [attendanceQuery.data]);
+  const openRecords = (title: string, predicate: (record: AttendanceRecord) => boolean) => {
+    setDrilldown({ title, records: (attendanceQuery.data || []).filter(predicate) });
+  };
+  const dateKey = (value: string) => {
+    const date = new Date(value);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+  const todayKey = dateKey(new Date().toISOString());
+  const statusLabel = (status: DashboardStatus) => status === "checkin" ? "Check-in" : status === "checkout" ? "Check-out" : status[0].toUpperCase() + status.slice(1);
+  const filterStatus = (status: DashboardStatus) => openRecords(`${statusLabel(status)} sessions`, (record) => getDashboardStatus(record) === status);
+  const languageName = (language: string) => ({ ta: "Tamil", tamil: "Tamil", en: "English", english: "English", ml: "Malayalam", malayalam: "Malayalam", te: "Telugu", telugu: "Telugu" }[language.toLowerCase()] || "Other");
+  const filterAttempts = (bucket: string) => openRecords(`${bucket} call attempts`, (record) => {
+    const attempts = record.callAttemptCount || 0;
+    return bucket === "0" ? attempts === 0 : bucket === "1–2" ? attempts >= 1 && attempts <= 2 : bucket === "3–4" ? attempts >= 3 && attempts <= 4 : attempts >= 5;
+  });
 
   if (showAgents) return <Stack spacing={3}>
     <PageHeader eyebrow="AI OPERATIONS" title="Calling agents" description="Agents configured for this authenticated workspace." />
@@ -96,15 +112,15 @@ export function OverviewPage({ showAgents = false }: { showAgents?: boolean }) {
   </Stack>;
 
   const metrics = [
-    { label: "Scheduled today", value: metricValue(summary?.scheduledToday), detail: "Assignments scheduled for today", icon: <GroupRoundedIcon /> },
-    { label: "Verified check-ins / check-outs", value: summary ? `${metricValue(summary.checkInsConfirmed)} / ${metricValue(summary.checkOutsConfirmed)}` : "—", detail: "Arrivals / duty completion confirmations", icon: <HowToRegRoundedIcon />, tint: "#e5f5ee", accent: "#178264" },
-    { label: "Pending check-ins", value: metricValue(summary?.checkInsPending), detail: "Scheduled, calling, or follow-up", icon: <PendingActionsRoundedIcon />, tint: "#fff3df", accent: "#b8751a" },
-    { label: "Exceptions", value: metricValue(summary?.exceptions), detail: "No-answer or review required", icon: <CrisisAlertRoundedIcon />, tint: "#fff0ed", accent: "#c44747" },
+    { label: "Scheduled today", value: metricValue(summary?.scheduledToday), detail: "Assignments scheduled for today · click to view", icon: <GroupRoundedIcon />, onClick: () => openRecords("Scheduled today", (record) => dateKey(record.scheduledStartAt) === todayKey) },
+    { label: "Verified check-ins / check-outs", value: summary ? `${metricValue(summary.checkInsConfirmed)} / ${metricValue(summary.checkOutsConfirmed)}` : "—", detail: "Arrivals / duty completion · click to view", icon: <HowToRegRoundedIcon />, tint: "#e5f5ee", accent: "#178264", onClick: () => openRecords("Verified attendance", (record) => record.checkIn.status === "confirmed" || record.checkOut.status === "confirmed") },
+    { label: "Pending check-ins", value: metricValue(summary?.checkInsPending), detail: "Scheduled, calling, or follow-up · click to view", icon: <PendingActionsRoundedIcon />, tint: "#fff3df", accent: "#b8751a", onClick: () => filterStatus("pending") },
+    { label: "Exceptions", value: metricValue(summary?.exceptions), detail: "No-answer or review required · click to view", icon: <CrisisAlertRoundedIcon />, tint: "#fff0ed", accent: "#c44747", onClick: () => filterStatus("delayed") },
   ];
   const pipeline = [
-    { name: "Completed calls", value: summary?.completedCalls || 0, percent: summary?.callsToday ? (summary.completedCalls / summary.callsToday) * 100 : 0, color: "success" },
-    { name: "Active calls", value: summary?.activeCalls || 0, percent: summary?.maxConcurrentCalls ? (summary.activeCalls / summary.maxConcurrentCalls) * 100 : 0, color: "primary" },
-    { name: "Waiting calls", value: summary?.callsWaiting || 0, percent: summary?.scheduledToday ? (summary.callsWaiting / summary.scheduledToday) * 100 : 0, color: "warning" },
+    { name: "Completed calls", value: summary?.completedCalls || 0, percent: summary?.callsToday ? (summary.completedCalls / summary.callsToday) * 100 : 0, color: "success", onClick: () => openRecords("Completed attendance calls", (record) => record.checkIn.status === "confirmed" && record.checkOut.status === "confirmed") },
+    { name: "Active calls", value: summary?.activeCalls || 0, percent: summary?.maxConcurrentCalls ? (summary.activeCalls / summary.maxConcurrentCalls) * 100 : 0, color: "primary", onClick: () => filterStatus("processing") },
+    { name: "Waiting calls", value: summary?.callsWaiting || 0, percent: summary?.scheduledToday ? (summary.callsWaiting / summary.scheduledToday) * 100 : 0, color: "warning", onClick: () => filterStatus("pending") },
   ];
 
   return <Stack spacing={2.5}>
@@ -114,20 +130,38 @@ export function OverviewPage({ showAgents = false }: { showAgents?: boolean }) {
     <Grid container spacing={1.75}>
       {metrics.map((metric) => <Grid key={metric.label} size={{ xs: 12, sm: 6, md: 3 }}><MetricCard {...metric} /></Grid>)}
     </Grid>
-    <Grid container spacing={2}>
-      <Grid size={{ xs: 12, xl: 7 }}><SectionCard title="Check-in and check-out trend" subtitle="Confirmed employee-reported arrival and departure times over the past 7 days."><AttendanceTrendChart points={chartData.trend} /></SectionCard></Grid>
-      <Grid size={{ xs: 12, xl: 5 }}><SectionCard title="Attendance status mix" subtitle="Current session distribution from the latest attendance records."><AttendanceStatusChart slices={chartData.statusSlices} /></SectionCard></Grid>
-      <Grid size={{ xs: 12, md: 6 }}><SectionCard title="Call attempts per session" subtitle="Retry volume helps identify staff who need operational follow-up."><RetryVolumeChart buckets={chartData.retryBuckets} /></SectionCard></Grid>
-      <Grid size={{ xs: 12, md: 6 }}><SectionCard title="Attendance by calling language" subtitle="Session outcomes grouped by the employee's selected language."><LanguageOutcomeChart rows={chartData.languageStacks} /></SectionCard></Grid>
+    <Grid container spacing={1.75}>
+      {userRole === "admin" && <Grid size={{ xs: 12, sm: 6, md: 3 }}><MetricCard label="Care Managers" value={metricValue(summary?.careManagers)} detail="Active application accounts" icon={<GroupRoundedIcon />} onClick={() => navigate("/care-managers")} /></Grid>}
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}><MetricCard label="Caregivers" value={metricValue(summary?.caregivers)} detail="Active organization records" icon={<GroupRoundedIcon />} onClick={() => navigate("/staff")} /></Grid>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}><MetricCard label="Patients" value={metricValue(summary?.patients)} detail="Active organization records" icon={<GroupRoundedIcon />} onClick={() => navigate("/patients")} /></Grid>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}><MetricCard label="Completed schedules" value={metricValue(summary?.completedSchedules)} detail="Both attendance stages confirmed" icon={<HowToRegRoundedIcon />} tint="#e5f5ee" accent="#178264" onClick={() => navigate("/attendance?status=completed")} /></Grid>
     </Grid>
+    <Grid container spacing={2}>
+      <Grid size={{ xs: 12, xl: 7 }}><SectionCard title="Check-in and check-out trend" subtitle="Select a day to see the sessions behind its totals."><AttendanceTrendChart points={chartData.trend} onSelectDay={(key) => openRecords(`Attendance on ${key}`, (record) => [record.checkIn.reportedAt, record.checkOut.reportedAt].some((time) => time && dateKey(time) === key))} /></SectionCard></Grid>
+      <Grid size={{ xs: 12, xl: 5 }}><SectionCard title="Attendance status mix" subtitle="Select a status to view its sessions."><AttendanceStatusChart slices={chartData.statusSlices} onSelectStatus={filterStatus} /></SectionCard></Grid>
+      <Grid size={{ xs: 12, md: 6 }}><SectionCard title="Call attempts per session" subtitle="Select a bar to review sessions by retry count."><RetryVolumeChart buckets={chartData.retryBuckets} onSelectBucket={filterAttempts} /></SectionCard></Grid>
+      <Grid size={{ xs: 12, md: 6 }}><SectionCard title="Attendance by calling language" subtitle="Select a colored segment to view matching sessions."><LanguageOutcomeChart rows={chartData.languageStacks} onSelectLanguageStatus={(language, status) => openRecords(`${language} · ${statusLabel(status)}`, (record) => languageName(record.language) === language && getDashboardStatus(record) === status)} /></SectionCard></Grid>
+    </Grid>
+    <Dialog open={Boolean(drilldown)} onClose={() => setDrilldown(null)} fullWidth maxWidth="md">
+      <DialogTitle>{drilldown?.title}</DialogTitle>
+      <DialogContent dividers>
+        {!drilldown?.records.length ? <Typography color="text.secondary" sx={{ py: 2 }}>No sessions match this widget.</Typography> : <Stack divider={<Box sx={{ borderBottom: "1px solid #edf0f4" }} />}>
+          {drilldown.records.map((record) => <Stack key={record.sessionId} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ py: 1.2 }}>
+            <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700}>{record.employee.name} · {record.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{record.patient.name} · {new Date(record.scheduledStartAt).toLocaleString()}</Typography></Box>
+            <Stack direction="row" spacing={1} alignItems="center"><StatusChip status={getDashboardStatus(record)} /><Button size="small" onClick={() => navigate(`/sessions/${encodeURIComponent(record.sessionId)}`)}>View</Button></Stack>
+          </Stack>)}
+        </Stack>}
+      </DialogContent>
+      <DialogActions><Button onClick={() => setDrilldown(null)}>Close</Button><Button component={RouterLink} to="/attendance" onClick={() => setDrilldown(null)}>Open attendance</Button></DialogActions>
+    </Dialog>
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, lg: 7 }}><SectionCard title="Attendance status" subtitle="Confirmed and pending check-ins and check-outs from PostgreSQL.">
         {summaryQuery.isLoading ? <LinearProgress /> : <Stack spacing={2.2}>
-          {[{ label: "Check-ins confirmed", value: summary?.checkInsConfirmed || 0, total: summary?.scheduledToday || 0, color: "#1557c0" }, { label: "Check-outs confirmed", value: summary?.checkOutsConfirmed || 0, total: summary?.scheduledToday || 0, color: "#178264" }, { label: "Check-ins pending", value: summary?.checkInsPending || 0, total: summary?.scheduledToday || 0, color: "#c07b24" }].map((item) => <Box key={item.label}><Stack direction="row" justifyContent="space-between" sx={{ mb: .7 }}><Typography variant="body2">{item.label}</Typography><Typography variant="body2" fontWeight={700}>{item.value} / {item.total}</Typography></Stack><LinearProgress variant="determinate" value={item.total ? Math.min(100, item.value / item.total * 100) : 0} sx={{ height: 8, borderRadius: 5, bgcolor: "#edf0f5", "& .MuiLinearProgress-bar": { bgcolor: item.color, borderRadius: 5 } }} /></Box>)}
+          {[{ label: "Check-ins confirmed", value: summary?.checkInsConfirmed || 0, total: summary?.scheduledToday || 0, color: "#1557c0", predicate: (record: AttendanceRecord) => record.checkIn.status === "confirmed" }, { label: "Check-outs confirmed", value: summary?.checkOutsConfirmed || 0, total: summary?.scheduledToday || 0, color: "#178264", predicate: (record: AttendanceRecord) => record.checkOut.status === "confirmed" }, { label: "Check-ins pending", value: summary?.checkInsPending || 0, total: summary?.scheduledToday || 0, color: "#c07b24", predicate: (record: AttendanceRecord) => record.checkIn.status !== "confirmed" }].map((item) => <Box key={item.label} role="button" tabIndex={0} onClick={() => openRecords(item.label, item.predicate)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openRecords(item.label, item.predicate); } }} sx={{ cursor: "pointer", borderRadius: 1, p: .5, mx: -.5, "&:hover": { bgcolor: "action.hover" }, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main" } }}><Stack direction="row" justifyContent="space-between" sx={{ mb: .7 }}><Typography variant="body2">{item.label}</Typography><Typography variant="body2" fontWeight={700}>{item.value} / {item.total}</Typography></Stack><LinearProgress variant="determinate" value={item.total ? Math.min(100, item.value / item.total * 100) : 0} sx={{ height: 8, borderRadius: 5, bgcolor: "#edf0f5", "& .MuiLinearProgress-bar": { bgcolor: item.color, borderRadius: 5 } }} /></Box>)}
         </Stack>}
       </SectionCard></Grid>
       <Grid size={{ xs: 12, lg: 5 }}><SectionCard title="Outbound call pipeline" subtitle="Current provider call and durable retry queue state." action={<Chip size="small" label={`${summary?.activeCalls ?? "—"} / ${summary?.maxConcurrentCalls ?? "—"} active`} variant="outlined" />}>
-        {summaryQuery.isLoading ? <LinearProgress /> : pipeline.map((row) => <Box key={row.name} sx={{ mb: 2.1 }}><Stack direction="row" justifyContent="space-between" sx={{ mb: .7 }}><Typography variant="body2">{row.name}</Typography><Typography variant="body2" fontWeight={700}>{row.value}</Typography></Stack><LinearProgress variant="determinate" value={Math.max(0, Math.min(100, row.percent))} color={row.color as "success" | "warning" | "primary"} sx={{ height: 7, borderRadius: 5, bgcolor: "#edf0f5" }} /></Box>)}
+        {summaryQuery.isLoading ? <LinearProgress /> : pipeline.map((row) => <Box key={row.name} role="button" tabIndex={0} onClick={row.onClick} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); row.onClick(); } }} sx={{ mb: 2.1, cursor: "pointer", borderRadius: 1, p: .5, mx: -.5, "&:hover": { bgcolor: "action.hover" }, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main" } }}><Stack direction="row" justifyContent="space-between" sx={{ mb: .7 }}><Typography variant="body2">{row.name}</Typography><Typography variant="body2" fontWeight={700}>{row.value}</Typography></Stack><LinearProgress variant="determinate" value={Math.max(0, Math.min(100, row.percent))} color={row.color as "success" | "warning" | "primary"} sx={{ height: 7, borderRadius: 5, bgcolor: "#edf0f5" }} /></Box>)}
         <Button component={RouterLink} to="/call-center" fullWidth endIcon={<ArrowForwardRoundedIcon />}>Open AI call center</Button>
       </SectionCard></Grid>
     </Grid>

@@ -15,6 +15,7 @@ const {
   PostgresRepository,
   startWorkers,
   createAttendanceBackendClient,
+  createAthulyaScheduleSyncHandler,
 } = require("../index");
 
 async function main() {
@@ -49,6 +50,9 @@ async function main() {
     backend,
     retry: config.callRetry,
     capacity: config.callCapacity,
+    additionalHandlers: {
+      sync_athulya_schedules: createAthulyaScheduleSyncHandler({ repository }),
+    },
   });
   const worker = startWorkers({ queue, handlers, ...config.worker });
   async function purgeExpiredInboundCalls() {

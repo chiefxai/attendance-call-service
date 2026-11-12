@@ -288,7 +288,11 @@ printf '%s\n%s\n%s\n' "$web_email" "$web_name" "$web_password" | sudo docker com
 unset web_password
 ```
 
-Run the same command to provision additional accounts. The account is scoped to `DEFAULT_ORGANIZATION_ID` and password material is stored as a salted scrypt hash. No API key or admin secret needs to be entered in the dashboard. Use the UI's **Sign out** control to revoke the current session.
+Run the same command to provision additional Admin accounts. The account is scoped to `DEFAULT_ORGANIZATION_ID` and password material is stored as a salted scrypt hash. No API key or admin secret needs to be entered in the dashboard. Use the UI's **Sign out** control to revoke the current session.
+
+Admins create Care Manager accounts in **Care Managers**; Care Manager access is enforced in backend routes as well as the navigation. Configure the Athulya schedule integration in **Settings → Athulya integration**. Before entering an API key, add a stable `ATHULYA_CREDENTIALS_ENCRYPTION_KEY` to the VM `.env` (generate a 32-byte hex value with `openssl rand -hex 32`). The key is encrypted at rest and masked in the UI. See [backend integration details](backend/README.md#athulya-workforce-integration).
+
+Only the schedule fetch endpoint is documented. Attendance export remains `Awaiting API Specification` and is intentionally not sent until Athulya provides the official check-in/check-out API contract.
 
 Useful operations:
 

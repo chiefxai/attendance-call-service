@@ -9,7 +9,7 @@ import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
 import { createPatient, fetchAttendance, fetchPatients, updatePatient, type AttendanceRecord, type CreatePatientPayload, type PatientRecord } from "../api/client";
-import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
+import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 
@@ -110,16 +110,18 @@ export function PatientRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-<TableContainer><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
-      <TableHead><TableRow>{["Patient name", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
-      <TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover>
-        <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
-        <TableCell>{row.phoneNumber || "Not provided"}</TableCell>
-        <TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell>
-        <TableCell>{row.language.toUpperCase()}</TableCell>
-        <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setViewPatient(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell>
-      </TableRow>)}</TableBody>
-    </Table></TableContainer>
+      <TableContainer><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
+        <TableHead><TableRow>{["Patient name", "UHID", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
+        <TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover>
+          <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
+          <TableCell>{row.patientUhid || "—"}</TableCell>
+          <TableCell>{row.branch || "—"}</TableCell>
+          <TableCell>{row.phoneNumber || "Not provided"}</TableCell>
+          <TableCell sx={{ minWidth: 240, maxWidth: 360, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell>
+          <TableCell>{row.language.toUpperCase()}</TableCell>
+          <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setViewPatient(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell>
+        </TableRow>)}</TableBody>
+      </Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>No patient records match these filters.</Typography>}
     </Card>
     <Dialog open={addOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
@@ -144,6 +146,8 @@ export function PatientRecordsPage() {
       <Grid container spacing={1.5}>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Patient ID</Typography><Typography>{viewPatient.id}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Mobile number</Typography><Typography>{viewPatient.phoneNumber || "Not provided"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Patient UHID</Typography><Typography>{viewPatient.patientUhid || "Not provided"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Branch</Typography><Typography>{viewPatient.branch || "Not provided"}</Typography></Grid>
         <Grid size={12}><Typography variant="overline" color="text.secondary">Address</Typography><Typography>{viewPatient.address || "Not provided"}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Preferred language</Typography><Typography>{viewPatient.language.toUpperCase()}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Care category</Typography><Typography>{viewPatient.careCategory}</Typography></Grid>

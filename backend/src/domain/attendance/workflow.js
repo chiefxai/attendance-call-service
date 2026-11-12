@@ -70,7 +70,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
   return { action: "review", reason: "invalid_stage" };
 }
 
-function createAttendanceHandlers({ repository, queue, vobiz, recordings, transcriber, postCallAgent, backend, activeSessionCache, retry = {}, capacity = {} }) {
+function createAttendanceHandlers({ repository, queue, vobiz, recordings, transcriber, postCallAgent, backend, activeSessionCache, retry = {}, capacity = {}, additionalHandlers = {} }) {
   const required = { repository, queue, vobiz, recordings, transcriber, postCallAgent, backend };
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
@@ -546,7 +546,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
   // The async job queue dispatches these LangChain tools in its fixed,
   // deterministic order. The model only extracts transcript facts; it does
   // not receive authority to schedule, complete, or deliver sessions.
-  return postCallToolHandlers;
+  return { ...postCallToolHandlers, ...additionalHandlers };
 }
 
 module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime, inferRequestedCallbackAt };

@@ -10,13 +10,13 @@ import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
 import { createStaff, fetchAttendance, fetchStaff, updateStaff, type AttendanceRecord, type CreateStaffPayload, type StaffRecord } from "../api/client";
-import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
+import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
-const createStaffForm = (): CreateStaffPayload => ({ id: crypto.randomUUID(), name: "", companyName: "", phoneNumber: "", address: "", language: "ta" });
+const createStaffForm = (): CreateStaffPayload => ({ id: crypto.randomUUID(), name: "", companyName: "ATHULYA", phoneNumber: "", address: "", language: "ta" });
 
 function formatDutyDateTime(value: string) {
   const date = new Date(value);
@@ -73,7 +73,7 @@ export function StaffRecordsPage() {
     const phoneNumber = normalizeIndianMobile(newStaff.phoneNumber);
     if (!phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
-    const payload = { ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), companyName: newStaff.companyName?.trim() || "", phoneNumber, address: newStaff.address.trim() };
+    const payload = { ...newStaff, id: newStaff.id.trim(), name: newStaff.name.trim(), companyName: newStaff.companyName?.trim() || "ATHULYA", phoneNumber, address: newStaff.address.trim() };
     createMutation.mutate({ payload, id: payload.id, update: Boolean(editing) });
   };
   const activeFilters = Number(language !== "all") + Number(status !== "all");
@@ -85,7 +85,7 @@ export function StaffRecordsPage() {
   };
   const openEdit = (record: StaffRecord) => {
     setEditing(record);
-    setNewStaff({ id: record.id, name: record.name, companyName: record.companyName || "", phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
+    setNewStaff({ id: record.id, name: record.name, companyName: record.companyName || "ATHULYA", phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
     setPhoneError("");
     setAddOpen(true);
   };
@@ -120,10 +120,11 @@ export function StaffRecordsPage() {
       />
       {query.isLoading && <LinearProgress />}
       <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 900 }}>
-        <TableHead><TableRow>{["Staff name", "Company / vendor", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
+        <TableHead><TableRow>{["Staff name", "Company / vendor", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
         <TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
-          <TableCell>{row.companyName || "Independent"}</TableCell>
+          <TableCell>{row.companyName || "ATHULYA"}</TableCell>
+          <TableCell>{row.branch || "—"}</TableCell>
           <TableCell>{row.phoneNumber || row.phoneMasked || "Not supplied"}</TableCell>
           <TableCell sx={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell>
           <TableCell>{row.language.toUpperCase()}</TableCell>
@@ -140,7 +141,7 @@ export function StaffRecordsPage() {
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={newStaff.id} InputProps={{ readOnly: true }} helperText="Generated automatically" /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={newStaff.companyName || ""} onChange={(event) => setNewStaff((current) => ({ ...current, companyName: event.target.value }))} helperText="Optional for independent staff." /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={newStaff.companyName || "ATHULYA"} onChange={(event) => setNewStaff((current) => ({ ...current, companyName: event.target.value }))} helperText="Defaults to ATHULYA. Enter another name for a vendor." /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={newStaff.phoneNumber} onChange={(event) => { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(newStaff.phoneNumber); if (!newStaff.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setNewStaff((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Calling language</InputLabel><Select label="Calling language" value={newStaff.language} onChange={(event) => setNewStaff((current) => ({ ...current, language: event.target.value }))}><MenuItem value="ta">Tamil</MenuItem><MenuItem value="en">English</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
             <Grid size={12}><AddressFields required value={newStaff.address} onChange={(address) => setNewStaff((current) => ({ ...current, address }))} /></Grid>
@@ -153,7 +154,8 @@ export function StaffRecordsPage() {
       <Grid container spacing={1.5}>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Staff ID</Typography><Typography>{selected.id}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Mobile number</Typography><Typography>{selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography></Grid>
-        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Company / vendor</Typography><Typography>{selected.companyName || "Independent"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Company / vendor</Typography><Typography>{selected.companyName || "ATHULYA"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Branch</Typography><Typography>{selected.branch || "Not provided"}</Typography></Grid>
         <Grid size={12}><Typography variant="overline" color="text.secondary">Address</Typography><Typography>{selected.address || "Not provided"}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Calling language</Typography><Typography>{selected.language.toUpperCase()}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Current duty status</Typography><Typography sx={{ textTransform: "capitalize" }}>{selected.dutyStatus}</Typography></Grid>

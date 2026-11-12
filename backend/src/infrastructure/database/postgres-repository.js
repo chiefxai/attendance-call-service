@@ -17,7 +17,7 @@ class PostgresRepository {
 
   async findWebUserByEmail(email) {
     const { rows } = await this.pool.query(
-      `SELECT id,organization_id,email,display_name,password_salt,password_hash,active
+      `SELECT id,organization_id,email,display_name,password_salt,password_hash,active,role
        FROM web_users WHERE lower(email)=lower($1) LIMIT 1`,
       [email],
     );
@@ -30,6 +30,7 @@ class PostgresRepository {
       passwordSalt: row.password_salt,
       passwordHash: row.password_hash,
       active: row.active,
+      role: row.role || "admin",
     } : null;
   }
 
@@ -41,6 +42,244 @@ class PostgresRepository {
       [organizationId, email, displayName, passwordSalt, passwordHash],
     );
     return rows[0];
+  }
+
+  async createCareManagerUser({ organizationId, email, displayName, passwordSalt, passwordHash, athulyaId, phone = null }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `INSERT INTO web_users (organization_id,email,display_name,password_salt,password_hash,role)
+         VALUES ($1,$2,$3,$4,$5,'care_manager')
+         RETURNING id,organization_id,email,display_name,active,role,created_at`,
+        [organizationId, email, displayName, passwordSalt, passwordHash],
+      );
+      const user = rows[0];
+      const linked = await client.query(
+        `INSERT INTO athulya_care_managers (organization_id,athulya_care_manager_id,app_user_id,name,email,phone)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (organization_id,athulya_care_manager_id) DO UPDATE SET
+           app_user_id=EXCLUDED.app_user_id,name=EXCLUDED.name,email=EXCLUDED.email,phone=EXCLUDED.phone,active=TRUE,updated_at=NOW()
+         WHERE athulya_care_managers.app_user_id IS NULL
+         RETURNING id`,
+        [organizationId, athulyaId, user.id, displayName, email, phone],
+      );
+      if (!linked.rowCount) throw new Error("This Athulya Care Manager ID is already linked to an application account.");
+      await client.query("COMMIT");
+      return user;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async listCareManagers(organizationId) {
+    const { rows } = await this.pool.query(
+      `SELECT cm.id,cm.athulya_care_manager_id AS "athulyaCareManagerId",cm.name,cm.email,cm.phone,
+        cm.active,u.id AS "userId",u.active AS "accountActive",u.created_at AS "createdAt",
+        MAX(s.last_used_at) AS "lastLogin"
+       FROM athulya_care_managers cm LEFT JOIN web_users u ON u.id=cm.app_user_id
+       LEFT JOIN web_sessions s ON s.user_id=u.id AND s.revoked_at IS NULL
+       WHERE cm.organization_id=$1 GROUP BY cm.id,u.id ORDER BY lower(cm.name)`, [organizationId],
+    );
+    return rows.map((row) => ({ ...row, lastLogin: row.lastLogin || null }));
+  }
+
+  async updateCareManager(organizationId, id, { name, email, phone, athulyaId }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `UPDATE athulya_care_managers cm SET athulya_care_manager_id=$3,name=$4,email=$5,phone=$6,updated_at=NOW()
+         WHERE cm.organization_id=$1 AND cm.id=$2 RETURNING cm.app_user_id`,
+        [organizationId,id,athulyaId,name,email,phone || null],
+      );
+      if (!rows[0]) { await client.query("ROLLBACK"); return false; }
+      if (rows[0].app_user_id) await client.query(
+        `UPDATE web_users SET email=$2,display_name=$3,updated_at=NOW() WHERE id=$1`, [rows[0].app_user_id,email,name],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async setCareManagerActive(organizationId, id, active) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `UPDATE athulya_care_managers SET active=$3,updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING app_user_id`,
+        [organizationId, id, active],
+      );
+      if (rows[0]?.app_user_id) {
+        await client.query("UPDATE web_users SET active=$2,updated_at=NOW() WHERE id=$1", [rows[0].app_user_id, active]);
+        if (!active) await client.query("UPDATE web_sessions SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL", [rows[0].app_user_id]);
+      }
+      await client.query("COMMIT");
+      return rows.length > 0;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async resetCareManagerPassword(organizationId, id, passwordSalt, passwordHash) {
+    const { rows } = await this.pool.query(
+      `UPDATE web_users u SET password_salt=$3,password_hash=$4,updated_at=NOW()
+       FROM athulya_care_managers cm WHERE cm.app_user_id=u.id AND cm.organization_id=$1 AND cm.id=$2
+       RETURNING u.id`, [organizationId, id, passwordSalt, passwordHash],
+    );
+    if (rows[0]) await this.pool.query("UPDATE web_sessions SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL", [rows[0].id]);
+    return Boolean(rows[0]);
+  }
+
+  async getAthulyaIntegration(organizationId) {
+    const { rows } = await this.pool.query(
+      `SELECT integration_name AS "integrationName",api_base_url AS "apiBaseUrl",encrypted_api_key AS "encryptedApiKey",
+        enabled,updated_at AS "updatedAt",
+        (SELECT MAX(completed_at) FROM athulya_sync_runs WHERE organization_id=$1 AND status='succeeded') AS "lastSuccessfulScheduleSync",
+        (SELECT MAX(updated_at) FROM athulya_attendance_submissions WHERE organization_id=$1 AND status='synced') AS "lastSuccessfulAttendanceSubmission"
+       FROM athulya_integration_settings WHERE organization_id=$1`, [organizationId],
+    );
+    return rows[0] || { integrationName: "Athulya Platform", apiBaseUrl: "https://homecare.athulyaliving.net/api", encryptedApiKey: null, enabled: false, lastSuccessfulScheduleSync: null, lastSuccessfulAttendanceSubmission: null };
+  }
+
+  async saveAthulyaIntegration(organizationId, { integrationName, apiBaseUrl, encryptedApiKey, enabled, updatedBy }) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO athulya_integration_settings (organization_id,integration_name,api_base_url,encrypted_api_key,enabled,updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (organization_id) DO UPDATE SET
+       integration_name=EXCLUDED.integration_name,api_base_url=EXCLUDED.api_base_url,
+       encrypted_api_key=COALESCE(EXCLUDED.encrypted_api_key,athulya_integration_settings.encrypted_api_key),
+       enabled=EXCLUDED.enabled,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+       RETURNING integration_name AS "integrationName",api_base_url AS "apiBaseUrl",encrypted_api_key AS "encryptedApiKey",enabled,updated_at AS "updatedAt",
+       (SELECT MAX(completed_at) FROM athulya_sync_runs WHERE organization_id=$1 AND status='succeeded') AS "lastSuccessfulScheduleSync",
+       (SELECT MAX(updated_at) FROM athulya_attendance_submissions WHERE organization_id=$1 AND status='synced') AS "lastSuccessfulAttendanceSubmission"`,
+      [organizationId, integrationName, apiBaseUrl, encryptedApiKey || null, enabled, updatedBy || null],
+    );
+    return rows[0];
+  }
+
+  async createAthulyaSyncRun(organizationId, { fromDate, toDate, filters }) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO athulya_sync_runs (organization_id,status,from_date,to_date,filters) VALUES ($1,'running',$2,$3,$4::jsonb) RETURNING id`,
+      [organizationId, fromDate || null, toDate || null, JSON.stringify(filters || {})],
+    );
+    return rows[0].id;
+  }
+
+  async finishAthulyaSyncRun(id, { status, recordsReceived = 0, recordsUpserted = 0, errorMessage = null }) {
+    await this.pool.query(
+      `UPDATE athulya_sync_runs SET status=$2,records_received=$3,records_upserted=$4,error_message=$5,completed_at=NOW() WHERE id=$1`,
+      [id, status, recordsReceived, recordsUpserted, errorMessage],
+    );
+  }
+
+  async upsertAthulyaSchedules(organizationId, records) {
+    const client = await this.pool.connect();
+    let upserted = 0;
+    try {
+      await client.query("BEGIN");
+      for (const item of records) {
+        const source = item.source;
+        const scheduleId = source.schedule_id == null ? null : String(source.schedule_id);
+        const schedulePk = source.schedule_pk == null ? "" : String(source.schedule_pk);
+        if (!scheduleId) continue;
+        const patientId = source.patient_id == null ? "" : String(source.patient_id);
+        if (patientId) await client.query(
+          `INSERT INTO patient_directory (organization_id,external_id,name,phone_number,address,language,care_category,hub,athulya_patient_uhid,branch)
+           VALUES ($1,$2,$3,NULL,'','ta',$4,$5,$6,$7) ON CONFLICT (organization_id,external_id) DO UPDATE SET
+           name=CASE WHEN EXCLUDED.name<>'' THEN EXCLUDED.name ELSE patient_directory.name END,
+           care_category=CASE WHEN EXCLUDED.care_category<>'' THEN EXCLUDED.care_category ELSE patient_directory.care_category END,
+           hub=CASE WHEN EXCLUDED.hub<>'' THEN EXCLUDED.hub ELSE patient_directory.hub END,
+           athulya_patient_uhid=CASE WHEN EXCLUDED.athulya_patient_uhid<>'' THEN EXCLUDED.athulya_patient_uhid ELSE patient_directory.athulya_patient_uhid END,
+           branch=CASE WHEN EXCLUDED.branch<>'' THEN EXCLUDED.branch ELSE patient_directory.branch END,updated_at=NOW()`,
+          [organizationId,patientId,String(source.client_name ?? ""),String(source.service_name ?? ""),String(source.branch ?? ""),String(source.patient_uhid ?? ""),String(source.branch ?? "")],
+        );
+        if (source.care_manager_id != null && source.care_manager_name) await client.query(
+          `INSERT INTO athulya_care_managers (organization_id,athulya_care_manager_id,name,phone)
+           VALUES ($1,$2,$3,$4) ON CONFLICT (organization_id,athulya_care_manager_id) DO UPDATE SET
+           name=CASE WHEN EXCLUDED.name<>'' THEN EXCLUDED.name ELSE athulya_care_managers.name END,
+           phone=COALESCE(NULLIF(EXCLUDED.phone,''),athulya_care_managers.phone),updated_at=NOW()`,
+          [organizationId,String(source.care_manager_id),String(source.care_manager_name),source.care_manager_phone == null ? null : String(source.care_manager_phone)],
+        );
+        for (const caregiver of item.caregivers) {
+          if (!caregiver.id) continue;
+          await client.query(
+            `INSERT INTO staff_directory (organization_id,external_id,name,company_name,phone_number,address,language,branch)
+             VALUES ($1,$2,$3,$4,$5,'','ta',$6) ON CONFLICT (organization_id,external_id) DO UPDATE SET
+             name=CASE WHEN EXCLUDED.name<>'' THEN EXCLUDED.name ELSE staff_directory.name END,
+             company_name=CASE WHEN EXCLUDED.company_name<>'' THEN EXCLUDED.company_name ELSE staff_directory.company_name END,
+             phone_number=CASE WHEN EXCLUDED.phone_number<>'' THEN EXCLUDED.phone_number ELSE staff_directory.phone_number END,
+             branch=CASE WHEN EXCLUDED.branch<>'' THEN EXCLUDED.branch ELSE staff_directory.branch END,active=TRUE,updated_at=NOW()`,
+            [organizationId,caregiver.id,caregiver.name || "",String(source.vendor_company ?? "ATHULYA") || "ATHULYA",caregiver.phone || "",String(source.branch ?? "")],
+          );
+        }
+        const { rows } = await client.query(
+          `INSERT INTO athulya_schedules (organization_id,athulya_schedule_id,athulya_schedule_pk,patient_external_id,patient_uhid,patient_name,
+           care_manager_external_id,care_manager_name,care_manager_phone,schedule_date,start_time,end_time,schedule_status,service_name,
+           service_from_date,service_to_date,active_service_status,care_plan,branch,vendor_company,raw_source_data,last_synced_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11,$12,$13,$14,$15::date,$16::date,$17,$18,$19,$20,$21::jsonb,NOW())
+           ON CONFLICT (organization_id,athulya_schedule_id,athulya_schedule_pk) DO UPDATE SET
+           patient_external_id=EXCLUDED.patient_external_id,patient_uhid=EXCLUDED.patient_uhid,patient_name=EXCLUDED.patient_name,
+           care_manager_external_id=EXCLUDED.care_manager_external_id,care_manager_name=EXCLUDED.care_manager_name,care_manager_phone=EXCLUDED.care_manager_phone,
+           schedule_date=EXCLUDED.schedule_date,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,schedule_status=EXCLUDED.schedule_status,
+           service_name=EXCLUDED.service_name,service_from_date=EXCLUDED.service_from_date,service_to_date=EXCLUDED.service_to_date,
+           active_service_status=EXCLUDED.active_service_status,care_plan=EXCLUDED.care_plan,branch=EXCLUDED.branch,vendor_company=EXCLUDED.vendor_company,
+           raw_source_data=EXCLUDED.raw_source_data,last_synced_at=NOW(),updated_at=NOW() RETURNING id`,
+          [organizationId,scheduleId,schedulePk,patientId,String(source.patient_uhid ?? ""),String(source.client_name ?? ""),
+            String(source.care_manager_id ?? ""),String(source.care_manager_name ?? ""),String(source.care_manager_phone ?? ""),
+            item.scheduleDate || null,source.start_time == null ? null : String(source.start_time),source.end_time == null ? null : String(source.end_time),
+            String(source.schedule_status ?? ""),String(source.service_name ?? ""),item.serviceFromDate || null,item.serviceToDate || null,
+            String(source.active_service_status ?? ""),String(source.care_plan ?? ""),String(source.branch ?? ""),String(source.vendor_company ?? ""),JSON.stringify(source)],
+        );
+        const id = rows[0].id;
+        await client.query("DELETE FROM athulya_schedule_caregivers WHERE schedule_id=$1", [id]);
+        for (const caregiver of item.caregivers) {
+          await client.query(
+            `INSERT INTO athulya_schedule_caregivers (organization_id,schedule_id,athulya_caregiver_id,caregiver_name,caregiver_phone,caregiver_schedule_status)
+             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (schedule_id,athulya_caregiver_id,caregiver_phone) DO UPDATE SET caregiver_name=EXCLUDED.caregiver_name,caregiver_schedule_status=EXCLUDED.caregiver_schedule_status`,
+            [organizationId,id,caregiver.id,caregiver.name,caregiver.phone,caregiver.status],
+          );
+        }
+        upserted += 1;
+      }
+      await client.query("COMMIT");
+      return upserted;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async listAthulyaSchedules(organizationId, { fromDate, toDate, limit = 500 } = {}) {
+    const { rows } = await this.pool.query(
+      `SELECT s.*,COALESCE(jsonb_agg(jsonb_build_object('id',c.athulya_caregiver_id,'name',c.caregiver_name,'phone',c.caregiver_phone,'status',c.caregiver_schedule_status)) FILTER (WHERE c.id IS NOT NULL),'[]'::jsonb) AS caregivers
+       FROM athulya_schedules s LEFT JOIN athulya_schedule_caregivers c ON c.schedule_id=s.id
+       WHERE s.organization_id=$1 AND ($2::date IS NULL OR s.schedule_date >= $2::date) AND ($3::date IS NULL OR s.schedule_date <= $3::date)
+       GROUP BY s.id ORDER BY s.schedule_date,s.start_time LIMIT $4`, [organizationId, fromDate || null, toDate || null, Math.min(Math.max(Number(limit) || 500,1),5000)],
+    );
+    return rows.map((row) => ({ id: row.id, athulyaScheduleId: row.athulya_schedule_id, athulyaSchedulePk: row.athulya_schedule_pk,
+      patient: { id: row.patient_external_id, uhid: row.patient_uhid, name: row.patient_name }, careManager: { id: row.care_manager_external_id, name: row.care_manager_name, phone: row.care_manager_phone },
+      date: row.schedule_date, startTime: row.start_time, endTime: row.end_time, status: row.schedule_status, service: row.service_name, carePlan: row.care_plan,
+      branch: row.branch, vendorCompany: row.vendor_company, caregivers: json(row.caregivers) || [], lastSyncedAt: row.last_synced_at }));
+  }
+
+  async listAthulyaSyncRuns(organizationId, limit = 100) {
+    const { rows } = await this.pool.query(
+      `SELECT id,status,from_date AS "fromDate",to_date AS "toDate",filters,records_received AS "recordsReceived",records_upserted AS "recordsUpserted",error_message AS "errorMessage",started_at AS "startedAt",completed_at AS "completedAt"
+       FROM athulya_sync_runs WHERE organization_id=$1 ORDER BY started_at DESC LIMIT $2`, [organizationId, Math.min(Number(limit) || 100,500)],
+    );
+    return rows;
+  }
+
+  async listAthulyaAttendanceSubmissions(organizationId, { eventType = "all", status = "all", fromDate = null, toDate = null, caregiverId = "", patientId = "", limit = 200 } = {}) {
+    const { rows } = await this.pool.query(
+      `SELECT e.id,e.event_type AS "eventType",e.event_at AS "eventAt",e.status,e.attempt_count AS "retryCount",
+       e.response_code AS "responseCode",e.error_message AS "errorMessage",e.external_reference AS "externalReference",e.created_at AS "createdAt",
+       s.athulya_schedule_id AS "scheduleId",s.patient_external_id AS "patientId",s.patient_name AS "patientName",c.caregiver_name AS "caregiverName"
+       FROM athulya_attendance_submissions e LEFT JOIN athulya_schedules s ON s.id=e.schedule_id
+       LEFT JOIN athulya_schedule_caregivers c ON c.schedule_id=s.id AND c.athulya_caregiver_id=e.caregiver_id
+       WHERE e.organization_id=$1 AND ($2='all' OR e.event_type=$2) AND ($3='all' OR e.status=$3)
+         AND ($4::timestamptz IS NULL OR e.event_at >= $4::timestamptz) AND ($5::timestamptz IS NULL OR e.event_at <= $5::timestamptz)
+         AND ($6='' OR e.caregiver_id=$6) AND ($7='' OR s.patient_external_id=$7)
+       ORDER BY e.created_at DESC LIMIT $8`, [organizationId,eventType,status,fromDate,toDate,caregiverId,patientId,Math.min(Number(limit) || 200,500)],
+    );
+    return rows;
   }
 
   async createWebSession(userId, tokenHash, expiresAt) {
@@ -56,11 +295,11 @@ class PostgresRepository {
        FROM web_users u
        WHERE s.token_hash=$1 AND s.user_id=u.id AND s.revoked_at IS NULL
          AND s.expires_at>NOW() AND u.active=TRUE
-       RETURNING u.id,u.organization_id,u.email,u.display_name`,
+       RETURNING u.id,u.organization_id,u.email,u.display_name,u.role`,
       [tokenHash],
     );
     const row = rows[0];
-    return row ? { id: row.id, organizationId: row.organization_id, email: row.email, displayName: row.display_name } : null;
+    return row ? { id: row.id, organizationId: row.organization_id, email: row.email, displayName: row.display_name, role: row.role || "admin" } : null;
   }
 
   async revokeWebSession(tokenHash) {
@@ -150,7 +389,7 @@ class PostgresRepository {
        LIMIT $6`,
       [organizationId, startAt, endAt, patientDistrict, patientState, Math.min(Math.max(Number(limit) || 10, 1), 10)],
     );
-    return rows.map((row) => ({ id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number, address: row.address,
+    return rows.map((row) => ({ id: row.external_id, name: row.name, companyName: row.company_name?.trim() || "ATHULYA", phoneNumber: row.phone_number, address: row.address,
       language: row.language, locationMatch: row.location_match }));
   }
 
@@ -476,7 +715,7 @@ class PostgresRepository {
         throw Object.assign(new Error("Enquiry does not have a valid requested care window"), { status: 409 });
       }
       const patient = json(enquiry.patient_context) || {};
-      const employee = { id: staff.id, name: staff.name, companyName: staff.companyName || "", phoneNumber: staff.phoneNumber, address: staff.address || "" };
+      const employee = { id: staff.id, name: staff.name, companyName: staff.companyName?.trim() || "ATHULYA", phoneNumber: staff.phoneNumber, address: staff.address || "" };
       await this.assertEmployeeScheduleAvailable({ organizationId, employee, scheduledStartAt: start, scheduledEndAt: end }, client);
       await this.createStaffDirectoryRecord(organizationId, { ...employee, language: staff.language || enquiry.language }, client);
       const session = await this.createAttendanceSession({
@@ -518,7 +757,7 @@ class PostgresRepository {
       [organizationId, staffId],
     );
     const row = rows[0];
-    return row ? { id: row.external_id, name: row.name, companyName: row.company_name || "",
+    return row ? { id: row.external_id, name: row.name, companyName: row.company_name?.trim() || "ATHULYA",
       phoneNumber: row.phone_number, address: row.address || "", language: row.language || "en" } : null;
   }
 
@@ -589,7 +828,7 @@ class PostgresRepository {
         throw error;
       }
       const staffResult = await client.query(
-        `SELECT external_id,name,company_name,phone_number,address,language FROM staff_directory
+        `SELECT external_id,name,company_name,phone_number,address,language,branch FROM staff_directory
          WHERE organization_id=$1 AND external_id=$2 AND active=TRUE FOR SHARE`, [organizationId, staffId],
       );
       if (!staffResult.rowCount) {
@@ -602,7 +841,7 @@ class PostgresRepository {
         `UPDATE inbound_calls SET enquiry_status='resolved',resolved_staff=$3::jsonb,resolved_at=NOW(),updated_at=NOW()
          WHERE id=$1 AND organization_id=$2
          RETURNING *`,
-        [id, organizationId, JSON.stringify({ id: staff.external_id, name: staff.name, companyName: staff.company_name || "", phoneNumber: staff.phone_number,
+        [id, organizationId, JSON.stringify({ id: staff.external_id, name: staff.name, companyName: staff.company_name?.trim() || "ATHULYA", phoneNumber: staff.phone_number,
           address: staff.address || "", language: staff.language || "en" })],
       );
       await client.query("COMMIT");
@@ -735,7 +974,7 @@ class PostgresRepository {
   }
   async getOperationsSummary(organizationId) {
     const timezone = process.env.APP_TIMEZONE || "Asia/Kolkata";
-    const [sessions, calls, jobs] = await Promise.all([
+    const [sessions, calls, jobs, workforce] = await Promise.all([
       this.pool.query(
         `WITH bounds AS (SELECT date_trunc('day', NOW() AT TIME ZONE $2) AT TIME ZONE $2 AS day_start)
          SELECT
@@ -745,6 +984,7 @@ class PostgresRepository {
            COUNT(*) FILTER (WHERE check_in_status IN ('scheduled','calling','processing','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_ins_pending,
            COUNT(*) FILTER (WHERE check_out_status IN ('scheduled','calling','processing','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_pending,
            COUNT(*) FILTER (WHERE check_in_status IN ('not_answered','missed','review') OR check_out_status IN ('not_answered','missed','review'))::int AS exceptions
+           ,COUNT(*) FILTER (WHERE session_status='completed')::int AS completed_schedules
          FROM attendance_sessions CROSS JOIN bounds WHERE organization_id=$1`, [organizationId, timezone],
       ),
       this.pool.query(
@@ -756,6 +996,11 @@ class PostgresRepository {
          FROM attendance_call_attempts CROSS JOIN bounds WHERE organization_id=$1 AND created_at >= bounds.day_start AND created_at < bounds.day_start + INTERVAL '1 day'`, [organizationId, timezone],
       ),
       this.pool.query("SELECT COUNT(*)::int AS waiting FROM attendance_jobs j JOIN attendance_sessions s ON j.payload->>'sessionId'=s.id::text WHERE s.organization_id=$1 AND j.job_type='place_call' AND j.status='queued'", [organizationId]),
+      this.pool.query(
+        `SELECT (SELECT COUNT(*)::int FROM staff_directory WHERE organization_id=$1 AND active=TRUE) AS caregivers,
+          (SELECT COUNT(*)::int FROM patient_directory WHERE organization_id=$1 AND active=TRUE) AS patients,
+          (SELECT COUNT(*)::int FROM athulya_care_managers WHERE organization_id=$1 AND active=TRUE AND app_user_id IS NOT NULL) AS care_managers`, [organizationId],
+      ),
     ]);
     const s = sessions.rows[0] || {};
     const c = calls.rows[0] || {};
@@ -766,12 +1011,16 @@ class PostgresRepository {
       checkInsPending: s.check_ins_pending || 0,
       checkOutsPending: s.check_outs_pending || 0,
       exceptions: s.exceptions || 0,
+      completedSchedules: s.completed_schedules || 0,
       callsToday: c.calls_today || 0,
       activeCalls: c.active_calls || 0,
       completedCalls: c.completed_calls || 0,
       averageDurationSeconds: c.average_duration_seconds || 0,
       callsWaiting: jobs.rows[0]?.waiting || 0,
       maxConcurrentCalls: Number(process.env.MAX_CONCURRENT_CALLS) || 20,
+      careManagers: workforce.rows[0]?.care_managers || 0,
+      caregivers: workforce.rows[0]?.caregivers || 0,
+      patients: workforce.rows[0]?.patients || 0,
     };
   }
   async createStaffDirectoryRecord(organizationId, person, client = this.pool) {
@@ -780,11 +1029,11 @@ class PostgresRepository {
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (organization_id,external_id) DO NOTHING
        RETURNING external_id,name,company_name,phone_number,address,language`,
-      [organizationId, person.id, person.name, person.companyName || "", person.phoneNumber, person.address, person.language || "en"],
+      [organizationId, person.id, person.name, person.companyName?.trim() || "ATHULYA", person.phoneNumber, person.address, person.language || "en"],
     );
     const row = rows[0];
     return row ? {
-      id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number,
+      id: row.external_id, name: row.name, companyName: row.company_name?.trim() || "ATHULYA", phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
       patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
@@ -798,11 +1047,11 @@ class PostgresRepository {
          name=EXCLUDED.name, company_name=EXCLUDED.company_name, phone_number=EXCLUDED.phone_number, address=EXCLUDED.address,
          language=EXCLUDED.language, active=TRUE, updated_at=NOW()
        RETURNING external_id,name,company_name,phone_number,address,language`,
-      [organizationId, person.id, person.name, person.companyName || "", person.phoneNumber, person.address, person.language || "en"],
+      [organizationId, person.id, person.name, person.companyName?.trim() || "ATHULYA", person.phoneNumber, person.address, person.language || "en"],
     );
     const row = rows[0];
     return row ? {
-      id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number,
+      id: row.external_id, name: row.name, companyName: row.company_name?.trim() || "ATHULYA", phoneNumber: row.phone_number,
       phoneMasked: this.maskPhone(row.phone_number), address: row.address, language: row.language,
       patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
     } : null;
@@ -820,6 +1069,7 @@ class PostgresRepository {
     const row = rows[0];
     return row ? {
       id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address,
+      patientUhid: row.athulya_patient_uhid || "", branch: row.branch || "",
       language: row.language, assignedStaff: "Unassigned", employeeId: null,
       careCategory: row.care_category || "Not specified", hub: row.hub || "Not specified",
       locationVerification: "not_integrated", status: "unassigned",
@@ -841,6 +1091,7 @@ class PostgresRepository {
     const row = rows[0];
     return row ? {
       id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address,
+      patientUhid: row.athulya_patient_uhid || "", branch: row.branch || "",
       language: row.language, assignedStaff: "Unassigned", employeeId: null,
       careCategory: row.care_category || "Not specified", hub: row.hub || "Not specified",
       locationVerification: "not_integrated", status: "unassigned",
@@ -850,7 +1101,7 @@ class PostgresRepository {
   async listStaffDirectory(organizationId, { search = "", status = "all", limit = 100 } = {}) {
     const [profiles, sessions] = await Promise.all([
       this.pool.query(
-        `SELECT external_id,name,company_name,phone_number,address,language FROM staff_directory
+        `SELECT external_id,name,company_name,phone_number,address,language,branch FROM staff_directory
          WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
         [organizationId],
       ),
@@ -859,7 +1110,7 @@ class PostgresRepository {
     const records = new Map();
     for (const row of profiles.rows) {
       records.set(row.external_id, {
-        id: row.external_id, name: row.name, companyName: row.company_name || "", phoneNumber: row.phone_number,
+        id: row.external_id, name: row.name, companyName: row.company_name?.trim() || "ATHULYA", branch: row.branch || "", phoneNumber: row.phone_number,
         phoneMasked: this.maskPhone(row.phone_number), address: row.address || "", language: row.language,
         patientName: "Unassigned", patientId: null, dutyStatus: "unassigned", assignmentId: "—", sessionId: "", scheduledStartAt: null, scheduledEndAt: null,
       });
@@ -873,7 +1124,8 @@ class PostgresRepository {
       records.set(key, {
         id: key,
         name: previous?.name || person.name,
-        companyName: previous?.companyName || person.companyName || "",
+        companyName: previous?.companyName?.trim() || person.companyName?.trim() || "ATHULYA",
+        branch: previous?.branch || "",
         phoneNumber: previous?.phoneNumber || person.phoneNumber || null,
         phoneMasked: previous?.phoneMasked || this.maskPhone(person.phoneNumber),
         address: previous?.address || person.address || "",
@@ -896,7 +1148,7 @@ class PostgresRepository {
   async listPatientDirectory(organizationId, { search = "", status = "all", limit = 100 } = {}) {
     const [profiles, sessions] = await Promise.all([
       this.pool.query(
-        `SELECT external_id,name,phone_number,address,language,care_category,hub FROM patient_directory
+        `SELECT external_id,name,phone_number,address,language,care_category,hub,athulya_patient_uhid,branch FROM patient_directory
          WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
         [organizationId],
       ),
@@ -905,7 +1157,7 @@ class PostgresRepository {
     const records = new Map();
     for (const row of profiles.rows) {
       records.set(row.external_id, {
-        id: row.external_id, name: row.name, phoneNumber: row.phone_number, address: row.address || "",
+        id: row.external_id, name: row.name, patientUhid: row.athulya_patient_uhid || "", branch: row.branch || "", phoneNumber: row.phone_number, address: row.address || "",
         language: row.language, assignedStaff: "Unassigned", employeeId: null,
         careCategory: row.care_category || "Not specified", hub: row.hub || "Not specified",
         locationVerification: "not_integrated", status: "unassigned",
@@ -920,6 +1172,8 @@ class PostgresRepository {
       records.set(key, {
         id: key,
         name: previous?.name || patient.name,
+        patientUhid: previous?.patientUhid || "",
+        branch: previous?.branch || metadata.branch || "",
         phoneNumber: previous?.phoneNumber || patient.phoneNumber || null,
         address: previous?.address || patient.address || "",
         language: previous?.language || session.language,
@@ -1247,6 +1501,19 @@ class PostgresRepository {
        SELECT organization_id,$1,'attendance.stage_status',$5::jsonb FROM updated`,
       [sessionId, status, stageKey, JSON.stringify(contextPatch), JSON.stringify({ stage, status, ...contextPatch })],
     );
+    if (status === "confirmed") {
+      await this.pool.query(
+        `INSERT INTO athulya_attendance_submissions (organization_id,schedule_id,caregiver_id,event_type,event_at,status,idempotency_key)
+         SELECT s.organization_id,source.id,s.employee->>'id',$2,COALESCE($3::timestamptz,NOW()),'awaiting_api_specification',
+           'attendance:'||s.id::text||':'||$2
+         FROM attendance_sessions s JOIN athulya_schedules source ON source.organization_id=s.organization_id
+           AND (source.athulya_schedule_id=s.external_assignment_id OR source.athulya_schedule_pk=s.external_assignment_id)
+         JOIN athulya_schedule_caregivers caregiver ON caregiver.schedule_id=source.id AND caregiver.athulya_caregiver_id=s.employee->>'id'
+         WHERE s.id=$1
+         ON CONFLICT (organization_id,idempotency_key) DO NOTHING`,
+        [sessionId, stage, contextPatch.reportedAt || null],
+      );
+    }
   }
   async setRecordingObjectKey(callAttemptId, key, contentType) {
     await this.pool.query("UPDATE attendance_call_attempts SET recording_object_key=$2,recording_content_type=$3,updated_at=NOW() WHERE id=$1", [callAttemptId, key, contentType || null]);

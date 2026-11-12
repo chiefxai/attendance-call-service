@@ -63,7 +63,7 @@ const shiftEnd = new Date(now.getTime() + 8 * 60 * 60_000);
 const createInitialValues = (): FormValues => ({
   assignmentId: crypto.randomUUID(), agentId: "", fromNumber: "", language: "ta",
   scheduledStartAt: localInputValue(now), scheduledEndAt: localInputValue(shiftEnd),
-  employeeId: "", employeeName: "", employeeCompanyName: "", employeePhone: "", employeeAddress: "",
+  employeeId: "", employeeName: "", employeeCompanyName: "ATHULYA", employeePhone: "", employeeAddress: "",
   patientId: "", patientName: "", patientPhone: "", patientAddress: "",
 });
 
@@ -149,7 +149,7 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
       scheduledStartAt: Number.isFinite(startAt) ? new Date(startAt).toISOString() : "",
       scheduledEndAt: Number.isFinite(endAt) ? new Date(endAt).toISOString() : "",
       metadata: { timeZone: assignmentTimeZone },
-      employee: { id: get("employeeId"), name: get("employeeName"), companyName: get("employeeCompanyName"), phoneNumber: employeePhone || employeePhoneInput, address: get("employeeAddress") },
+      employee: { id: get("employeeId"), name: get("employeeName"), companyName: get("employeeCompanyName") || "ATHULYA", phoneNumber: employeePhone || employeePhoneInput, address: get("employeeAddress") },
       patient: { id: get("patientId"), name: get("patientName"), address: get("patientAddress"), phoneNumber: patientPhone || undefined },
     };
     return { line, payload: errors.length ? undefined : payload, errors };
@@ -269,7 +269,7 @@ export function NewAssignmentPage() {
       assignmentId: form.assignmentId.trim(), agentId: form.agentId, fromNumber: form.fromNumber.trim(),
       language: form.language, scheduledStartAt: toUtcIso(form.scheduledStartAt),
       scheduledEndAt: toUtcIso(form.scheduledEndAt), metadata: { timeZone: getBrowserTimeZone() },
-      employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), companyName: form.employeeCompanyName.trim(), phoneNumber: employeePhone, address: form.employeeAddress.trim() },
+      employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), companyName: form.employeeCompanyName.trim() || "ATHULYA", phoneNumber: employeePhone, address: form.employeeAddress.trim() },
       patient: { id: form.patientId.trim(), name: form.patientName.trim(), phoneNumber: patientPhone || undefined, address: form.patientAddress.trim() },
     };
     mutation.mutate(payload);
@@ -281,7 +281,7 @@ export function NewAssignmentPage() {
     const employee = staff.data?.find((row) => row.id === employeeId);
     if (!employee) return;
     setPhoneError("");
-    setForm((current) => ({ ...current, employeeId: employee.id, employeeName: employee.name, employeeCompanyName: employee.companyName || "",
+    setForm((current) => ({ ...current, employeeId: employee.id, employeeName: employee.name, employeeCompanyName: employee.companyName || "ATHULYA",
       employeePhone: employee.phoneNumber || "", employeeAddress: employee.address || "",
       language: employee.language ? callLanguageCode(employee.language) : current.language }));
   };
@@ -297,7 +297,7 @@ export function NewAssignmentPage() {
   const selectedPatient = patients.data?.find((row) => row.id === form.patientId) || null;
   const clearStaff = () => {
     setPhoneError("");
-    setForm((current) => ({ ...current, employeeId: "", employeeName: "", employeeCompanyName: "", employeePhone: "", employeeAddress: "" }));
+    setForm((current) => ({ ...current, employeeId: "", employeeName: "", employeeCompanyName: "ATHULYA", employeePhone: "", employeeAddress: "" }));
   };
   const clearPatient = () => {
     setPatientPhoneError("");
@@ -343,7 +343,7 @@ export function NewAssignmentPage() {
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee ID" value={form.employeeId} onChange={update("employeeId")} required readOnly={Boolean(selectedEmployee)} /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee name" value={form.employeeName} onChange={update("employeeName")} required readOnly={Boolean(selectedEmployee)} /></Grid>
-              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Company / vendor name" value={form.employeeCompanyName} onChange={update("employeeCompanyName")} helperText={selectedEmployee ? "Stored company is locked. Edit it in Staff records if needed." : "Optional for independent staff."} readOnly={Boolean(selectedEmployee)} /></Grid>
+              <Grid size={{ xs: 12, sm: 3 }}><FormField label="Company / vendor name" value={form.employeeCompanyName} onChange={update("employeeCompanyName")} helperText={selectedEmployee ? "Stored company is locked. Edit it in Staff records if needed." : "Defaults to ATHULYA. Enter another name for a vendor."} readOnly={Boolean(selectedEmployee)} /></Grid>
               <Grid size={{ xs: 12, sm: 3 }}><FormField label="Employee mobile number" value={form.employeePhone} readOnly={Boolean(selectedEmployee)} helperText={phoneError || (selectedEmployee ? "Stored number is locked. Edit it in Staff records if needed." : "Enter 10 digits; 91 or +91 country code is optional.")} onChange={(value) => { setPhoneError(""); update("employeePhone")(value); }} required error={Boolean(phoneError)}  onBlur={() => { const normalized = normalizeIndianMobile(form.employeePhone); if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setForm((current) => ({ ...current, employeePhone: normalized })); } }} /></Grid>
               <Grid size={12}><AddressFields required value={form.employeeAddress} onChange={update("employeeAddress")} /></Grid>
             </Grid>

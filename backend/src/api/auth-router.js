@@ -61,7 +61,7 @@ function createAuthRouter({ express, repository }) {
       const expiresAt = new Date(now + SESSION_TTL_MS);
       await repository.createWebSession(user.id, hash(token), expiresAt);
       res.set("Set-Cookie", sessionCookie(token, SESSION_TTL_MS / 1000));
-      return res.json({ user: { id: user.id, email: user.email, displayName: user.displayName } });
+      return res.json({ user: { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin" } });
     } catch (error) {
       console.error("[attendance-auth] login failed", error.message);
       return res.status(500).json({ error: "Sign-in is temporarily unavailable." });
@@ -77,7 +77,7 @@ function createAuthRouter({ express, repository }) {
         res.set("Set-Cookie", sessionCookie("", 0));
         return res.status(401).json({ error: "Session expired. Sign in again." });
       }
-      return res.json({ user: { id: user.id, email: user.email, displayName: user.displayName } });
+      return res.json({ user: { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin" } });
     } catch (error) {
       console.error("[attendance-auth] session lookup failed", error.message);
       return res.status(500).json({ error: "Session validation is temporarily unavailable." });

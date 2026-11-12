@@ -20,6 +20,138 @@ export interface WebUser {
   id: string;
   email: string;
   displayName: string;
+  role: "admin" | "care_manager";
+}
+
+export interface CareManager {
+  id: string;
+  athulyaCareManagerId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  active: boolean;
+  userId: string | null;
+  accountActive: boolean | null;
+  createdAt: string | null;
+  lastLogin: string | null;
+}
+
+export interface AthulyaIntegrationSettings {
+  integrationName: string;
+  apiBaseUrl: string;
+  enabled: boolean;
+  keyConfigured: boolean;
+  apiKeyMasked: string;
+  updatedAt: string | null;
+  lastSuccessfulScheduleSync: string | null;
+  lastSuccessfulAttendanceSubmission: string | null;
+  attendanceSubmissionStatus: "awaiting_api_specification";
+}
+
+export interface AthulyaSyncRun {
+  id: string;
+  status: "running" | "succeeded" | "failed";
+  fromDate: string | null;
+  toDate: string | null;
+  recordsReceived: number;
+  recordsUpserted: number;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface AthulyaSchedule {
+  id: string;
+  athulyaScheduleId: string;
+  athulyaSchedulePk: string;
+  patient: { id: string; uhid: string; name: string };
+  careManager: { id: string; name: string; phone: string };
+  date: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  status: string;
+  service: string;
+  carePlan: string;
+  branch: string;
+  vendorCompany: string;
+  caregivers: Array<{ id: string; name: string; phone: string; status: string }>;
+  lastSyncedAt: string;
+}
+
+export interface AthulyaAttendanceSubmission {
+  id: string;
+  eventType: "check_in" | "check_out";
+  eventAt: string;
+  status: "pending" | "processing" | "synced" | "failed" | "retry_scheduled" | "awaiting_api_specification";
+  retryCount: number;
+  responseCode: number | null;
+  errorMessage: string | null;
+  externalReference: string | null;
+  createdAt: string;
+  scheduleId: string | null;
+  patientId: string | null;
+  patientName: string | null;
+  caregiverName: string | null;
+}
+
+export async function fetchCareManagers() {
+  const response = await api.get<CareManager[]>("/care-managers");
+  return response.data;
+}
+
+export async function createCareManager(payload: { name: string; email: string; phone: string; athulyaCareManagerId: string; password: string }) {
+  const response = await api.post<CareManager>("/care-managers", payload);
+  return response.data;
+}
+
+export async function updateCareManager(id: string, payload: { name: string; email: string; phone: string; athulyaCareManagerId: string }) {
+  const response = await api.put<{ success: boolean }>(`/care-managers/${encodeURIComponent(id)}`, payload);
+  return response.data;
+}
+
+export async function setCareManagerActive(id: string, active: boolean) {
+  const response = await api.patch<{ success: boolean; active: boolean }>(`/care-managers/${encodeURIComponent(id)}`, { active });
+  return response.data;
+}
+
+export async function resetCareManagerPassword(id: string, password: string) {
+  const response = await api.post<{ success: boolean; sessionsRevoked: boolean }>(`/care-managers/${encodeURIComponent(id)}/reset-password`, { password });
+  return response.data;
+}
+
+export async function fetchAthulyaIntegration() {
+  const response = await api.get<AthulyaIntegrationSettings>("/integrations/athulya");
+  return response.data;
+}
+
+export async function saveAthulyaIntegration(payload: { integrationName: string; apiBaseUrl: string; apiKey?: string; enabled: boolean }) {
+  const response = await api.put<AthulyaIntegrationSettings>("/integrations/athulya", payload);
+  return response.data;
+}
+
+export async function testAthulyaIntegration(payload: { apiKey?: string; apiBaseUrl?: string } = {}) {
+  const response = await api.post<{ connected: boolean; recordsReceived: number }>("/integrations/athulya/test", payload);
+  return response.data;
+}
+
+export async function startAthulyaSync(payload: { fromDate?: string; toDate?: string; careManagerId?: string; branchId?: string; clientId?: string }) {
+  const response = await api.post<{ runId: string; status: string }>("/integrations/athulya/sync", payload);
+  return response.data;
+}
+
+export async function fetchAthulyaSyncRuns() {
+  const response = await api.get<AthulyaSyncRun[]>("/integrations/athulya/sync-status");
+  return response.data;
+}
+
+export async function fetchAthulyaSchedules(params: { fromDate?: string; toDate?: string } = {}) {
+  const response = await api.get<AthulyaSchedule[]>("/integrations/athulya/schedules", { params });
+  return response.data;
+}
+
+export async function fetchAthulyaAttendanceSubmissions(params: { eventType?: string; status?: string; fromDate?: string; toDate?: string; caregiverId?: string; patientId?: string } = {}) {
+  const response = await api.get<AthulyaAttendanceSubmission[]>("/integrations/athulya/attendance-submissions", { params });
+  return response.data;
 }
 
 const authApi = axios.create({
@@ -219,6 +351,7 @@ export interface AttendanceRecord {
 
 export interface CallingSettings {
   defaultFromNumber: string;
+  allowInboundCalls: boolean;
   allowNonPatientInboundCalls: boolean;
   requireHumanVerificationForStaffBooking: boolean;
   retry: {
@@ -237,12 +370,16 @@ export interface OperationsSummary {
   checkInsPending: number;
   checkOutsPending: number;
   exceptions: number;
+  completedSchedules: number;
   callsToday: number;
   activeCalls: number;
   completedCalls: number;
   averageDurationSeconds: number;
   callsWaiting: number;
   maxConcurrentCalls: number;
+  careManagers: number;
+  caregivers: number;
+  patients: number;
 }
 
 export interface CreateStaffPayload {
@@ -268,6 +405,7 @@ export interface StaffRecord {
   id: string;
   name: string;
   companyName: string;
+  branch?: string;
   phoneNumber: string | null;
   phoneMasked: string | null;
   address: string;
@@ -284,6 +422,8 @@ export interface StaffRecord {
 export interface PatientRecord {
   id: string;
   name: string;
+  patientUhid?: string;
+  branch?: string;
   phoneNumber: string | null;
   address: string;
   language: string;

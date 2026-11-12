@@ -7,6 +7,7 @@ const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { verifyVobizWebhookSignature } = require("../infrastructure/telephony/vobiz-signature");
 const { createVobizLiveRuntime } = require("../realtime/vobiz-live-runtime");
+const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules } = require("../infrastructure/integrations/athulya-platform");
 
 const AGENT_DEFAULTS = {
   active: true,
@@ -41,7 +42,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         const user = await repository.resolveWebSession(crypto.createHash("sha256").update(sessionToken).digest("hex"));
         if (user) {
           req.orgId = user.organizationId;
-          req.webUser = { id: user.id, email: user.email, displayName: user.displayName };
+          req.webUser = { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin" };
           return next();
         }
       }
@@ -50,6 +51,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         if (!process.env.API_KEY_ADMIN_TOKEN) return res.status(503).json({ error: "API_KEY_ADMIN_TOKEN is not configured" });
         if (!validateAdminToken(req)) return res.status(401).json({ error: "A web session or valid X-API-Admin-Token is required" });
         req.orgId = process.env.DEFAULT_ORGANIZATION_ID;
+        req.webUser = { role: "admin", id: null };
         if (!req.orgId) return res.status(503).json({ error: "DEFAULT_ORGANIZATION_ID is not configured" });
         return next();
       }
@@ -77,6 +79,11 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     }
     return req.orgId;
   };
+  const requireAdmin = (req, res) => {
+    if (req.webUser?.role === "admin") return true;
+    res.status(403).json({ error: "Admin access is required for this action." });
+    return false;
+  };
   const fail = (res, error) => res.status(error.status || 500).json({ error: error.message || "Request failed" });
   const envNumber = (name, fallback) => process.env[name] !== undefined && process.env[name] !== "" && Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback;
   const getEffectiveCallingSettings = async (organizationId) => {
@@ -84,6 +91,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     const storedRetry = stored.callRetry || {};
     return {
       defaultFromNumber: stored.defaultFromNumber ?? process.env.VOBIZ_FROM_NUMBER ?? "",
+      allowInboundCalls: stored.allowInboundCalls ?? true,
       allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
       requireHumanVerificationForStaffBooking: stored.requireHumanVerificationForStaffBooking ?? false,
       retry: {
@@ -100,6 +108,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   };
 
   router.post("/api-keys", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const label = String(req.body?.label || "").trim();
       if (!label || label.length > 80) return res.status(400).json({ error: "label must contain 1 to 80 characters" });
@@ -114,15 +123,170 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   });
 
   router.get("/api-keys", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try { res.json(await repository.listApiKeys(req.orgId)); } catch (error) { fail(res, error); }
   });
 
   router.delete("/api-keys/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const revoked = await repository.revokeApiKey(req.orgId, req.params.id);
       if (!revoked) return res.status(404).json({ error: "Active API key not found" });
       res.json({ success: true });
     } catch (error) { fail(res, error); }
+  });
+
+  router.get("/care-managers", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try { res.json(await repository.listCareManagers(org(req))); } catch (error) { fail(res, error); }
+  });
+
+  router.post("/care-managers", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const body = req.body || {};
+      const email = String(body.email || "").trim().toLowerCase();
+      const displayName = String(body.name || "").trim();
+      const athulyaId = String(body.athulyaCareManagerId || "").trim();
+      const phone = String(body.phone || "").trim();
+      const password = String(body.password || "");
+      if (!/^\S+@\S+\.\S+$/.test(email) || !displayName || !athulyaId || password.length < 12 || password.length > 1024) {
+        return res.status(400).json({ error: "Provide a valid name, email, Athulya Care Manager ID, and password of at least 12 characters." });
+      }
+      const salt = crypto.randomBytes(16).toString("hex");
+      const passwordHash = crypto.scryptSync(password, salt, 64).toString("hex");
+      const user = await repository.createCareManagerUser({ organizationId: org(req), email, displayName, passwordSalt: salt, passwordHash, athulyaId, phone: phone || null });
+      res.status(201).json({ id: user.id, email: user.email, displayName: user.display_name || displayName, role: "care_manager" });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.put("/care-managers/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const body = req.body || {};
+      const email = String(body.email || "").trim().toLowerCase();
+      const name = String(body.name || "").trim();
+      const athulyaId = String(body.athulyaCareManagerId || "").trim();
+      const phone = String(body.phone || "").trim();
+      if (!/^\S+@\S+\.\S+$/.test(email) || !name || !athulyaId) return res.status(400).json({ error: "Provide a valid name, email, and Athulya Care Manager ID." });
+      if (!await repository.updateCareManager(org(req), req.params.id, { name, email, phone, athulyaId })) return res.status(404).json({ error: "Care Manager not found" });
+      res.json({ success: true });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.patch("/care-managers/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const active = req.body?.active;
+    if (typeof active !== "boolean") return res.status(400).json({ error: "active must be true or false" });
+    try {
+      if (!await repository.setCareManagerActive(org(req), req.params.id, active)) return res.status(404).json({ error: "Care Manager not found" });
+      res.json({ success: true, active });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.post("/care-managers/:id/reset-password", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const password = String(req.body?.password || "");
+      if (password.length < 12 || password.length > 1024) return res.status(400).json({ error: "Password must contain 12 to 1024 characters." });
+      const salt = crypto.randomBytes(16).toString("hex");
+      const passwordHash = crypto.scryptSync(password, salt, 64).toString("hex");
+      if (!await repository.resetCareManagerPassword(org(req), req.params.id, salt, passwordHash)) return res.status(404).json({ error: "Care Manager not found" });
+      res.json({ success: true, sessionsRevoked: true });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/integrations/athulya", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const value = await repository.getAthulyaIntegration(org(req));
+      res.json({ integrationName: value.integrationName, apiBaseUrl: value.apiBaseUrl || DEFAULT_BASE_URL, enabled: value.enabled,
+        keyConfigured: Boolean(value.encryptedApiKey), apiKeyMasked: value.encryptedApiKey ? "••••••••" : "", updatedAt: value.updatedAt || null,
+        lastSuccessfulScheduleSync: value.lastSuccessfulScheduleSync || null,
+        lastSuccessfulAttendanceSubmission: value.lastSuccessfulAttendanceSubmission || null,
+        attendanceSubmissionStatus: "awaiting_api_specification" });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.put("/integrations/athulya", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const body = req.body || {};
+      const integrationName = String(body.integrationName || "Athulya Platform").trim().slice(0, 100);
+      const apiBaseUrl = validateBaseUrl(body.apiBaseUrl || DEFAULT_BASE_URL);
+      const enabled = body.enabled === true;
+      const old = await repository.getAthulyaIntegration(org(req));
+      const apiKeyInput = String(body.apiKey || "").trim();
+      const encryptedApiKey = apiKeyInput ? encryptSecret(apiKeyInput) : null;
+      if (enabled && !(encryptedApiKey || old.encryptedApiKey)) return res.status(400).json({ error: "Enter the Athulya API key before enabling the integration." });
+      const saved = await repository.saveAthulyaIntegration(org(req), { integrationName, apiBaseUrl, encryptedApiKey, enabled, updatedBy: req.webUser?.id });
+      res.json({ integrationName: saved.integrationName, apiBaseUrl: saved.apiBaseUrl, enabled: saved.enabled,
+        keyConfigured: Boolean(saved.encryptedApiKey), apiKeyMasked: saved.encryptedApiKey ? "••••••••" : "", updatedAt: saved.updatedAt,
+        lastSuccessfulScheduleSync: saved.lastSuccessfulScheduleSync || null,
+        lastSuccessfulAttendanceSubmission: saved.lastSuccessfulAttendanceSubmission || null,
+        attendanceSubmissionStatus: "awaiting_api_specification" });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.post("/integrations/athulya/test", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const settings = await repository.getAthulyaIntegration(org(req));
+      const apiBaseUrl = validateBaseUrl(req.body?.apiBaseUrl || settings.apiBaseUrl);
+      const apiKey = String(req.body?.apiKey || "").trim() || decryptSecret(settings.encryptedApiKey);
+      const records = await fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters: {} });
+      res.json({ connected: true, recordsReceived: records.length });
+    } catch (error) { res.status(502).json({ connected: false, error: error.message }); }
+  });
+
+  router.post("/integrations/athulya/sync", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const settings = await repository.getAthulyaIntegration(org(req));
+      if (!settings.enabled) return res.status(409).json({ error: "Enable the Athulya integration before synchronising." });
+      const body = req.body || {};
+      const fromDate = body.fromDate ? String(body.fromDate) : "";
+      const toDate = body.toDate ? String(body.toDate) : "";
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+      if ((fromDate && !datePattern.test(fromDate)) || (toDate && !datePattern.test(toDate))) return res.status(400).json({ error: "Dates must use YYYY-MM-DD format." });
+      const filters = { from_date: fromDate || undefined, to_date: toDate || undefined,
+        care_manager_id: body.careManagerId || undefined, branch_id: body.branchId || undefined, client_id: body.clientId || undefined };
+      if (fromDate && toDate && toDate < fromDate) return res.status(400).json({ error: "toDate must be on or after fromDate." });
+      const runId = await repository.createAthulyaSyncRun(org(req), { fromDate, toDate, filters });
+      await queue.enqueue("sync_athulya_schedules", { runId, organizationId: org(req), filters }, { idempotencyKey: `athulya-sync:${runId}` });
+      res.status(202).json({ runId, status: "running" });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/integrations/athulya/sync-status", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try { res.json(await repository.listAthulyaSyncRuns(org(req))); } catch (error) { fail(res, error); }
+  });
+
+  router.get("/integrations/athulya/attendance-submissions", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const date = (key) => {
+        const value = String(req.query[key] || "").trim();
+        if (!value) return null;
+        const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value)
+          ? `${value}T${key === "toDate" ? "23:59:59.999" : "00:00:00.000"}Z` : value;
+        const parsed = new Date(normalized);
+        if (!Number.isFinite(parsed.getTime())) { const error = new Error(`${key} must be a valid timestamp`); error.status = 400; throw error; }
+        return parsed;
+      };
+      res.json(await repository.listAthulyaAttendanceSubmissions(org(req), {
+        eventType: ["check_in", "check_out"].includes(String(req.query.eventType)) ? String(req.query.eventType) : "all",
+        status: ["pending", "processing", "synced", "failed", "retry_scheduled", "awaiting_api_specification"].includes(String(req.query.status)) ? String(req.query.status) : "all",
+        fromDate: date("fromDate"), toDate: date("toDate"), caregiverId: String(req.query.caregiverId || ""), patientId: String(req.query.patientId || ""),
+        limit: req.query.limit || 200,
+      }));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/integrations/athulya/schedules", async (req, res) => {
+    try { res.json(await repository.listAthulyaSchedules(org(req), { fromDate: req.query.fromDate, toDate: req.query.toDate, limit: req.query.limit })); }
+    catch (error) { fail(res, error); }
   });
 
   router.get("/dashboard/summary", async (req, res) => {
@@ -158,7 +322,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.post("/staff", async (req, res) => {
     const id = String(req.body?.id || "").trim();
     const name = String(req.body?.name || "").trim();
-    const companyName = String(req.body?.companyName || "").trim();
+    const companyName = String(req.body?.companyName || "").trim() || "ATHULYA";
     const phoneNumber = normalizeIndianMobile(req.body?.phoneNumber);
     const address = String(req.body?.address || "").trim();
     const language = String(req.body?.language || "en").trim().toLowerCase();
@@ -178,7 +342,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.put("/staff/:id", async (req, res) => {
     const id = String(req.params.id || "").trim();
     const name = String(req.body?.name || "").trim();
-    const companyName = String(req.body?.companyName || "").trim();
+    const companyName = String(req.body?.companyName || "").trim() || "ATHULYA";
     const phoneNumber = normalizeIndianMobile(req.body?.phoneNumber);
     const address = String(req.body?.address || "").trim();
     const language = String(req.body?.language || "en").trim().toLowerCase();
@@ -420,11 +584,13 @@ router.get("/activities", async (req, res) => {
   });
 
   router.get("/settings/calling", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try { res.set("Cache-Control", "private, no-store").json(await getEffectiveCallingSettings(org(req))); }
     catch (error) { fail(res, error); }
   });
 
   router.put("/settings/calling", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
       const body = req.body || {};
@@ -436,6 +602,9 @@ router.get("/activities", async (req, res) => {
       if (!retry || typeof retry !== "object") return res.status(400).json({ error: "retry settings are required" });
       if (body.allowNonPatientInboundCalls !== undefined && typeof body.allowNonPatientInboundCalls !== "boolean") {
         return res.status(400).json({ error: "allowNonPatientInboundCalls must be a boolean" });
+      }
+      if (body.allowInboundCalls !== undefined && typeof body.allowInboundCalls !== "boolean") {
+        return res.status(400).json({ error: "allowInboundCalls must be a boolean" });
       }
       if (body.requireHumanVerificationForStaffBooking !== undefined && typeof body.requireHumanVerificationForStaffBooking !== "boolean") {
         return res.status(400).json({ error: "requireHumanVerificationForStaffBooking must be a boolean" });
@@ -454,6 +623,7 @@ router.get("/activities", async (req, res) => {
       await repository.saveOrganizationCallSettings(organizationId, {
         defaultFromNumber,
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
+        allowInboundCalls: body.allowInboundCalls ?? existingSettings.allowInboundCalls ?? true,
         allowNonPatientInboundCalls: body.allowNonPatientInboundCalls ?? existingSettings.allowNonPatientInboundCalls ?? false,
         requireHumanVerificationForStaffBooking: body.requireHumanVerificationForStaffBooking ?? existingSettings.requireHumanVerificationForStaffBooking ?? false,
       });
@@ -462,9 +632,10 @@ router.get("/activities", async (req, res) => {
   });
 
   router.post("/settings/calling/reset", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowInboundCalls: true, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });
@@ -477,7 +648,8 @@ router.get("/activities", async (req, res) => {
       const missing = required.filter((key) => !body[key]);
       const callingSettings = await getEffectiveCallingSettings(organizationId);
       const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
-      if (String(body.employee?.companyName || "").trim().length > 200) {
+      const employeeCompanyName = String(body.employee?.companyName || "").trim() || "ATHULYA";
+      if (employeeCompanyName.length > 200) {
         return res.status(400).json({ error: "Employee company name must be at most 200 characters." });
       }
       const employeePhone = normalizeIndianMobile(body.employee?.phoneNumber);
@@ -504,7 +676,7 @@ router.get("/activities", async (req, res) => {
           scheduledEndAt: endAt,
         }, client);
         await repository.createStaffDirectoryRecord(organizationId, {
-          id: body.employee.id, name: body.employee.name, companyName: body.employee.companyName || "", phoneNumber: employeePhone,
+          id: body.employee.id, name: body.employee.name, companyName: employeeCompanyName, phoneNumber: employeePhone,
           address: String(body.employee.address || "").trim(), language: body.language,
         }, client);
         await repository.createPatientDirectoryRecord(organizationId, {
@@ -515,7 +687,7 @@ router.get("/activities", async (req, res) => {
         const created = await repository.createAttendanceSession({
           organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
           agentId: body.agentId, fromNumber, language: body.language,
-          employee: { ...body.employee, companyName: String(body.employee.companyName || "").trim(), phoneNumber: employeePhone },
+          employee: { ...body.employee, companyName: employeeCompanyName, phoneNumber: employeePhone },
           patient: { ...body.patient, phoneNumber: patientPhone || undefined }, scheduledStartAt: startAt,
           scheduledEndAt: endAt, metadata: body.metadata || {},
         }, client);
@@ -614,6 +786,7 @@ router.get("/activities", async (req, res) => {
   });
 
   router.post("/agents", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
       const body = req.body || {};
@@ -636,6 +809,7 @@ router.get("/activities", async (req, res) => {
   });
 
   router.patch("/agents/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const agent = await repository.updateAgent(org(req), req.params.id, req.body || {});
       if (!agent) return res.status(404).json({ error: "Agent not found" });
@@ -644,6 +818,7 @@ router.get("/activities", async (req, res) => {
   });
 
   router.delete("/agents/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const removed = await repository.deleteAgent(org(req), req.params.id);
       if (!removed) return res.status(404).json({ error: "Agent not found" });
@@ -652,10 +827,12 @@ router.get("/activities", async (req, res) => {
   });
 
   router.get("/campaigns", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try { res.json(await repository.listCampaigns(org(req))); } catch (error) { fail(res, error); }
   });
 
   router.post("/campaigns", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
       const { name, agentId, fromNumber } = req.body || {};
@@ -672,6 +849,7 @@ router.get("/activities", async (req, res) => {
   });
 
   router.get("/campaigns/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
     try {
       const campaign = await repository.getCampaign(org(req), req.params.id);
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });

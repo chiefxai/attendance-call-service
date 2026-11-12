@@ -212,11 +212,16 @@ function createVobizLiveRuntime({ repository, vobiz, getClientForOrg, verifyWebh
       // contacts or retrieve staff records.
       const organizationId = process.env.DEFAULT_ORGANIZATION_ID;
       if (!organizationId) return res.status(503).send("Inbound calls are not configured");
+      const callingSettings = await repository.getOrganizationCallSettings(organizationId);
+      if (callingSettings.allowInboundCalls === false) {
+        console.info(`[vobiz-inbound] rejected call because inbound calling is disabled call=${callId}`);
+        res.set("Content-Type", "text/xml; charset=utf-8");
+        return res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>');
+      }
       const patientTool = createPatientContactTool(repository, organizationId);
       const patientResult = await patientTool.invoke({ phoneNumber: fromNumber });
       const patient = typeof patientResult === "string" ? JSON.parse(patientResult) : patientResult;
       if (!patient) {
-        const callingSettings = await repository.getOrganizationCallSettings(organizationId);
         if (callingSettings.allowNonPatientInboundCalls !== true) {
           console.info(`[vobiz-inbound] rejected unregistered caller call=${callId}`);
           res.set("Content-Type", "text/xml; charset=utf-8");

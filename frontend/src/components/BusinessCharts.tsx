@@ -1,7 +1,7 @@
 import { Box, Stack, Typography } from "@mui/material";
 
 export type AttendanceChartStatus = "pending" | "checkin" | "checkout" | "processing" | "delayed";
-export interface TrendPoint { label: string; checkIns: number; checkOuts: number }
+export interface TrendPoint { key: string; label: string; checkIns: number; checkOuts: number }
 export interface StatusSlice { status: AttendanceChartStatus; value: number }
 export interface RetryBucket { label: string; value: number }
 export interface LanguageStack { label: string; values: Record<AttendanceChartStatus, number> }
@@ -25,7 +25,7 @@ function EmptyChart({ message = "No attendance data yet" }: { message?: string }
   return <Box sx={{ height: 245, display: "grid", placeItems: "center" }}><Typography variant="body2" color="text.secondary">{message}</Typography></Box>;
 }
 
-export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
+export function AttendanceTrendChart({ points, onSelectDay }: { points: TrendPoint[]; onSelectDay?: (dayKey: string) => void }) {
   if (!points.some((point) => point.checkIns || point.checkOuts)) return <EmptyChart message="No confirmed attendance in the last 7 days" />;
   const width = 640, height = 260, left = 42, right = 20, top = 20, bottom = 42;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
@@ -46,7 +46,7 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
       <polyline points={checkOutLine.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={statusColors.checkout} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
       {points.map((point, index) => {
         const checkIn = coordinates(point.checkIns, index), checkOut = coordinates(point.checkOuts, index);
-        return <g key={point.label}><circle cx={checkIn.x} cy={checkIn.y} r="4" fill={statusColors.checkin} /><circle cx={checkOut.x} cy={checkOut.y} r="4" fill={statusColors.checkout} /><text x={checkIn.x} y={height - 14} textAnchor="middle" fontSize="11" fill="#758194">{point.label}</text></g>;
+        return <g key={point.key} onClick={onSelectDay ? () => onSelectDay(point.key) : undefined} role={onSelectDay ? "button" : undefined} tabIndex={onSelectDay ? 0 : undefined} aria-label={onSelectDay ? `View attendance records for ${point.label}` : undefined} onKeyDown={onSelectDay ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectDay(point.key); } } : undefined} style={{ cursor: onSelectDay ? "pointer" : undefined }}><circle cx={checkIn.x} cy={checkIn.y} r="5" fill={statusColors.checkin} /><circle cx={checkOut.x} cy={checkOut.y} r="5" fill={statusColors.checkout} /><text x={checkIn.x} y={height - 14} textAnchor="middle" fontSize="11" fill="#758194">{point.label}</text></g>;
       })}
     </svg>
     <Stack direction="row" spacing={2.5} justifyContent="center" sx={{ mt: .5 }}>
@@ -55,7 +55,7 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   </Box>;
 }
 
-export function AttendanceStatusChart({ slices }: { slices: StatusSlice[] }) {
+export function AttendanceStatusChart({ slices, onSelectStatus }: { slices: StatusSlice[]; onSelectStatus?: (status: AttendanceChartStatus) => void }) {
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
   if (!total) return <EmptyChart />;
   const radius = 72, circumference = 2 * Math.PI * radius;
@@ -65,7 +65,7 @@ export function AttendanceStatusChart({ slices }: { slices: StatusSlice[] }) {
       <circle cx="100" cy="100" r={radius} fill="none" stroke="#edf0f4" strokeWidth="24" />
       {slices.filter((slice) => slice.value > 0).map((slice) => {
         const segment = slice.value / total * circumference;
-        const circle = <circle key={slice.status} cx="100" cy="100" r={radius} fill="none" stroke={statusColors[slice.status]} strokeWidth="24" strokeDasharray={`${segment} ${circumference - segment}`} strokeDashoffset={-offset} transform="rotate(-90 100 100)" />;
+        const circle = <circle key={slice.status} cx="100" cy="100" r={radius} fill="none" stroke={statusColors[slice.status]} strokeWidth="24" strokeDasharray={`${segment} ${circumference - segment}`} strokeDashoffset={-offset} transform="rotate(-90 100 100)" onClick={onSelectStatus ? () => onSelectStatus(slice.status) : undefined} role={onSelectStatus ? "button" : undefined} tabIndex={onSelectStatus ? 0 : undefined} aria-label={onSelectStatus ? `View ${statusLabels[slice.status]} attendance` : undefined} onKeyDown={onSelectStatus ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectStatus(slice.status); } } : undefined} style={{ cursor: onSelectStatus ? "pointer" : undefined }} />;
         offset += segment;
         return circle;
       })}
@@ -73,7 +73,7 @@ export function AttendanceStatusChart({ slices }: { slices: StatusSlice[] }) {
       <text x="100" y="117" textAnchor="middle" fontSize="11" fill="#758194">sessions</text>
     </svg>
     <Stack spacing={1} sx={{ minWidth: 145 }}>
-      {slices.map((slice) => <Stack key={slice.status} direction="row" spacing={1} alignItems="center">
+      {slices.map((slice) => <Stack key={slice.status} component={onSelectStatus ? "button" : "div"} onClick={onSelectStatus ? () => onSelectStatus(slice.status) : undefined} sx={{ border: 0, bgcolor: "transparent", p: 0, textAlign: "left", cursor: onSelectStatus ? "pointer" : undefined, "&:hover": onSelectStatus ? { opacity: .72 } : undefined }} direction="row" spacing={1} alignItems="center">
         <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: statusColors[slice.status], flexShrink: 0 }} />
         <Typography variant="body2" sx={{ flex: 1 }}>{statusLabels[slice.status]}</Typography>
         <Typography variant="body2" fontWeight={700}>{slice.value}</Typography>
@@ -82,7 +82,7 @@ export function AttendanceStatusChart({ slices }: { slices: StatusSlice[] }) {
   </Stack>;
 }
 
-export function RetryVolumeChart({ buckets }: { buckets: RetryBucket[] }) {
+export function RetryVolumeChart({ buckets, onSelectBucket }: { buckets: RetryBucket[]; onSelectBucket?: (bucketLabel: string) => void }) {
   const max = Math.max(1, ...buckets.map((bucket) => bucket.value));
   if (!buckets.some((bucket) => bucket.value)) return <EmptyChart message="No call attempts are recorded yet" />;
   const width = 640, height = 260, left = 42, right = 20, top = 18, bottom = 48;
@@ -95,14 +95,14 @@ export function RetryVolumeChart({ buckets }: { buckets: RetryBucket[] }) {
     })}
     {buckets.map((bucket, index) => {
       const barHeight = bucket.value / max * plotHeight, x = left + slot * index + (slot - barWidth) / 2, y = top + plotHeight - barHeight;
-      return <g key={bucket.label}><rect x={x} y={y} width={barWidth} height={barHeight} rx="7" fill={["#356bd1", "#4d81dd", "#e0a12e", "#d85454"][index]} /><text x={x + barWidth / 2} y={Math.max(top + 12, y - 7)} textAnchor="middle" fontSize="12" fontWeight="700" fill="#354052">{bucket.value}</text><text x={x + barWidth / 2} y={height - 18} textAnchor="middle" fontSize="11" fill="#758194">{bucket.label}</text></g>;
+      return <g key={bucket.label} onClick={onSelectBucket ? () => onSelectBucket(bucket.label) : undefined} role={onSelectBucket ? "button" : undefined} tabIndex={onSelectBucket ? 0 : undefined} aria-label={onSelectBucket ? `View sessions with ${bucket.label} call attempts` : undefined} onKeyDown={onSelectBucket ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectBucket(bucket.label); } } : undefined} style={{ cursor: onSelectBucket ? "pointer" : undefined }}><rect x={x} y={y} width={barWidth} height={barHeight} rx="7" fill={["#356bd1", "#4d81dd", "#e0a12e", "#d85454"][index]} /><text x={x + barWidth / 2} y={Math.max(top + 12, y - 7)} textAnchor="middle" fontSize="12" fontWeight="700" fill="#354052">{bucket.value}</text><text x={x + barWidth / 2} y={height - 18} textAnchor="middle" fontSize="11" fill="#758194">{bucket.label}</text></g>;
     })}
   </svg>;
 }
 
 const stackOrder: AttendanceChartStatus[] = ["checkout", "checkin", "processing", "delayed", "pending"];
 
-export function LanguageOutcomeChart({ rows }: { rows: LanguageStack[] }) {
+export function LanguageOutcomeChart({ rows, onSelectLanguageStatus }: { rows: LanguageStack[]; onSelectLanguageStatus?: (language: string, status: AttendanceChartStatus) => void }) {
   if (!rows.some((row) => stackOrder.some((status) => row.values[status] > 0))) return <EmptyChart message="No language breakdown is available yet" />;
   const width = 680, height = 250, left = 108, right = 16, top = 18, rowGap = 45, trackWidth = width - left - right;
   const max = Math.max(1, ...rows.map((row) => stackOrder.reduce((sum, status) => sum + row.values[status], 0)));
@@ -116,7 +116,7 @@ export function LanguageOutcomeChart({ rows }: { rows: LanguageStack[] }) {
           <text x={left - 10} y={y + 19} textAnchor="end" fontSize="12" fill="#596579">{row.label}</text>
           {stackOrder.map((status) => {
             const segmentWidth = row.values[status] / max * trackWidth;
-            const node = segmentWidth > 0 ? <rect key={status} x={x} y={y} width={segmentWidth} height="26" fill={statusColors[status]} /> : null;
+            const node = segmentWidth > 0 ? <rect key={status} x={x} y={y} width={segmentWidth} height="26" fill={statusColors[status]} onClick={onSelectLanguageStatus ? () => onSelectLanguageStatus(row.label, status) : undefined} role={onSelectLanguageStatus ? "button" : undefined} tabIndex={onSelectLanguageStatus ? 0 : undefined} aria-label={onSelectLanguageStatus ? `${row.label}: view ${statusLabels[status]} sessions` : undefined} onKeyDown={onSelectLanguageStatus ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectLanguageStatus(row.label, status); } } : undefined} style={{ cursor: onSelectLanguageStatus ? "pointer" : undefined }}><title>{row.label}: {statusLabels[status]} {row.values[status]}</title></rect> : null;
             x += segmentWidth;
             return node;
           })}

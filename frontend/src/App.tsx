@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import type { ReactNode } from "react";
+import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
@@ -12,6 +13,8 @@ import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
+import SupervisorAccountRoundedIcon from "@mui/icons-material/SupervisorAccountRounded";
+import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -26,10 +29,12 @@ import { EnquiriesPage } from "./pages/EnquiriesPage";
 import { AttendanceSchedulesPage } from "./pages/AttendanceSchedulesPage";
 import { PageHeaderTargetContext } from "./components/OperationsUI";
 import { LoginPage } from "./pages/LoginPage";
+import { CareManagersPage } from "./pages/CareManagersPage";
+import { ReportsPage } from "./pages/ReportsPage";
 import { fetchCurrentUser, signOut, type WebUser } from "./api/client";
 
 const drawerWidth = 252;
-const navigation = [
+const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnly?: boolean }> = [
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
   { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
@@ -37,7 +42,9 @@ const navigation = [
   { label: "Care activities", path: "/care-activities", icon: <MedicalServicesRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
-  { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon /> },
+  { label: "Reports", path: "/reports", icon: <AssessmentRoundedIcon /> },
+  { label: "Care Managers", path: "/care-managers", icon: <SupervisorAccountRoundedIcon />, adminOnly: true },
+  { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
 ];
 
@@ -70,7 +77,7 @@ function App() {
       </Stack>
       <Typography variant="overline" color="text.secondary" sx={{ px: 1.5, letterSpacing: ".12em", fontWeight: 700 }}>WORKSPACE</Typography>
       <List sx={{ mt: 1, p: 0 }}>
-        {navigation.map((item) => (
+        {navigation.filter((item) => !item.adminOnly || user?.role === "admin").map((item) => (
           <ListItemButton key={item.path} component={NavLink} to={item.path} onClick={() => setMobileOpen(false)}
             sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: "text.secondary", "&.active": { color: "primary.dark", bgcolor: "#eaf3ef", "& .MuiListItemIcon-root": { color: "primary.main" } } }}>
             <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}>{item.icon}</ListItemIcon>
@@ -106,16 +113,18 @@ function App() {
       <Box component="main" sx={{ flex: "1 1 auto", minWidth: 0, maxWidth: { xs: "100%", md: `calc(100% - ${drawerWidth}px)` }, boxSizing: "border-box", px: { xs: 1.5, sm: 3, lg: 5 }, pt: { xs: "128px", sm: "104px" }, pb: 6 }}>
         <PageHeaderTargetContext.Provider value={headerTarget}>
         <Routes>
-          <Route path="/" element={<OverviewPage />} />
+          <Route path="/" element={<OverviewPage userRole={user.role} />} />
           <Route path="/attendance" element={<AttendanceSchedulesPage />} />
           <Route path="/schedules" element={<AttendanceSchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
           <Route path="/enquiries" element={<EnquiriesPage />} />
           <Route path="/care-activities" element={<CareActivitiesPage />} />
+          <Route path="/care-managers" element={user.role === "admin" ? <CareManagersPage /> : <Navigate to="/" replace />} />
           <Route path="/assignments/new" element={<NewAssignmentPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={user.role === "admin" ? <SettingsPage /> : <Navigate to="/" replace />} />
           <Route path="/api-access" element={<ApiAccessPage section="docs" />} />
           <Route path="/sessions/:sessionId" element={<AssignmentStatusPage />} />
           <Route path="*" element={<OverviewPage />} />

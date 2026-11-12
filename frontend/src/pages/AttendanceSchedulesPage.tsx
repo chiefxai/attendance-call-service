@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, Chip, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, Chip, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, Tab, Typography } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
 import CrisisAlertRoundedIcon from "@mui/icons-material/CrisisAlertRounded";
 import FileDownloadRoundedIcon from "@mui/icons-material/FileDownloadRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
-import { fetchAttendance, fetchOperationsSummary, type AttendanceRecord } from "../api/client";
+import { fetchAttendance, fetchAthulyaSchedules, fetchOperationsSummary, type AttendanceRecord } from "../api/client";
 import { MetricCard, PageHeader, SearchFilterBar, StatusChip } from "../components/OperationsUI";
 
 const dateTime = (value: string | null) => value
@@ -64,12 +64,14 @@ function exportCsv(data: AttendanceRecord[]) {
 
 export function AttendanceSchedulesPage() {
   const navigate = useNavigate();
+  const [view, setView] = useState<"attendance" | "athulya">("attendance");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [language, setLanguage] = useState("all");
   const [shift, setShift] = useState("all");
   const query = useQuery({ queryKey: ["attendance", "list"], queryFn: () => fetchAttendance({ limit: 500 }), refetchInterval: 15_000 });
   const summary = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary });
+  const athulyaSchedules = useQuery({ queryKey: ["athulya-schedules", "all"], queryFn: () => fetchAthulyaSchedules(), enabled: view === "athulya" });
   const records = query.data || [];
   const filtered = records.filter((row) =>
     (!search || `${row.assignmentId} ${row.employee.name} ${row.patient.name} ${row.employee.id || ""}`.toLowerCase().includes(search.toLowerCase()))
@@ -91,6 +93,16 @@ export function AttendanceSchedulesPage() {
       description="Manage duty assignments, scheduled calls, and actual employee check-in and check-out times in one place."
       actions={<><Button variant="outlined" startIcon={<FileDownloadRoundedIcon />} disabled={!records.length} onClick={() => exportCsv(filtered)}>Export CSV</Button><Button component={RouterLink} to="/assignments/new" variant="contained" startIcon={<AddRoundedIcon />}>New assignment</Button></>}
     />
+    <Tabs value={view} onChange={(_event, value: "attendance" | "athulya") => setView(value)} sx={{ borderBottom: 1, borderColor: "divider" }}>
+      <Tab value="attendance" label="Attendance & assignments" />
+      <Tab value="athulya" label="Athulya schedules" />
+    </Tabs>
+    {view === "athulya" ? <Card><TableContainer><Table size="small"><TableHead><TableRow>{["Date", "Patient", "Patient ID / UHID", "Care Manager", "Caregivers", "Scheduled time", "Service", "Branch", "Status"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
+      {athulyaSchedules.data?.map((schedule) => <TableRow key={schedule.id} hover><TableCell>{schedule.date || "—"}</TableCell><TableCell>{schedule.patient.name || "—"}</TableCell><TableCell>{schedule.patient.id || "—"} / {schedule.patient.uhid || "—"}</TableCell><TableCell>{schedule.careManager.name || "—"}<Typography variant="caption" display="block" color="text.secondary">{schedule.careManager.phone || ""}</Typography></TableCell><TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell><TableCell>{schedule.startTime || "—"} – {schedule.endTime || "—"}</TableCell><TableCell>{schedule.service || "—"}</TableCell><TableCell>{schedule.branch || "—"}</TableCell><TableCell>{schedule.status || "—"}</TableCell></TableRow>)}
+      {athulyaSchedules.isLoading && <TableRow><TableCell colSpan={9}><LinearProgress /></TableCell></TableRow>}
+      {athulyaSchedules.isError && <TableRow><TableCell colSpan={9}><Alert severity="error">Imported schedules could not be loaded.</Alert></TableCell></TableRow>}
+      {athulyaSchedules.data?.length === 0 && <TableRow><TableCell colSpan={9} align="center">No Athulya schedules imported yet. An Admin can configure and sync the integration in Settings.</TableCell></TableRow>}
+    </TableBody></Table></TableContainer></Card> : <>
     {(query.isError || summary.isError) && <Alert severity="error">Attendance and schedule data could not be loaded. Check backend availability and workspace access.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Total scheduled" value={summary.data?.scheduledToday.toLocaleString() ?? "—"} detail="Today's assignments" icon={<GroupRoundedIcon />} /></Grid>
@@ -147,5 +159,6 @@ export function AttendanceSchedulesPage() {
       </Table></TableContainer>
       {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No attendance or schedule records match these filters.</Typography>}
     </Card>
+    </>}
   </Stack>;
 }

@@ -253,3 +253,23 @@ Configure the activity catalog in **Settings → Care activities**. Each organiz
 The authenticated API is `GET /api/call-service/activities`, `POST /api/call-service/activities`, and `PUT /api/call-service/activities/:id`. Incoming enquiries use the system-controlled `enquiryStatus` values `processing`, `need_review`, `suggestion`, `shortage`, and `resolved`. The post-call pipeline selects the status; arbitrary values are rejected by the database constraint and API writes do not accept status overrides. `POST /api/call-service/incoming-calls/:id/resolve` accepts only `{ "staffId": "..." }`. It allows a suggested staff member or any active staff member in the organization for a shortage enquiry, then records who resolved it. The incoming call list includes this status, extracted activity and requested times, transcript, recording availability, staff suggestions, and resolved staff.
 
 Set `DATA_RETENTION_DAYS=90`, `RETENTION_SCAN_INTERVAL_MS=3600000`, and `INBOUND_RECORDING_MAX_BYTES=52428800` in the service environment as needed. The worker deletes expired recording objects and inbound call rows.
+
+## Athulya workforce integration
+
+The web application supports `admin` and `care_manager` login roles. Existing provisioned accounts remain Admin accounts after migration. Care Managers can view organization-wide staff and patient records and operate assignments; backend authorization prevents them from managing users, application settings, calling agents, API keys, or Athulya credentials.
+
+The documented schedule source is `GET https://homecare.athulyaliving.net/api/caremanager/clients`, authenticated with the `x-api-key` header. Configure it under **Settings → Athulya integration**. The API key is AES-256-GCM encrypted in PostgreSQL and is never returned by the configuration API. Set `ATHULYA_CREDENTIALS_ENCRYPTION_KEY` to a stable 32-byte hex value before saving the key; losing or rotating this value makes the stored credential unreadable. Generate a key with `openssl rand -hex 32` and keep it in the VM `.env`.
+
+Admin-only endpoints:
+
+- `GET/PUT /api/call-service/integrations/athulya` — read or update settings; a blank `apiKey` leaves the stored key unchanged.
+- `POST /api/call-service/integrations/athulya/test` — test the connection and return only the record count.
+- `POST /api/call-service/integrations/athulya/sync` — enqueue an asynchronous import. Accepts optional `fromDate`, `toDate`, `careManagerId`, `branchId`, and `clientId`.
+- `GET /api/call-service/integrations/athulya/sync-status` — view sync runs and errors.
+- `GET /api/call-service/integrations/athulya/attendance-submissions` — view local attendance export state.
+- `GET /api/call-service/integrations/athulya/schedules` — view imported schedules.
+- `GET/POST /api/call-service/care-managers`, `PUT/PATCH /api/call-service/care-managers/:id`, and `POST /api/call-service/care-managers/:id/reset-password` — manage Care Manager accounts. Password reset revokes their active sessions.
+
+Schedule sync is idempotent by organization and Athulya schedule identifiers. It preserves source date values as date-only fields, stores raw response JSON, and updates patient, caregiver, Care Manager, schedule, and caregiver-to-schedule records without deleting records absent from a filtered response. Imported profiles do not overwrite saved patient/staff addresses or language preferences.
+
+Athulya has supplied only the schedule-fetching contract so far. Check-in and check-out events are recorded locally as `awaiting_api_specification` when an attendance session can be matched to an imported schedule and caregiver. The service does not send attendance data to Athulya, retry submissions, or claim successful delivery until the official attendance endpoints, payload, timestamp rules, and duplicate behavior are documented.
