@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
@@ -20,6 +20,8 @@ export function PatientRecordsPage() {
   const [category, setCategory] = useState("all");
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [editOpen, setEditOpen] = useState(false);
   const [viewPatient, setViewPatient] = useState<PatientRecord | null>(null);
   const [newPatient, setNewPatient] = useState<CreatePatientPayload>({ id: "", name: "", phoneNumber: "", address: "", language: "ta", careCategory: "", hub: "" });
@@ -43,6 +45,8 @@ export function PatientRecordsPage() {
   const filtered = records.filter((row) => (!search || `${row.id} ${row.name} ${row.phoneNumber || ""} ${row.assignedStaff} ${row.address}`.toLowerCase().includes(search.toLowerCase()))
     && (hub === "all" || row.hub === hub) && (category === "all" || row.careCategory === category)
     && (language === "all" || row.language.toLowerCase().includes(language)) && (status === "all" || row.status === status));
+  useEffect(() => setPage(0), [search, hub, category, language, status]);
+  const pageRows = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const active = records.filter((row) => row.status === "active").length;
   const upcomingForPatient = (upcomingTasks.data || [])
     .filter((task: AttendanceRecord) => task.patient.id === viewPatient?.id
@@ -82,7 +86,7 @@ export function PatientRecordsPage() {
     <Card>
       <SearchFilterBar
         search={search}
-        onSearchChange={setSearch}
+        onSearchChange={(value) => { setSearch(value); setPage(0); }}
         searchLabel="Search patient, ID, or employee"
         activeFilters={activeFilters}
         resultCount={filtered.length}
@@ -98,7 +102,7 @@ export function PatientRecordsPage() {
       {query.isLoading && <LinearProgress />}
       <TableContainer><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
         <TableHead><TableRow>{["Patient name", "UHID", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
-        <TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover>
+        <TableBody>{pageRows.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
           <TableCell>{row.patientUhid || "—"}</TableCell>
           <TableCell>{row.branch || "—"}</TableCell>
@@ -108,6 +112,7 @@ export function PatientRecordsPage() {
           <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setViewPatient(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell>
         </TableRow>)}</TableBody>
       </Table></TableContainer>
+      <TablePagination component="div" count={filtered.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Patients per page" />
       {query.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>No patient records match these filters.</Typography>}
     </Card>
     <Dialog open={editOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">

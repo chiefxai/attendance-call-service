@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog, DialogActions,
   DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select,
-  Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
+  Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography,
 } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
@@ -34,7 +34,7 @@ export function EnquiriesPage() {
   });
   const incomingCalls = useQuery({
     queryKey: ["incoming-calls"],
-    queryFn: () => fetchIncomingCalls(),
+    queryFn: () => fetchIncomingCalls(500),
     refetchInterval: (query) => query.state.data?.some((call) => call.enquiryStatus === "processing" || call.bookingStatus === "calling") ? 4000 : 15000,
   });
   const staffDirectory = useQuery({ queryKey: ["staff", "enquiry-resolution"], queryFn: () => fetchStaff({ limit: 500 }) });
@@ -201,6 +201,10 @@ export function EnquiriesPage() {
 
 function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls: IncomingCall[]; loading: boolean; error: boolean; onResolve: (call: IncomingCall) => void }) {
   const [detailCall, setDetailCall] = useState<IncomingCall | null>(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  useEffect(() => setPage(0), [calls.length]);
+  const pageCalls = calls.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const formatTime = (value?: string | null, timeZone?: string | null) => value
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", ...(timeZone ? { timeZone } : {}) }).format(new Date(value))
     : "Not captured";
@@ -222,7 +226,7 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
         <TableHead><TableRow>
           <TableCell>Name</TableCell><TableCell>Phone number</TableCell><TableCell>Need</TableCell><TableCell>Timing</TableCell><TableCell>Status</TableCell>
         </TableRow></TableHead>
-        <TableBody>{calls.map((call) => <TableRow key={call.id} hover>
+        <TableBody>{pageCalls.map((call) => <TableRow key={call.id} hover>
           <TableCell sx={{ minWidth: 150 }}>
             <Typography fontWeight={700}>{call.patient?.name || "Incoming caller"}</Typography>
             <Typography variant="caption" color="text.secondary">Call {formatTime(call.startedAt)}</Typography>
@@ -244,6 +248,7 @@ function IncomingPatientEnquiries({ calls, loading, error, onResolve }: { calls:
           </TableCell>
         </TableRow>)}</TableBody>
       </Table>
+      <TablePagination component="div" count={calls.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Enquiries per page" />
     </TableContainer>}
     {!loading && !error && calls.length === 0 && <Card><CardContent><Typography variant="body2" color="text.secondary">No incoming patient calls yet.</Typography></CardContent></Card>}
 

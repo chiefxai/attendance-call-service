@@ -55,12 +55,27 @@ function caregiverRows(record) {
   const phones = listValue(record.caregiver_phones);
   const statuses = listValue(record.caregiver_schedule_status);
   const count = Math.max(ids.length, names.length, phones.length, statuses.length);
-  return Array.from({ length: count }, (_, index) => ({
-    id: ids[index] == null ? null : String(ids[index]),
-    name: names[index] == null ? null : String(names[index]),
-    phone: phones[index] == null ? null : String(phones[index]),
-    status: statuses[index] == null ? null : String(statuses[index]),
-  })).filter((item) => item.id || item.name || item.phone);
+  const unique = new Map();
+  Array.from({ length: count }, (_, index) => ({
+    id: ids[index] == null ? null : String(ids[index]).trim() || null,
+    name: names[index] == null ? null : String(names[index]).trim() || null,
+    phone: phones[index] == null ? null : String(phones[index]).trim() || null,
+    status: statuses[index] == null ? null : String(statuses[index]).trim() || null,
+  })).filter((item) => item.id || item.name || item.phone).forEach((item) => {
+    // Use stable Athulya IDs first. Phone is a fallback when the schedule omits
+    // caregiver IDs, so one person is not repeated in the same schedule row.
+    const phoneKey = item.phone?.replace(/\D/g, "");
+    const key = item.id ? `id:${item.id}` : phoneKey ? `phone:${phoneKey}` : null;
+    if (!key) { unique.set(`row:${unique.size}`, item); return; }
+    const previous = unique.get(key);
+    unique.set(key, previous ? {
+      id: previous.id || item.id,
+      name: previous.name || item.name,
+      phone: previous.phone || item.phone,
+      status: previous.status || item.status,
+    } : item);
+  });
+  return [...unique.values()];
 }
 
 function sourceRecords(payload) {

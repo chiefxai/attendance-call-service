@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
@@ -14,6 +14,10 @@ import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
+function displayCompanyName(value?: string | null) {
+  const name = value?.trim();
+  return !name || /^n\/a$/i.test(name) ? "ATHULYA" : name;
+}
 
 function formatDutyDateTime(value: string) {
   const date = new Date(value);
@@ -32,6 +36,8 @@ export function StaffRecordsPage() {
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [selected, setSelected] = useState<StaffRecord | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [staffForm, setStaffForm] = useState<CreateStaffPayload>({ id: "", name: "", companyName: "ATHULYA", phoneNumber: "", address: "", language: "ta" });
@@ -52,9 +58,11 @@ export function StaffRecordsPage() {
     },
   });
   const records = query.data || [];
-  const filtered = records.filter((row) => (!search || `${row.name} ${row.companyName} ${row.id} ${row.phoneNumber || ""} ${row.patientName} ${row.address}`.toLowerCase().includes(search.toLowerCase()))
+  const filtered = records.filter((row) => (!search || `${row.name} ${displayCompanyName(row.companyName)} ${row.id} ${row.phoneNumber || ""} ${row.patientName} ${row.address}`.toLowerCase().includes(search.toLowerCase()))
     && (language === "all" || row.language.toLowerCase() === language)
     && (status === "all" || row.dutyStatus === status));
+  useEffect(() => setPage(0), [search, language, status]);
+  const pageRows = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const languages = [...new Set(records.map((row) => row.language.toLowerCase()))];
   const active = records.filter((row) => row.dutyStatus === "on duty").length;
   const upcomingForSelected = (upcomingTasks.data || [])
@@ -67,12 +75,12 @@ export function StaffRecordsPage() {
     const phoneNumber = normalizeIndianMobile(staffForm.phoneNumber);
     if (!phoneNumber) { setPhoneError(INDIAN_MOBILE_ERROR); return; }
     setPhoneError("");
-    const payload = { ...staffForm, id: staffForm.id.trim(), name: staffForm.name.trim(), companyName: staffForm.companyName?.trim() || "ATHULYA", phoneNumber, address: staffForm.address.trim() };
+    const payload = { ...staffForm, id: staffForm.id.trim(), name: staffForm.name.trim(), companyName: displayCompanyName(staffForm.companyName), phoneNumber, address: staffForm.address.trim() };
     updateMutation.mutate({ payload, id: payload.id });
   };
   const activeFilters = Number(language !== "all") + Number(status !== "all");
   const openEdit = (record: StaffRecord) => {
-    setStaffForm({ id: record.id, name: record.name, companyName: record.companyName || "ATHULYA", phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
+    setStaffForm({ id: record.id, name: record.name, companyName: displayCompanyName(record.companyName), phoneNumber: record.phoneNumber || "", address: record.address || "", language: record.language || "en" });
     setPhoneError("");
     setEditOpen(true);
   };
@@ -93,7 +101,7 @@ export function StaffRecordsPage() {
     <Card>
       <SearchFilterBar
         search={search}
-        onSearchChange={setSearch}
+        onSearchChange={(value) => { setSearch(value); setPage(0); }}
         searchLabel="Search employee ID, name, or patient"
         activeFilters={activeFilters}
         resultCount={filtered.length}
@@ -107,9 +115,9 @@ export function StaffRecordsPage() {
       {query.isLoading && <LinearProgress />}
       <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 900 }}>
         <TableHead><TableRow>{["Staff name", "Company / vendor", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
-        <TableBody>{filtered.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover>
+        <TableBody>{pageRows.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
-          <TableCell>{row.companyName || "ATHULYA"}</TableCell>
+          <TableCell>{displayCompanyName(row.companyName)}</TableCell>
           <TableCell>{row.branch || "—"}</TableCell>
           <TableCell>{row.phoneNumber || row.phoneMasked || "Not supplied"}</TableCell>
           <TableCell sx={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{row.address || "Not provided"}</TableCell>
@@ -117,6 +125,7 @@ export function StaffRecordsPage() {
           <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setSelected(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell>
         </TableRow>)}</TableBody>
       </Table></TableContainer>
+      <TablePagination component="div" count={filtered.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Staff per page" />
       {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No staff records match these filters.</Typography>}
     </Card>
     <Dialog open={editOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
@@ -127,7 +136,7 @@ export function StaffRecordsPage() {
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Staff ID" value={staffForm.id} InputProps={{ readOnly: true }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required label="Full name" value={staffForm.name} onChange={(event) => setStaffForm((current) => ({ ...current, name: event.target.value }))} /></Grid>
-            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={staffForm.companyName || "ATHULYA"} onChange={(event) => setStaffForm((current) => ({ ...current, companyName: event.target.value }))} /></Grid>
+            <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth label="Company / vendor name" value={staffForm.companyName || "ATHULYA"} onChange={(event) => setStaffForm((current) => ({ ...current, companyName: event.target.value }))} helperText="N/A is treated as ATHULYA." /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth required type="tel" label="Indian mobile number" placeholder="9876543210 or +919876543210" error={Boolean(phoneError)} helperText={phoneError || "Enter 10 digits; 91 or +91 country code is optional."} value={staffForm.phoneNumber} onChange={(event) => { setPhoneError(""); setStaffForm((current) => ({ ...current, phoneNumber: event.target.value })); }} onBlur={() => { const normalized = normalizeIndianMobile(staffForm.phoneNumber); if (!staffForm.phoneNumber.trim()) return; if (!normalized) setPhoneError(INDIAN_MOBILE_ERROR); else { setPhoneError(""); setStaffForm((current) => ({ ...current, phoneNumber: normalized })); } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel>Calling language</InputLabel><Select label="Calling language" value={staffForm.language} onChange={(event) => setStaffForm((current) => ({ ...current, language: event.target.value }))}><MenuItem value="ta">Tamil</MenuItem><MenuItem value="en">English</MenuItem><MenuItem value="ml">Malayalam</MenuItem><MenuItem value="te">Telugu</MenuItem></Select></FormControl></Grid>
             <Grid size={12}><AddressFields required value={staffForm.address} onChange={(address) => setStaffForm((current) => ({ ...current, address }))} /></Grid>
@@ -140,7 +149,7 @@ export function StaffRecordsPage() {
       <Grid container spacing={1.5}>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Staff ID</Typography><Typography>{selected.id}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Mobile number</Typography><Typography>{selected.phoneNumber || selected.phoneMasked || "Not available"}</Typography></Grid>
-        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Company / vendor</Typography><Typography>{selected.companyName || "ATHULYA"}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Company / vendor</Typography><Typography>{displayCompanyName(selected.companyName)}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Branch</Typography><Typography>{selected.branch || "Not provided"}</Typography></Grid>
         <Grid size={12}><Typography variant="overline" color="text.secondary">Address</Typography><Typography>{selected.address || "Not provided"}</Typography></Grid>
         <Grid size={{ xs: 12, sm: 6 }}><Typography variant="overline" color="text.secondary">Calling language</Typography><Typography>{selected.language.toUpperCase()}</Typography></Grid>
