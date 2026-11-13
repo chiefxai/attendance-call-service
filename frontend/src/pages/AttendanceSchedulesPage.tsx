@@ -142,12 +142,18 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       const reason = stage === "checkIn" ? record.stageReasons.checkIn : record.stageReasons.checkOut;
       const didNotAnswer = reason === "not_answered" || reason === "consecutive_no_answer_limit_reached" || stageStatus.status === "not_answered";
       const wasNotPlaced = overdue && attemptCount === 0 && ["scheduled", "missed", "review"].includes(stageStatus.status);
+      const employeeRequestedRetry = stageStatus.status === "follow_up" && reason === "employee_requested_callback";
+      const hasScheduledRetry = stageStatus.status === "follow_up" && Boolean(stageStatus.nextCallAt);
+      const showScheduledTime = !didNotAnswer && !employeeRequestedRetry;
       return <Stack key={record.sessionId} direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
         {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}:</Typography>}
-        <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{scheduleClock(stageStatus.reportedAt || scheduledTime)}</Typography>
+        {showScheduledTime && <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{scheduleClock(stageStatus.reportedAt || scheduledTime)}</Typography>}
         {didNotAnswer && <StatusChip status="not answered" />}
+        {employeeRequestedRetry && <StatusChip status="delayed" />}
         {wasNotPlaced && <StatusChip status="call not placed" />}
-        {stageStatus.status === "follow_up" && stageStatus.nextCallAt && <Typography variant="caption" color="error.main">Recall at {dateTimeLabel(stageStatus.nextCallAt)}</Typography>}
+        {hasScheduledRetry && <Typography variant="caption" color={employeeRequestedRetry ? "error.main" : "text.secondary"} sx={{ width: "100%" }}>
+          {employeeRequestedRetry ? "Next call:" : "Next retry:"} {dateTimeLabel(stageStatus.nextCallAt)}
+        </Typography>}
       </Stack>;
     })}
   </Stack>;
