@@ -20,7 +20,7 @@ function loadConfig() {
     },
     callRetry: {
       maxConsecutiveNoAnswer: number("CALL_MAX_CONSECUTIVE_NO_ANSWER", 3),
-      initialMinutes: number("CALL_RETRY_INITIAL_MINUTES", 5),
+      initialMinutes: number("CALL_RETRY_INITIAL_MINUTES", 3),
       multiplier: number("CALL_RETRY_MULTIPLIER", 1.2),
       maxMinutes: number("CALL_RETRY_MAX_MINUTES", 30),
       recordingWaitMs: number("RECORDING_READY_POLL_MS", 15_000),

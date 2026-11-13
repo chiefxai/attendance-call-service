@@ -33,10 +33,11 @@ export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accen
 
 export function StatusChip({ status }: { status: string }) {
   const normalized = status.toLowerCase().replaceAll("_", " ");
-  const color = ["verified", "confirmed", "completed", "active", "synced", "delivered"].includes(normalized) ? "success"
-    : ["delayed", "not answered", "call not placed", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
+  const label = normalized === "not placed" ? "N/P" : normalized === "not answered" ? "N/A" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
+  const color = ["verified", "confirmed", "completed", "active", "synced", "delivered", "check in", "check out"].includes(normalized) ? "success"
+    : ["delayed", "not placed", "not answered", "call not placed", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
       : ["late", "retrying", "pending", "queued", "in progress", "processing", "high"].includes(normalized) ? "warning" : "default";
-  return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={normalized} sx={{ textTransform: "capitalize", fontWeight: 650 }} />;
+  return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={label} sx={{ textTransform: "capitalize", fontWeight: 650 }} />;
 }
 
 export function SectionCard({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode }) {

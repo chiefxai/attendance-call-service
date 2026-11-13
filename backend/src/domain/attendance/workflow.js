@@ -147,10 +147,10 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
         ? await repository.getOrganizationCallSettings(attempt.organizationId)
         : {};
       const retrySettings = organizationSettings.callRetry || {};
-      const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 5;
+      const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
       const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
       const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
-      const maxConsecutiveNoAnswer = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 5;
+      const maxConsecutiveNoAnswer = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
       const config = { initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000 };
       if (noAnswerCount >= maxConsecutiveNoAnswer) {
         await repository.setStageStatus(attempt.sessionId, attempt.stage, "not_answered", {
@@ -476,9 +476,17 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
             await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: "callback_time_invalid", callAttemptId });
           } else {
             const nextNumber = await repository.nextAttemptNumber(sessionId, attempt.stage);
-            await repository.setStageStatus(sessionId, attempt.stage, "follow_up", { reason: "employee_requested_callback", nextCallAt: runAt.toISOString(), callAttemptId });
+            let callbackAt = runAt;
+            if (attempt.stage === "check_in" && session.scheduledEndAt) {
+              const checkoutAt = new Date(session.scheduledEndAt);
+              if (Number.isFinite(checkoutAt.getTime())) {
+                const latestCheckInAt = new Date(checkoutAt.getTime() - 60_000);
+                if (callbackAt >= latestCheckInAt) callbackAt = latestCheckInAt > new Date() ? latestCheckInAt : new Date(Date.now() + 1_000);
+              }
+            }
+            await repository.setStageStatus(sessionId, attempt.stage, "follow_up", { reason: "employee_requested_callback", nextCallAt: callbackAt.toISOString(), callAttemptId });
             await queue.enqueue("place_call", { sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage, attemptNumber: nextNumber, consecutiveNoAnswer: 0 }, {
-              idempotencyKey: `call:${sessionId}:${attempt.stage}:${nextNumber}`, runAt,
+              idempotencyKey: `call:${sessionId}:${attempt.stage}:${nextNumber}`, runAt: callbackAt,
             });
           }
         }
@@ -544,7 +552,7 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     const stageStatus = stage === "check_out" ? session.checkOutStatus : session.checkInStatus;
     if (stageStatus === "not_answered") {
       const settings = await repository.getOrganizationCallSettings(session.organizationId);
-      const escalation = settings.unansweredCallEscalation || "platform_notification";
+      const escalation = settings.unansweredCallEscalation || "call_care_manager";
       const maxNoAnswer = settings.callRetry?.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
       const patient = session.patient || {};
       const stageLabel = stage === "check_out" ? "check-out" : "check-in";

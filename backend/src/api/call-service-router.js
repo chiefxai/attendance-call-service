@@ -124,10 +124,10 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       allowInboundCalls: stored.allowInboundCalls ?? true,
       allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
       requireHumanVerificationForStaffBooking: stored.requireHumanVerificationForStaffBooking ?? false,
-      unansweredCallEscalation: stored.unansweredCallEscalation ?? "platform_notification",
+      unansweredCallEscalation: stored.unansweredCallEscalation ?? "call_care_manager",
       retry: {
         maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 3),
-        initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 5),
+        initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 3),
         multiplier: storedRetry.multiplier ?? envNumber("CALL_RETRY_MULTIPLIER", 1.2),
         maxMinutes: storedRetry.maxMinutes ?? envNumber("CALL_RETRY_MAX_MINUTES", 30),
       },
@@ -807,7 +807,7 @@ router.get("/activities", async (req, res) => {
         allowInboundCalls: body.allowInboundCalls ?? existingSettings.allowInboundCalls ?? true,
         allowNonPatientInboundCalls: body.allowNonPatientInboundCalls ?? existingSettings.allowNonPatientInboundCalls ?? false,
         requireHumanVerificationForStaffBooking: body.requireHumanVerificationForStaffBooking ?? existingSettings.requireHumanVerificationForStaffBooking ?? false,
-        unansweredCallEscalation: body.unansweredCallEscalation ?? existingSettings.unansweredCallEscalation ?? "platform_notification",
+        unansweredCallEscalation: body.unansweredCallEscalation ?? existingSettings.unansweredCallEscalation ?? "call_care_manager",
       });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
@@ -817,7 +817,7 @@ router.get("/activities", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowInboundCalls: true, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false, unansweredCallEscalation: "platform_notification" });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowInboundCalls: true, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false, unansweredCallEscalation: "call_care_manager" });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });

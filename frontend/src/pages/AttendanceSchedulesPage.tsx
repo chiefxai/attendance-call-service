@@ -38,27 +38,54 @@ function scheduledInstant(dateValue: string | null | undefined, timeValue: strin
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-type AttendanceStatus = "pending" | "check_in" | "check_out" | "processing" | "delayed" | "completed" | "cancelled";
+type AttendanceStatus = "pending" | "check_in" | "check_out" | "processing" | "delayed" | "not_placed" | "not_answered" | "review" | "completed" | "cancelled";
+
+function stageIsDelayed(schedule: AthulyaSchedule, records: AttendanceRecord[], stage: "checkIn" | "checkOut") {
+  const scheduledTime = stage === "checkIn" ? schedule.startTime : schedule.endTime;
+  const due = scheduledInstant(schedule.date, scheduledTime);
+  const overdue = Boolean(due && due.getTime() <= Date.now());
+  if (!records.length) return overdue;
+  return records.some((record) => {
+    const status = record[stage].status;
+    return status === "follow_up" || status === "missed" || (overdue && status === "scheduled");
+  });
+}
 
 function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]): AttendanceStatus {
-  const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\s_-]/g, "");
+  const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\\s_-]/g, "");
   if (["cancelled", "canceled"].includes(externalStatus)) return "cancelled";
   const checkInDue = scheduledInstant(schedule.date, schedule.startTime);
-  if (!records.length) return checkInDue && Date.now() >= checkInDue.getTime() ? "delayed" : "pending";
+  const checkOutDue = scheduledInstant(schedule.date, schedule.endTime);
+  const now = Date.now();
+  const noCheckInCall = records.length ? records.every((record) => record.checkInAttemptCount === 0) : true;
+  const noCheckOutCall = records.length ? records.every((record) => record.checkOutAttemptCount === 0) : true;
+  if (checkInDue && checkOutDue && now >= checkInDue.getTime() && now >= checkOutDue.getTime() && noCheckInCall && noCheckOutCall) return "not_placed";
+
+  const checkInDelayed = stageIsDelayed(schedule, records, "checkIn");
+  const checkOutDelayed = stageIsDelayed(schedule, records, "checkOut");
+  if (checkInDelayed && checkOutDelayed && noCheckInCall && noCheckOutCall) return "not_placed";
+  if (!records.length) return checkInDelayed || checkOutDelayed ? "delayed" : "pending";
 
   const allComplete = records.every((record) => record.checkIn.status === "confirmed" && record.checkOut.status === "confirmed");
   if (allComplete) return "completed";
+  const onlyCheckInComplete = records.every((record) => record.checkIn.status === "confirmed")
+    && records.some((record) => record.checkOut.status !== "confirmed");
+  const onlyCheckOutComplete = records.every((record) => record.checkOut.status === "confirmed")
+    && records.some((record) => record.checkIn.status !== "confirmed");
+  if (onlyCheckInComplete) return "check_in";
+  if (onlyCheckOutComplete) return "check_out";
 
+  if (records.some((record) => record.checkIn.status === "not_answered" || record.checkOut.status === "not_answered")) return "not_answered";
   const stages = records.flatMap((record) => [
     { status: record.checkIn.status, stage: "check_in" as const },
     { status: record.checkOut.status, stage: "check_out" as const },
   ]);
-  if (records.some((record) => record.sessionStatus === "exception")
-    || stages.some(({ status }) => ["not_answered", "missed", "review"].includes(status))) return "delayed";
-
+  if (stages.some(({ status }) => status === "review")) return "review";
+  if (records.some((record) => record.sessionStatus === "exception") || stages.some(({ status }) => status === "missed")) return "delayed";
   const activeStage = stages.find(({ status }) => ["calling", "processing"].includes(status));
   if (activeStage) return activeStage.status === "processing" ? "processing" : activeStage.stage;
-  if (records.some((record) => record.checkOut.status === "confirmed" && record.checkIn.status !== "confirmed")) return "delayed";
+  if (stages.some(({ status }) => status === "follow_up")) return "delayed";
+  if (checkInDelayed || checkOutDelayed) return "delayed";
   if (records.some((record) => record.checkIn.status === "confirmed")) return "check_in";
   return "pending";
 }
@@ -165,11 +192,24 @@ export function AttendanceSchedulesPage() {
     refetchInterval: selectedSchedule ? 15_000 : (false as const),
   })) });
   const statusesBySchedule = new Map(schedulesData.map((schedule) => [schedule.id, scheduleStatus(schedule, matchingAttendance(schedule, attendance.data || []))]));
+  const delayedBySchedule = new Map(schedulesData.map((schedule) => {
+    const records = matchingAttendance(schedule, attendance.data || []);
+    return [schedule.id, stageIsDelayed(schedule, records, "checkIn") || stageIsDelayed(schedule, records, "checkOut")];
+  }));
+  const nextCallBySchedule = new Map(schedulesData.map((schedule) => {
+    const nextCalls = matchingAttendance(schedule, attendance.data || []).flatMap((record) => [record.checkIn.nextCallAt, record.checkOut.nextCallAt])
+      .filter((value): value is string => Boolean(value) && new Date(value as string).getTime() >= Date.now())
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    return [schedule.id, nextCalls[0] || null];
+  }));
   const counts = schedulesData.reduce((result, schedule) => {
-    result[statusesBySchedule.get(schedule.id) || "pending"] += 1;
+    const status = statusesBySchedule.get(schedule.id) || "pending";
+    result[status] += 1;
+    if (status !== "delayed" && delayedBySchedule.get(schedule.id)) result.delayed += 1;
     return result;
-  }, { pending: 0, check_in: 0, check_out: 0, processing: 0, delayed: 0, completed: 0, cancelled: 0 });
-  const filteredSchedules = schedulesData.filter((schedule) => statusFilter === "all" || statusesBySchedule.get(schedule.id) === statusFilter);
+  }, { pending: 0, check_in: 0, check_out: 0, processing: 0, delayed: 0, not_placed: 0, not_answered: 0, review: 0, completed: 0, cancelled: 0 });
+  const filteredSchedules = schedulesData.filter((schedule) => statusFilter === "all"
+    || (statusFilter === "delayed" ? delayedBySchedule.get(schedule.id) : statusesBySchedule.get(schedule.id) === statusFilter));
   useEffect(() => setPage(0), [selectedDate, statusFilter, schedulesData.length]);
   const pageRows = filteredSchedules.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const dateLabel = selectedDate
@@ -200,6 +240,8 @@ export function AttendanceSchedulesPage() {
             <MenuItem value="check_out">Check-out</MenuItem>
             <MenuItem value="processing">Processing</MenuItem>
             <MenuItem value="delayed">Delayed</MenuItem>
+            <MenuItem value="not_placed">N/P</MenuItem>
+            <MenuItem value="not_answered">N/A</MenuItem>
             <MenuItem value="completed">Completed</MenuItem>
             <MenuItem value="cancelled">Cancelled</MenuItem>
           </Select>
@@ -218,7 +260,24 @@ export function AttendanceSchedulesPage() {
                 <TableCell>{schedule.service || "—"}</TableCell>
                 <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
                 <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
-                <TableCell><StatusChip status={statusesBySchedule.get(schedule.id) || "pending"} /></TableCell>
+                <TableCell>
+                  <Stack spacing={0.5} alignItems="flex-start">
+                    {(() => {
+                      const status = statusesBySchedule.get(schedule.id) || "pending";
+                      const stageRecords = matchingAttendance(schedule, attendance.data || []);
+                      const hasNotAnswered = stageRecords.some((record) => record.checkIn.status === "not_answered" || record.checkOut.status === "not_answered");
+                      const hasReview = stageRecords.some((record) => record.checkIn.status === "review" || record.checkOut.status === "review");
+                      return <>
+                        <StatusChip status={status} />
+                        {hasNotAnswered && status !== "not_answered" && <StatusChip status="not_answered" />}
+                        {hasReview && status !== "review" && <StatusChip status="review" />}
+                        {delayedBySchedule.get(schedule.id) && !["delayed", "not_placed"].includes(status) && <StatusChip status="delayed" />}
+                      </>;
+                    })()}
+                    {delayedBySchedule.get(schedule.id) && nextCallBySchedule.get(schedule.id) && <Typography variant="caption" color="error.main">Next call {dateTimeLabel(nextCallBySchedule.get(schedule.id))}</Typography>}
+                    {delayedBySchedule.get(schedule.id) && !nextCallBySchedule.get(schedule.id) && <Typography variant="caption" color="error.main">No next call scheduled</Typography>}
+                  </Stack>
+                </TableCell>
                 <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
               </TableRow>;
             })}
