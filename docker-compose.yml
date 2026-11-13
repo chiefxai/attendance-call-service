@@ -5,6 +5,8 @@ x-backend-environment: &backend-environment
   DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
   DEFAULT_ORGANIZATION_ID: ${DEFAULT_ORGANIZATION_ID:?Set DEFAULT_ORGANIZATION_ID in .env}
   ATHULYA_CREDENTIALS_ENCRYPTION_KEY: ${ATHULYA_CREDENTIALS_ENCRYPTION_KEY:-}
+  ATHULYA_MOCK_API_BASE_URL: ${ATHULYA_MOCK_API_BASE_URL:-}
+  ATHULYA_MOCK_API_KEY: ${ATHULYA_MOCK_API_KEY:-}
   GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in .env}
   GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
   APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
@@ -61,6 +63,20 @@ x-backend-environment: &backend-environment
   ATTENDANCE_BACKEND_TIMEOUT_MS: ${ATTENDANCE_BACKEND_TIMEOUT_MS:-15000}
 
 services:
+  mock-athulya:
+    profiles: [mock-platform]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["node", "src/mock-platform/server.js"]
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
+      ATHULYA_MOCK_API_KEY: ${ATHULYA_MOCK_API_KEY:-mock-athulya-api-key}
+    ports:
+      - "127.0.0.1:${ATHULYA_MOCK_PORT:-4010}:4000"
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped

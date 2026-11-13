@@ -265,6 +265,33 @@ The web application supports `admin` and `care_manager` login roles. Existing pr
 
 The documented schedule source is `GET https://homecare.athulyaliving.net/api/caremanager/clients`, authenticated with the `x-api-key` header. Configure it under **Settings → Athulya integration**. The API key is AES-256-GCM encrypted in PostgreSQL and is never returned by the configuration API. Set `ATHULYA_CREDENTIALS_ENCRYPTION_KEY` to a stable 32-byte hex value before saving the key; losing or rotating this value makes the stored credential unreadable. Generate a key with `openssl rand -hex 32` and keep it in the VM `.env`.
 
+### Local mock platform
+
+The optional `mock-platform` Compose profile provides an Athulya-compatible test API for schedule reads and attendance writes. It is intended for local or staging validation; it is not enabled by the normal Compose startup and the sample schedule is marked `Completed` with no caregiver assignment, so syncing it cannot place a Vobiz call.
+
+Set these values in `.env`:
+
+```dotenv
+ATHULYA_MOCK_API_BASE_URL=http://127.0.0.1:4010/api
+ATHULYA_MOCK_API_KEY=mock-athulya-api-key
+ATHULYA_MOCK_PORT=4010
+```
+
+Start the mock API and recreate the application services so they receive the mock URL allowlist:
+
+```sh
+docker compose --env-file .env --profile mock-platform up --build -d mock-athulya
+docker compose --env-file .env up -d --force-recreate backend-api backend-worker
+```
+
+In **Settings → Athulya integration**, enter the mock base URL and key, leave automatic sync disabled, then use **Test connection** and **Sync schedules now**. The mock returns one safe sample schedule for the selected date. To exercise the attendance POST through the same client used by the worker, run:
+
+```sh
+docker compose --env-file .env exec -T backend-api node scripts/test-athulya-mock.js
+```
+
+The mock accepts `GET /api/caremanager/clients` and `POST /api/check-in-out`. POSTs are stored in memory and can be inspected or cleared using `GET` or `DELETE /mock/submissions` with the mock API key. The listener is bound to `127.0.0.1` on the VM, so it is not exposed as a public service. Remove the profile service when testing is complete with `docker compose --env-file .env --profile mock-platform stop mock-athulya`.
+
 Admin-only endpoints:
 
 - `GET/PUT /api/call-service/integrations/athulya` — read or update settings; a blank `apiKey` leaves the stored key unchanged.

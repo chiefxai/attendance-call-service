@@ -30,14 +30,16 @@ class PostgresJobQueue {
     }
   }
 
-  async enqueue(jobType, payload, { idempotencyKey, runAt = new Date(), maxAttempts = this.defaultMaxAttempts, client } = {}) {
+  async enqueue(jobType, payload, { idempotencyKey, runAt = new Date(), maxAttempts = this.defaultMaxAttempts, client, skipIfPast = false } = {}) {
     if (!jobType || !idempotencyKey) throw new Error("jobType and idempotencyKey are required");
     const result = await (client || this.pool).query(
       `INSERT INTO attendance_jobs (job_type, payload, idempotency_key, run_at, max_attempts)
-       VALUES ($1, $2::jsonb, $3, $4, $5)
+       SELECT $1, $2::jsonb, $3, $4, $5
+       WHERE NOT $6::boolean OR $4::timestamptz > NOW()
+         OR EXISTS (SELECT 1 FROM attendance_jobs WHERE idempotency_key=$3)
        ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
        RETURNING *`,
-      [jobType, JSON.stringify(payload || {}), idempotencyKey, runAt, maxAttempts],
+      [jobType, JSON.stringify(payload || {}), idempotencyKey, runAt, maxAttempts, skipIfPast],
     );
     return result.rows[0];
   }

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
-import PlayCircleOutlineRoundedIcon from "@mui/icons-material/PlayCircleOutlineRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import { fetchAttendance, fetchAthulyaSchedules, fetchSessionArtifacts, type AttendanceRecord, type AthulyaSchedule } from "../api/client";
@@ -15,12 +14,28 @@ function todayInIndia() {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-function statusGroup(status: string | null | undefined) {
-  const value = String(status || "pending").trim().toLowerCase().replaceAll(/[\s_-]/g, "");
-  if (["completed", "complete", "done"].includes(value)) return "completed";
-  if (["cancelled", "canceled"].includes(value)) return "cancelled";
-  if (["", "pending", "scheduled", "notstarted"].includes(value)) return "pending";
-  return "active";
+type AttendanceStatus = "pending" | "check_in" | "check_out" | "processing" | "delayed" | "completed" | "cancelled";
+
+function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]): AttendanceStatus {
+  const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\s_-]/g, "");
+  if (["cancelled", "canceled"].includes(externalStatus)) return "cancelled";
+  if (!records.length) return "pending";
+
+  const allComplete = records.every((record) => record.checkIn.status === "confirmed" && record.checkOut.status === "confirmed");
+  if (allComplete) return "completed";
+
+  const stages = records.flatMap((record) => [
+    { status: record.checkIn.status, stage: "check_in" as const },
+    { status: record.checkOut.status, stage: "check_out" as const },
+  ]);
+  if (records.some((record) => record.sessionStatus === "exception")
+    || stages.some(({ status }) => ["not_answered", "missed", "review"].includes(status))) return "delayed";
+
+  const activeStage = stages.find(({ status }) => ["calling", "processing"].includes(status));
+  if (activeStage) return activeStage.status === "processing" ? "processing" : activeStage.stage;
+  if (records.some((record) => record.checkOut.status === "confirmed" && record.checkIn.status !== "confirmed")) return "delayed";
+  if (records.some((record) => record.checkIn.status === "confirmed")) return "check_in";
+  return "pending";
 }
 
 function matchingAttendance(schedule: AthulyaSchedule, records: AttendanceRecord[]) {
@@ -109,11 +124,12 @@ export function AttendanceSchedulesPage() {
     retry: false,
     refetchInterval: selectedSchedule ? 15_000 : (false as const),
   })) });
+  const statusesBySchedule = new Map(schedulesData.map((schedule) => [schedule.id, scheduleStatus(schedule, matchingAttendance(schedule, attendance.data || []))]));
   const counts = schedulesData.reduce((result, schedule) => {
-    result[statusGroup(schedule.status)] += 1;
+    result[statusesBySchedule.get(schedule.id) || "pending"] += 1;
     return result;
-  }, { active: 0, pending: 0, completed: 0, cancelled: 0 });
-  const filteredSchedules = schedulesData.filter((schedule) => statusFilter === "all" || statusGroup(schedule.status) === statusFilter);
+  }, { pending: 0, check_in: 0, check_out: 0, processing: 0, delayed: 0, completed: 0, cancelled: 0 });
+  const filteredSchedules = schedulesData.filter((schedule) => statusFilter === "all" || statusesBySchedule.get(schedule.id) === statusFilter);
   useEffect(() => setPage(0), [selectedDate, statusFilter, schedulesData.length]);
   const pageRows = filteredSchedules.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const dateLabel = selectedDate
@@ -124,14 +140,14 @@ export function AttendanceSchedulesPage() {
     <PageHeader title="Attendance & schedules" actions={<Chip icon={<EventAvailableRoundedIcon />} label={dateLabel} variant="outlined" />} />
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Schedules" value={schedules.isLoading ? "—" : schedulesData.length.toLocaleString()} detail="For the selected day" icon={<EventAvailableRoundedIcon />} /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Active" value={schedules.isLoading ? "—" : counts.active.toLocaleString()} detail="In progress or underway" icon={<PlayCircleOutlineRoundedIcon />} tint="#e9efff" accent="#1557c0" /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Pending" value={schedules.isLoading ? "—" : counts.pending.toLocaleString()} detail="Waiting to start" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
+      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Pending" value={schedules.isLoading ? "—" : counts.pending.toLocaleString()} detail="Waiting for attendance activity" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
+      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Delayed" value={schedules.isLoading || attendance.isLoading ? "—" : counts.delayed.toLocaleString()} detail="Missed calls or needs follow-up" icon={<PendingActionsRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
       <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Completed" value={schedules.isLoading ? "—" : counts.completed.toLocaleString()} detail="Finished duties" icon={<TaskAltRoundedIcon />} tint="#e5f5ee" accent="#178264" /></Grid>
     </Grid>
     <Card>
       {schedules.isLoading && <LinearProgress />}
-      {schedules.isError && <Alert severity="error" sx={{ m: 2 }}>Athulya schedules could not be loaded.</Alert>}
-      {attendance.isError && <Alert severity="warning" sx={{ m: 2 }}>Our check-in and check-out statuses could not be loaded.</Alert>}
+      {schedules.isError && <Alert severity="error" sx={{ m: 2 }}>Scheduled duties could not be loaded.</Alert>}
+      {attendance.isError && <Alert severity="warning" sx={{ m: 2 }}>Attendance updates could not be loaded.</Alert>}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} sx={{ p: 2, borderBottom: "1px solid #e8edf3" }}>
         <TextField type="date" size="small" required label="Schedule date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value || todayInIndia())} InputLabelProps={{ shrink: true }} sx={{ minWidth: { sm: 200 } }} />
         <Button size="small" onClick={() => setSelectedDate(todayInIndia())} disabled={selectedDate === todayInIndia()}>Today</Button>
@@ -139,8 +155,11 @@ export function AttendanceSchedulesPage() {
           <InputLabel id="schedule-status-label">Schedule status</InputLabel>
           <Select labelId="schedule-status-label" value={statusFilter} label="Schedule status" onChange={(event) => setStatusFilter(event.target.value)}>
             <MenuItem value="all">All statuses</MenuItem>
-            <MenuItem value="active">Active</MenuItem>
             <MenuItem value="pending">Pending</MenuItem>
+            <MenuItem value="check_in">Check-in</MenuItem>
+            <MenuItem value="check_out">Check-out</MenuItem>
+            <MenuItem value="processing">Processing</MenuItem>
+            <MenuItem value="delayed">Delayed</MenuItem>
             <MenuItem value="completed">Completed</MenuItem>
             <MenuItem value="cancelled">Cancelled</MenuItem>
           </Select>
@@ -148,8 +167,8 @@ export function AttendanceSchedulesPage() {
         <Chip label={`${filteredSchedules.length} schedules`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
       </Stack>
       <TableContainer sx={{ overflowX: "auto" }}>
-        <Table size="small" sx={{ minWidth: 850 }} aria-label="Athulya schedules and attendance">
-          <TableHead><TableRow>{["Patient", "Caregivers", "Service", "Check in", "Check out", "Status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
+        <Table size="small" sx={{ minWidth: 850 }} aria-label="Attendance and schedules">
+          <TableHead><TableRow>{["Patient", "Care givers", "Service", "Check in", "Check out", "Status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>
             {pageRows.map((schedule) => {
               const localTasks = matchingAttendance(schedule, attendance.data || []);
@@ -159,11 +178,11 @@ export function AttendanceSchedulesPage() {
                 <TableCell>{schedule.service || "—"}</TableCell>
                 <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduledTime={schedule.startTime} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
                 <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduledTime={schedule.endTime} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
-                <TableCell><StatusChip status={schedule.status || "pending"} /></TableCell>
+                <TableCell><StatusChip status={statusesBySchedule.get(schedule.id) || "pending"} /></TableCell>
                 <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
               </TableRow>;
             })}
-            {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No schedules found for {dateLabel}. Choose another date or sync Athulya schedules in Settings.</TableCell></TableRow>}
+            {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No schedules found for {dateLabel}. Choose another date or contact your administrator.</TableCell></TableRow>}
             {schedules.isSuccess && schedulesData.length > 0 && filteredSchedules.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No {statusFilter} schedules found for {dateLabel}.</TableCell></TableRow>}
           </TableBody>
         </Table>
@@ -205,8 +224,6 @@ export function AttendanceSchedulesPage() {
                 <Detail label="Branch" value={selectedSchedule.branch} />
                 <Detail label="Vendor" value={selectedSchedule.vendorCompany} />
                 <Detail label="Care Manager" value={selectedSchedule.careManager.name} />
-                <Detail label="Care Manager ID" value={selectedSchedule.careManager.id} />
-                <Detail label="Care Manager phone" value={selectedSchedule.careManager.phone} />
               </Box>
             </Card>
 
@@ -234,7 +251,7 @@ export function AttendanceSchedulesPage() {
                 const artifacts = query?.data;
                 return <Box key={record.sessionId} sx={{ mt: index ? 2 : 0, pt: index ? 2 : 0, borderTop: index ? "1px solid" : undefined, borderColor: "divider" }}>
                   <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={.5} sx={{ mb: 1.25 }}>
-                    <Box><Typography variant="body2" fontWeight={700}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Session {record.sessionId}</Typography></Box>
+                    <Box><Typography variant="body2" fontWeight={700}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Attendance calls</Typography></Box>
                     <StatusChip status={record.sessionStatus} />
                   </Stack>
                   {query?.isLoading && <LinearProgress sx={{ mb: 1.25 }} />}
@@ -278,13 +295,8 @@ export function AttendanceSchedulesPage() {
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
-              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Record information</Typography>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
-                <Detail label="Schedule record ID" value={selectedSchedule.id} />
-                <Detail label="Athulya schedule ID" value={selectedSchedule.athulyaScheduleId} />
-                <Detail label="Athulya schedule PK" value={selectedSchedule.athulyaSchedulePk} />
-                <Detail label="Last synced" value={dateTimeLabel(selectedSchedule.lastSyncedAt)} />
-              </Box>
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Schedule reference</Typography>
+              <Detail label="Schedule ID" value={selectedSchedule.athulyaScheduleId || selectedSchedule.athulyaSchedulePk} />
             </Card>
           </Stack>
         </DialogContent>

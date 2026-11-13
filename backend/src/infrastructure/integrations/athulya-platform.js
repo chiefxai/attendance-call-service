@@ -29,8 +29,15 @@ function decryptSecret(value) {
 
 function validateBaseUrl(value) {
   const parsed = new URL(String(value || DEFAULT_BASE_URL));
-  if (parsed.protocol !== "https:" || !(parsed.hostname === "athulyaliving.net" || parsed.hostname.endsWith(".athulyaliving.net"))) {
-    throw new Error("Athulya API Base URL must use HTTPS on an athulyaliving.net host");
+  const officialHost = parsed.protocol === "https:"
+    && (parsed.hostname === "athulyaliving.net" || parsed.hostname.endsWith(".athulyaliving.net"));
+  const configuredMockUrl = String(process.env.ATHULYA_MOCK_API_BASE_URL || "").trim();
+  const matchesConfiguredMock = Boolean(configuredMockUrl)
+    && parsed.toString().replace(/\/$/, "") === new URL(configuredMockUrl).toString().replace(/\/$/, "")
+    && parsed.protocol === "http:"
+    && ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  if (!officialHost && !matchesConfiguredMock) {
+    throw new Error("Athulya API Base URL must use HTTPS on an athulyaliving.net host, or exactly match ATHULYA_MOCK_API_BASE_URL for local testing");
   }
   parsed.pathname = parsed.pathname.replace(/\/+$/, "");
   parsed.search = "";
@@ -270,10 +277,23 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
           }
           for (const stage of ["check_in", "check_out"]) {
             const stageTask = stage === "check_in" ? result.session.checkInTask : result.session.checkOutTask;
+            if (!stageTask || ["confirmed", "missed", "not_answered", "review"].includes(stageTask.status)) continue;
             const runAt = new Date(stage === "check_in" ? result.session.scheduledStartAt : result.session.scheduledEndAt);
             const job = await queue.enqueue("place_call", { sessionId: result.session.id, taskId: stageTask?.id, stage, attemptNumber: 1 }, {
-              idempotencyKey: `call:${result.session.id}:${stage}:1`, runAt,
+              idempotencyKey: `call:${result.session.id}:${stage}:1`, runAt, skipIfPast: true,
             });
+            if (!job) {
+              if (stageTask.status === "scheduled") {
+                const lateBySeconds = Math.max(0, Math.floor((Date.now() - runAt.getTime()) / 1000));
+                await repository.setStageStatus(result.session.id, stage, "missed", {
+                  reason: "schedule_imported_after_scheduled_time",
+                  importedAt: new Date().toISOString(),
+                  lateBySeconds,
+                });
+                console.info(`[athulya-sync] late schedule stage skipped; no call placed schedule=${scheduleId} caregiver=${caregiverId} stage=${stage} lateBySeconds=${lateBySeconds}`);
+              }
+              continue;
+            }
             if (job?.status === "queued" || job?.status === "running") scheduledCalls += 1;
           }
           scheduledForRecord += 1;
