@@ -31,7 +31,8 @@ function validateBaseUrl(value) {
   const parsed = new URL(String(value || DEFAULT_BASE_URL));
   const officialHost = parsed.protocol === "https:"
     && (parsed.hostname === "athulyaliving.net" || parsed.hostname.endsWith(".athulyaliving.net"));
-  const configuredMockUrl = String(process.env.ATHULYA_MOCK_API_BASE_URL || "").trim();
+  const upstreamMockBase = String(process.env.MOCK_PLATFORM_UPSTREAM_URL || "").trim().replace(/\/+$/, "");
+  const configuredMockUrl = String(process.env.ATHULYA_MOCK_API_BASE_URL || (upstreamMockBase ? `${upstreamMockBase}/api` : "")).trim();
   const matchesConfiguredMock = Boolean(configuredMockUrl)
     && parsed.toString().replace(/\/$/, "") === new URL(configuredMockUrl).toString().replace(/\/$/, "")
     && parsed.protocol === "http:"
@@ -202,14 +203,37 @@ async function fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters = {}, fetchIm
   } finally { clearTimeout(timeout); }
 }
 
+async function resolveAthulyaConnection(repository, organizationId) {
+  const [integration, mock] = await Promise.all([
+    repository.getAthulyaIntegration(organizationId),
+    repository.getMockPlatformServerSettings(organizationId),
+  ]);
+  if (mock.enabled) {
+    const apiKey = String(process.env.ATHULYA_MOCK_API_KEY || "");
+    const upstream = String(process.env.MOCK_PLATFORM_UPSTREAM_URL || "").replace(/\/+$/, "");
+    if (!apiKey || !upstream) throw new Error("The mock Athulya server is not configured");
+    return {
+      apiBaseUrl: validateBaseUrl(process.env.ATHULYA_MOCK_API_BASE_URL || `${upstream}/api`),
+      apiKey,
+      mode: "mock",
+    };
+  }
+  if (!integration.enabled) throw new Error("Enable the Athulya integration before synchronising");
+  if (!integration.encryptedApiKey) throw new Error("Athulya API key is not configured");
+  return {
+    apiBaseUrl: validateBaseUrl(integration.apiBaseUrl),
+    apiKey: decryptSecret(integration.encryptedApiKey),
+    mode: "live",
+  };
+}
+
 function createAthulyaScheduleSyncHandler({ repository, queue }) {
   return async ({ runId, organizationId, filters = {} }) => {
     try {
-      const settings = await repository.getAthulyaIntegration(organizationId);
-      if (!settings.enabled) throw new Error("Athulya integration is disabled");
+      const connection = await resolveAthulyaConnection(repository, organizationId);
       const records = await fetchAthulyaSchedules({
-        apiBaseUrl: settings.apiBaseUrl,
-        apiKey: decryptSecret(settings.encryptedApiKey),
+        apiBaseUrl: connection.apiBaseUrl,
+        apiKey: connection.apiKey,
         filters,
       });
       const upserted = await repository.upsertAthulyaSchedules(organizationId, records);
@@ -312,4 +336,4 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
   };
 }
 
-module.exports = { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, sourceRecords, caregiverRows, localScheduleDateTimeToUtc, localDateInTimeZone, latestDueAthulyaSyncSlot, createAthulyaScheduleSyncHandler };
+module.exports = { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, sourceRecords, caregiverRows, localScheduleDateTimeToUtc, localDateInTimeZone, latestDueAthulyaSyncSlot, createAthulyaScheduleSyncHandler };

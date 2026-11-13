@@ -7,7 +7,7 @@ const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { verifyVobizWebhookSignature } = require("../infrastructure/telephony/vobiz-signature");
 const { createVobizLiveRuntime } = require("../realtime/vobiz-live-runtime");
-const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
+const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
 
 const AGENT_DEFAULTS = {
   active: true,
@@ -273,7 +273,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     if (!requireAdmin(req, res)) return;
     try {
       const setting = await repository.getMockPlatformServerSettings(org(req));
-      res.json({ enabled: setting.enabled, configured: Boolean(process.env.ATHULYA_MOCK_API_KEY && process.env.MOCK_PLATFORM_UPSTREAM_URL) });
+      res.json({ enabled: setting.enabled, configured: Boolean(process.env.ATHULYA_MOCK_API_KEY && process.env.MOCK_PLATFORM_UPSTREAM_URL), activeMode: setting.enabled ? "mock" : "live" });
     } catch (error) { fail(res, error); }
   });
 
@@ -284,7 +284,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const configured = Boolean(process.env.ATHULYA_MOCK_API_KEY && process.env.MOCK_PLATFORM_UPSTREAM_URL);
       if (req.body.enabled && !configured) return res.status(400).json({ error: "Configure the mock platform API key and upstream URL on the server before enabling it." });
       const setting = await repository.setMockPlatformServerEnabled(org(req), req.body.enabled, req.webUser?.id || null);
-      res.json({ enabled: setting.enabled, configured });
+      res.json({ enabled: setting.enabled, configured, activeMode: setting.enabled ? "mock" : "live" });
     } catch (error) { fail(res, error); }
   });
 
@@ -346,6 +346,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const enabled = body.enabled === true;
       if (body.autoSyncEnabled != null && typeof body.autoSyncEnabled !== "boolean") return res.status(400).json({ error: "autoSyncEnabled must be a boolean." });
       const autoSyncEnabled = body.autoSyncEnabled === true;
+      const mockSetting = await repository.getMockPlatformServerSettings(org(req));
       const autoSyncScope = String(body.autoSyncScope || "all");
       const autoSyncScopeId = String(body.autoSyncScopeId || "").trim();
       if (!["all", "branch", "care_manager"].includes(autoSyncScope)) return res.status(400).json({ error: "autoSyncScope must be all, branch, or care_manager." });
@@ -354,7 +355,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const apiKeyInput = String(body.apiKey || "").trim();
       const encryptedApiKey = apiKeyInput ? encryptSecret(apiKeyInput) : null;
       if (enabled && !(encryptedApiKey || old.encryptedApiKey)) return res.status(400).json({ error: "Enter the Athulya API key before enabling the integration." });
-      if (autoSyncEnabled && !enabled) return res.status(400).json({ error: "Enable the Athulya integration before enabling automatic sync." });
+      if (autoSyncEnabled && !enabled && !mockSetting.enabled) return res.status(400).json({ error: "Enable the live Athulya integration or the mock test server before enabling automatic sync." });
       if (autoSyncEnabled && autoSyncScope !== "all" && !autoSyncScopeId) return res.status(400).json({ error: "Enter the branch or Care Manager ID for the selected automatic sync scope." });
       const saved = await repository.saveAthulyaIntegration(org(req), { integrationName, apiBaseUrl, encryptedApiKey, enabled, autoSyncEnabled, autoSyncScope, autoSyncScopeId, updatedBy: req.webUser?.id });
       res.json({ integrationName: saved.integrationName, apiBaseUrl: saved.apiBaseUrl, enabled: saved.enabled,
@@ -371,9 +372,15 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.post("/integrations/athulya/test", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
+      const mockSetting = await repository.getMockPlatformServerSettings(org(req));
       const settings = await repository.getAthulyaIntegration(org(req));
-      const apiBaseUrl = validateBaseUrl(req.body?.apiBaseUrl || settings.apiBaseUrl);
-      const apiKey = String(req.body?.apiKey || "").trim() || decryptSecret(settings.encryptedApiKey);
+      const connection = mockSetting.enabled
+        ? await resolveAthulyaConnection(repository, org(req))
+        : {
+          apiBaseUrl: validateBaseUrl(req.body?.apiBaseUrl || settings.apiBaseUrl),
+          apiKey: String(req.body?.apiKey || "").trim() || decryptSecret(settings.encryptedApiKey),
+        };
+      const { apiBaseUrl, apiKey } = connection;
       const scheduleDate = localDateInTimeZone(new Date(), process.env.APP_TIMEZONE || "Asia/Kolkata");
       const records = await fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters: { from_date: scheduleDate, to_date: scheduleDate } });
       res.json({ connected: true, scheduleDate, recordsReceived: records.length });
@@ -383,8 +390,9 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.post("/integrations/athulya/sync", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
+      const mockSetting = await repository.getMockPlatformServerSettings(org(req));
       const settings = await repository.getAthulyaIntegration(org(req));
-      if (!settings.enabled) return res.status(409).json({ error: "Enable the Athulya integration before synchronising." });
+      if (!settings.enabled && !mockSetting.enabled) return res.status(409).json({ error: "Enable either the live Athulya integration or the mock test server before synchronising." });
       const body = req.body || {};
       const fromDate = body.fromDate ? String(body.fromDate) : "";
       const toDate = body.toDate ? String(body.toDate) : "";

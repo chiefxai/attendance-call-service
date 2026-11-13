@@ -297,7 +297,11 @@ class PostgresRepository {
     const { rows } = await this.pool.query(
       `SELECT organization_id AS "organizationId",auto_sync_enabled_at AS "autoSyncEnabledAt",last_auto_sync_slot AS "lastAutoSyncSlot",
         auto_sync_scope AS "autoSyncScope",auto_sync_scope_id AS "autoSyncScopeId"
-       FROM athulya_integration_settings WHERE enabled=TRUE AND auto_sync_enabled=TRUE AND encrypted_api_key IS NOT NULL`,
+       FROM athulya_integration_settings settings WHERE auto_sync_enabled=TRUE
+         AND ((enabled=TRUE AND encrypted_api_key IS NOT NULL) OR EXISTS (
+           SELECT 1 FROM mock_platform_server_settings mock
+           WHERE mock.organization_id=settings.organization_id AND mock.enabled=TRUE
+         ))`,
     );
     return rows;
   }
@@ -306,7 +310,11 @@ class PostgresRepository {
     if (!client?.query) throw new Error("A database transaction client is required");
     const claimed = await client.query(
       `UPDATE athulya_integration_settings SET last_auto_sync_slot=$2,updated_at=NOW()
-       WHERE organization_id=$1 AND enabled=TRUE AND auto_sync_enabled=TRUE
+       WHERE organization_id=$1 AND auto_sync_enabled=TRUE
+         AND (enabled=TRUE OR EXISTS (
+           SELECT 1 FROM mock_platform_server_settings mock
+           WHERE mock.organization_id=athulya_integration_settings.organization_id AND mock.enabled=TRUE
+         ))
          AND auto_sync_enabled_at <= $3 AND (last_auto_sync_slot IS NULL OR last_auto_sync_slot < $2)
        RETURNING organization_id`, [organizationId, slotKey, slotAt],
     );

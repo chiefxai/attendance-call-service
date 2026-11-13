@@ -1,6 +1,6 @@
 "use strict";
 
-const { decryptSecret, validateBaseUrl } = require("./athulya-platform");
+const { resolveAthulyaConnection } = require("./athulya-platform");
 
 function formatTimingWithOffset(value, timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata") {
   const date = value instanceof Date ? value : new Date(value);
@@ -25,12 +25,9 @@ function createAthulyaAttendanceClient({ repository, fetchImpl = globalThis.fetc
   async function sendAttendance({ organizationId, scheduleId, type, timing, idempotencyKey }) {
     if (!organizationId || !scheduleId) throw new Error("Athulya attendance requires an organization and schedule ID");
     if (!["check_in", "check_out"].includes(type)) throw new Error("Athulya attendance type must be check_in or check_out");
-    const settings = await repository.getAthulyaIntegration(organizationId);
-    if (!settings.enabled) throw new Error("Enable the Athulya integration before submitting attendance");
-    if (!settings.encryptedApiKey) throw new Error("Athulya API key is not configured");
-
-    const apiKey = decryptSecret(settings.encryptedApiKey);
-    const baseUrl = validateBaseUrl(settings.apiBaseUrl);
+    const connection = await resolveAthulyaConnection(repository, organizationId);
+    const apiKey = connection.apiKey;
+    const baseUrl = connection.apiBaseUrl;
     const endpoint = new URL("check-in-out", `${baseUrl.replace(/\/+$/, "")}/`);
     const payload = { schedule_id: String(scheduleId), type, timing: formatTimingWithOffset(timing) };
     const timeoutMs = Math.max(1_000, Math.min(Number(process.env.ATHULYA_ATTENDANCE_TIMEOUT_MS) || 15_000, 120_000));
