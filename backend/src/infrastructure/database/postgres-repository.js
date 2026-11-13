@@ -1439,20 +1439,27 @@ class PostgresRepository {
     }
     const visibleStaff = new Set(sessions.flatMap((session) => [session.employee?.id, session.employee?.name]).filter(Boolean));
     return [...records.values()]
-      .filter((record) => (!careManagerExternalId || visibleStaff.has(record.id) || visibleStaff.has(record.name)))
       .filter((record) => (status === "all" || status === record.dutyStatus)
         && (!search || `${record.id} ${record.name} ${record.companyName} ${record.patientName} ${record.address}`.toLowerCase().includes(search.toLowerCase())))
       .slice(0, Math.min(Number(limit) || 100, 500));
   }
 
   async listPatientDirectory(organizationId, { search = "", status = "all", limit = 100, careManagerExternalId = null } = {}) {
-    const [profiles, sessions] = await Promise.all([
+    const schedulePatientsQuery = careManagerExternalId
+      ? this.pool.query(
+        `SELECT DISTINCT patient_external_id FROM athulya_schedules
+         WHERE organization_id=$1 AND care_manager_external_id=$2`,
+        [organizationId, careManagerExternalId],
+      )
+      : Promise.resolve({ rows: [] });
+    const [profiles, sessions, schedulePatients] = await Promise.all([
       this.pool.query(
         `SELECT external_id,name,phone_number,address,language,care_category,hub,athulya_patient_uhid,branch FROM patient_directory
          WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
         [organizationId],
       ),
       this.listAttendanceSessions(organizationId, { limit: 500, careManagerExternalId }),
+      schedulePatientsQuery,
     ]);
     const records = new Map();
     for (const row of profiles.rows) {
@@ -1485,7 +1492,10 @@ class PostgresRepository {
         status: session.sessionStatus,
       });
     }
-    const visiblePatients = new Set(sessions.flatMap((session) => [session.patient?.id, session.patient?.name]).filter(Boolean));
+    const visiblePatients = new Set([
+      ...sessions.flatMap((session) => [session.patient?.id, session.patient?.name]).filter(Boolean),
+      ...schedulePatients.rows.map((row) => row.patient_external_id).filter(Boolean),
+    ]);
     return [...records.values()]
       .filter((record) => (!careManagerExternalId || visiblePatients.has(record.id) || visiblePatients.has(record.name)))
       .filter((record) => (status === "all" || status === record.status)

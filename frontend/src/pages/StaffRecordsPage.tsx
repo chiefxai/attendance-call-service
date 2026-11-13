@@ -90,10 +90,10 @@ export function StaffRecordsPage() {
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="WORKFORCE / ATTENDANCE ASSIGNMENTS" title="Caregivers" description="Manage caregiver profiles and review their attendance assignments." actions={<Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled={!records.length}>Export</Button>} />
-    {query.isError && <Alert severity="error">Could not load caregiver records from the backend.</Alert>}
+    <PageHeader eyebrow="WORKFORCE / ATTENDANCE ASSIGNMENTS" title="Care Givers" description="Manage care giver profiles and review their attendance assignments." actions={<Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled={!records.length}>Export</Button>} />
+    {query.isError && <Alert severity="error">Could not load care giver records from the backend.</Alert>}
     <Grid container spacing={1.75}>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Caregivers" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned caregivers" icon={<GroupRoundedIcon />} /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Care Givers" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned care givers" icon={<GroupRoundedIcon />} /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Active assignments" value={query.isLoading ? "—" : String(active)} detail="Current active session" icon={<MedicalServicesRoundedIcon />} tint="#e5f5ee" accent="#178264" /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Calling languages" value={query.isLoading ? "—" : String(languages.length)} detail={languages.map((value) => value.toUpperCase()).join(" · ") || "None yet"} icon={<TranslateRoundedIcon />} tint="#e9efff" accent="#1557c0" /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Contacts on record" value={query.isLoading ? "—" : String(contacts)} detail="Registered staff mobile numbers" icon={<PhoneIphoneRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
@@ -113,7 +113,7 @@ export function StaffRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Staff directory" sx={{ minWidth: 900 }}>
+      <TableContainer><Table size="small" aria-label="Care giver directory" sx={{ minWidth: 900 }}>
         <TableHead><TableRow>{["Staff name", "Company / vendor", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
         <TableBody>{pageRows.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
@@ -126,7 +126,7 @@ export function StaffRecordsPage() {
         </TableRow>)}</TableBody>
       </Table></TableContainer>
       <TablePagination component="div" count={filtered.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Staff per page" />
-      {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No caregivers match these filters.</Typography>}
+      {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No care givers match these filters.</Typography>}
     </Card>
     <Dialog open={editOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
       <DialogTitle>Edit staff record</DialogTitle>

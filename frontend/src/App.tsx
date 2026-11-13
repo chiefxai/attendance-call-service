@@ -33,7 +33,7 @@ const drawerWidth = 252;
 const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnly?: boolean }> = [
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
   { label: "Care Managers", path: "/care-managers", icon: <SupervisorAccountRoundedIcon />, adminOnly: true },
-  { label: "Caregivers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
+  { label: "Care Givers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
