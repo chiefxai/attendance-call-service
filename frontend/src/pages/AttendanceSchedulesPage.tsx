@@ -96,7 +96,7 @@ export function AttendanceSchedulesPage() {
         .filter((record) => ids.includes(record.assignmentId));
       return [...new Map(matches.map((record) => [record.sessionId, record])).values()];
     },
-    refetchInterval: selectedSchedule ? 15_000 : false,
+    refetchInterval: selectedSchedule ? 15_000 : (false as const),
   });
   const schedulesData = schedules.data || [];
   const scheduleSessions = selectedSchedule
