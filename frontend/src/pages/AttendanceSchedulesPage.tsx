@@ -24,12 +24,12 @@ function matchingAttendance(schedule: AthulyaSchedule, records: AttendanceRecord
   return records.filter((record) => ids.has(record.assignmentId));
 }
 
-function AttendanceStage({ records, stage, emptyLabel }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; emptyLabel: string }) {
-  if (!records.length) return <Typography variant="body2" color="text.secondary">{emptyLabel}</Typography>;
+function AttendanceStage({ records, stage, scheduledTime, emptyLabel }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduledTime: string | null | undefined; emptyLabel: string }) {
+  if (!records.length) return <Typography variant="body2" color="text.secondary">{scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}</Typography>;
   return <Stack spacing={0.5}>
     {records.map((record) => <Stack key={record.sessionId} direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
       {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}:</Typography>}
-      <StatusChip status={record[stage].status === "not_answered" ? "delayed" : record[stage].status || "pending"} />
+      <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{scheduleClock(record[stage].reportedAt || scheduledTime)}</Typography>
     </Stack>)}
   </Stack>;
 }
@@ -59,26 +59,22 @@ export function AttendanceSchedulesPage() {
       {schedules.isError && <Alert severity="error" sx={{ m: 2 }}>Athulya schedules could not be loaded.</Alert>}
       {attendance.isError && <Alert severity="warning" sx={{ m: 2 }}>Our check-in and check-out statuses could not be loaded.</Alert>}
       <TableContainer sx={{ overflowX: "auto" }}>
-        <Table size="small" sx={{ minWidth: 1100 }} aria-label="Athulya schedules and attendance">
-          <TableHead><TableRow>{["Patient", "Care Manager", "Caregivers", "Service", "Branch", "Athulya status", "Check-in time", "Check-in status", "Check-out time", "Check-out status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
+        <Table size="small" sx={{ minWidth: 850 }} aria-label="Athulya schedules and attendance">
+          <TableHead><TableRow>{["Patient", "Caregivers", "Service", "Check in", "Check out", "Status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>
             {pageRows.map((schedule) => {
               const localTasks = matchingAttendance(schedule, attendance.data || []);
               return <TableRow key={schedule.id} hover>
                 <TableCell>{schedule.patient.name || "—"}</TableCell>
-                <TableCell>{schedule.careManager.name || "—"}<Typography variant="caption" display="block" color="text.secondary">{schedule.careManager.phone || ""}</Typography></TableCell>
                 <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell>
                 <TableCell>{schedule.service || "—"}</TableCell>
-                <TableCell>{schedule.branch || "—"}</TableCell>
+                <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduledTime={schedule.startTime} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
+                <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduledTime={schedule.endTime} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
                 <TableCell><StatusChip status={schedule.status || "pending"} /></TableCell>
-                <TableCell>{scheduleClock(schedule.startTime)}</TableCell>
-                <TableCell><AttendanceStage records={localTasks} stage="checkIn" emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "Not scheduled"} /></TableCell>
-                <TableCell>{scheduleClock(schedule.endTime)}</TableCell>
-                <TableCell><AttendanceStage records={localTasks} stage="checkOut" emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "Not scheduled"} /></TableCell>
                 <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
               </TableRow>;
             })}
-            {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 5 }}>No Athulya schedules imported yet. An Admin can configure and sync schedules in Settings.</TableCell></TableRow>}
+            {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No Athulya schedules imported yet. An Admin can configure and sync schedules in Settings.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </TableContainer>
@@ -105,7 +101,7 @@ export function AttendanceSchedulesPage() {
             <Detail label="Branch" value={selectedSchedule.branch} />
             <Detail label="Vendor" value={selectedSchedule.vendorCompany} />
             <Stack spacing={0.5}>
-              <Typography variant="overline" color="text.secondary">Athulya status</Typography>
+              <Typography variant="overline" color="text.secondary">Status</Typography>
               <Chip size="small" label={selectedSchedule.status || "pending"} sx={{ alignSelf: "flex-start", textTransform: "capitalize" }} />
             </Stack>
             <Detail label="Last synced" value={selectedSchedule.lastSyncedAt ? new Date(selectedSchedule.lastSyncedAt).toLocaleString() : "—"} />
