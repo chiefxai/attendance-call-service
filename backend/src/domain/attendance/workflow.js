@@ -45,6 +45,13 @@ function inferRequestedCallbackAt(transcript, referenceDate = new Date()) {
   return new Date(referenceDate.getTime() + amount * 60_000).toISOString();
 }
 
+function validateReportedTime(value, now = new Date()) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "reported_time_invalid";
+  return timestamp > now.getTime() ? "future_reported_time" : null;
+}
+
 function chooseAttendanceAction(stage, outcome = {}) {
   if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment" || outcome.employeeIntent === "unclear") {
     return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
@@ -440,11 +447,42 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
       repository.getAgentSessionContext(attempt.sessionId, attempt.stage),
       repository.getTranscriptForCall(callAttemptId),
     ]);
+    const endedAt = new Date(attempt.endedAt || attempt.updatedAt || Date.now());
+    const callEndedAt = Number.isFinite(endedAt.getTime()) ? endedAt.toISOString() : new Date().toISOString();
+    sessionContext.systemTimeAtCallEnd = callEndedAt;
     const outcome = await postCallAgent.extractCallOutcome({
       orgId: session.organizationId,
       sessionContext,
       transcript: transcript.text,
     });
+    const now = new Date(callEndedAt);
+    const stageTimeField = attempt.stage === "check_in" ? "reportedArrivalTime" : "reportedDepartureTime";
+    const stageTimeMentionedField = attempt.stage === "check_in" ? "reportedArrivalTimeMentioned" : "reportedDepartureTimeMentioned";
+    const scheduledStageTime = attempt.stage === "check_in" ? session.scheduledStartAt : session.scheduledEndAt;
+
+    // A clearly future arrival/departure cannot be recorded as attendance.
+    // The live prompt asks the employee to correct it; if it remains wrong in
+    // the transcript, route it to human review rather than silently adjusting it.
+    const reportedTimeError = validateReportedTime(outcome[stageTimeField], now);
+    if (reportedTimeError) {
+      outcome.exceptionCode = reportedTimeError;
+      outcome.employeeIntent = "unclear";
+      outcome.summary = `${outcome.summary || ""} ${reportedTimeError === "future_reported_time" ? "Reported attendance time is later than call completion." : "Reported attendance time could not be parsed."}`.trim();
+    } else if (
+      outcome.employeeIntent === (attempt.stage === "check_in" ? "arrival_confirmed" : "departure_confirmed") &&
+      outcome[stageTimeMentionedField] === false
+    ) {
+      // When the employee confirms attendance but does not state a clock time,
+      // use the imported schedule time for this stage as requested.
+      const scheduledDate = scheduledStageTime ? new Date(scheduledStageTime) : null;
+      outcome[stageTimeField] = scheduledDate && Number.isFinite(scheduledDate.getTime()) ? scheduledDate.toISOString() : null;
+      outcome[`${stageTimeField}Source`] = "scheduled_time_fallback";
+      const fallbackTimeError = validateReportedTime(outcome[stageTimeField], now);
+      if (fallbackTimeError) {
+        outcome.exceptionCode = fallbackTimeError === "future_reported_time" ? "scheduled_time_in_future" : fallbackTimeError;
+        outcome.employeeIntent = "unclear";
+      }
+    }
     if (["will_arrive_later", "still_on_duty"].includes(outcome.employeeIntent)) {
       const inferredCallbackAt = inferRequestedCallbackAt(transcript.text, attempt.updatedAt ? new Date(attempt.updatedAt) : new Date());
       if (inferredCallbackAt) outcome.requestedCallbackAt = inferredCallbackAt;
@@ -586,6 +624,14 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
         }
       } else if (notifications.length) {
         console.info(`[attendance-worker] care-manager platform notification created session=${session.id} stage=${stage} recipients=${notifications.length}`);
+      }
+      await repository.setStageStatus(sessionId, stage, "not_answered", {
+        reason: "consecutive_no_answer_limit_reached",
+        consecutiveNoAnswer: maxNoAnswer,
+        careManagerNotified: notifications.length > 0,
+      });
+      if (escalation === "call_care_manager" && notifications.length === 0) {
+        console.info(`[attendance-worker] no care manager found; keeping stage not_answered session=${session.id} stage=${stage}`);
       }
     }
     const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);

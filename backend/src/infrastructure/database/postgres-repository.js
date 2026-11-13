@@ -1849,7 +1849,12 @@ class PostgresRepository {
     );
     const context = json(taskResult.rows[0]?.active_context) || {};
     return {
-      assignment: { id: session.assignmentId, scheduleVersion: session.scheduleVersion, ...(session.metadata || {}) },
+      assignment: {
+        id: session.assignmentId,
+        scheduleVersion: session.scheduleVersion,
+        ...(session.metadata || {}),
+        timeZone: session.metadata?.timeZone || process.env.APP_TIMEZONE || "Asia/Kolkata",
+      },
       employee: session.employee,
       patient: session.patient,
       stage,

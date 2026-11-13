@@ -101,13 +101,16 @@ status events release slots. `CALL_SLOT_TTL_MINUTES` is a safety expiry for
 lost terminal callbacks. Queue worker concurrency controls background job
 processing separately from the number of live provider calls.
 
-`CALL_MAX_CONSECUTIVE_NO_ANSWER` defaults to 3. After three consecutive
-unanswered attempts for a stage, the service stops dialing that stage and
-records its status as `not_answered`. The assigned care manager receives an
-in-app alert by default. Settings can switch escalation to an automated Vobiz
-call. An answered call resets that streak if the employee requests a later callback. The host app can read
-`GET /assignments/:id/status`; its check-in and check-out results include a
-`flag: "not_answered"` when that limit is reached.
+`CALL_MAX_CONSECUTIVE_NO_ANSWER` defaults to 3. The first retry delay defaults
+to 3 minutes and continues using the configured exponential backoff. After
+three consecutive unanswered attempts, the service stops dialing that stage,
+calls the assigned care manager by default, and marks the stage `review`.
+Settings can switch escalation to an in-app alert. An answered call resets
+that streak if the employee requests a later callback. Employee-requested
+callback times are scheduled as follow-ups and remain `delayed` until the
+employee confirms the stage. The host app can read
+`GET /assignments/:id/status`; its check-in and check-out results retain a
+`flag: "not_answered"` after that limit is reached.
 
 `POST /assignments` accepts employee and patient details, agent, language,
 caller ID, and scheduled shift times. It creates separate durable check-in and

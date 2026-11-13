@@ -181,8 +181,9 @@ export function AttendanceSchedulesPage() {
     refetchInterval: selectedSchedule ? 15_000 : (false as const),
   });
   const schedulesData = schedules.data || [];
+  const attendanceData = attendance.data || [];
   const scheduleSessions = selectedSchedule
-    ? (scheduleAttendance.data || matchingAttendance(selectedSchedule, attendance.data || []))
+    ? (scheduleAttendance.data || matchingAttendance(selectedSchedule, attendanceData))
     : [];
   const conversationQueries = useQueries({ queries: scheduleSessions.map((record) => ({
     queryKey: ["session-artifacts", record.sessionId],
