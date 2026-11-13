@@ -5,7 +5,7 @@ import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
 import SettingsPhoneRoundedIcon from "@mui/icons-material/SettingsPhoneRounded";
 import { AxiosError } from "axios";
-import { fetchAthulyaAttendanceSubmissions, fetchAthulyaIntegration, fetchAthulyaSchedules, fetchAthulyaSyncRuns, fetchCallingSettings, resetCallingSettings, saveAthulyaIntegration, saveCallingSettings, startAthulyaSync, testAthulyaIntegration, type CallingSettings, type AthulyaIntegrationSettings } from "../api/client";
+import { fetchAthulyaAttendanceSubmissions, fetchAthulyaIntegration, fetchAthulyaSchedules, fetchAthulyaSyncRuns, fetchCallingSettings, fetchMockPlatformServerSettings, resetCallingSettings, saveAthulyaIntegration, saveCallingSettings, setMockPlatformServerEnabled, startAthulyaSync, testAthulyaIntegration, type CallingSettings, type AthulyaIntegrationSettings } from "../api/client";
 import { ApiAccessPage } from "./ApiAccessPage";
 import { PageHeader } from "../components/OperationsUI";
 
@@ -37,6 +37,7 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: ["calling-settings"], queryFn: fetchCallingSettings, retry: false });
   const integration = useQuery({ queryKey: ["athulya-integration"], queryFn: fetchAthulyaIntegration, enabled: tab === "athulya", retry: false });
+  const mockPlatform = useQuery({ queryKey: ["mock-platform-server"], queryFn: fetchMockPlatformServerSettings, enabled: tab === "api", retry: false });
   const syncRuns = useQuery({ queryKey: ["athulya-sync-runs"], queryFn: fetchAthulyaSyncRuns, enabled: tab === "athulya", refetchInterval: 5000, retry: false });
   const attendanceSubmissions = useQuery({ queryKey: ["athulya-attendance-submissions", submissionFilters], queryFn: () => fetchAthulyaAttendanceSubmissions({ ...submissionFilters, eventType: submissionFilters.eventType === "all" ? undefined : submissionFilters.eventType, status: submissionFilters.status === "all" ? undefined : submissionFilters.status, fromDate: submissionFilters.fromDate || undefined, toDate: submissionFilters.toDate || undefined, caregiverId: submissionFilters.caregiverId || undefined, patientId: submissionFilters.patientId || undefined }), enabled: tab === "athulya", refetchInterval: 5000, retry: false });
   const schedules = useQuery({ queryKey: ["athulya-schedules", syncFilters.scheduleDate], queryFn: () => fetchAthulyaSchedules({ fromDate: syncFilters.scheduleDate || undefined, toDate: syncFilters.scheduleDate || undefined }), enabled: tab === "athulya", retry: false });
@@ -62,6 +63,7 @@ export function SettingsPage() {
     onSuccess: (data) => queryClient.setQueryData(["calling-settings"], data),
   });
   const saveIntegration = useMutation({ mutationFn: saveAthulyaIntegration, onSuccess: (data) => { queryClient.setQueryData(["athulya-integration"], data); setIntegrationForm((current) => ({ ...current, apiKey: "" })); } });
+  const updateMockPlatform = useMutation({ mutationFn: setMockPlatformServerEnabled, onSuccess: (data) => queryClient.setQueryData(["mock-platform-server"], data) });
   const testIntegration = useMutation({ mutationFn: testAthulyaIntegration });
   const syncIntegration = useMutation({ mutationFn: startAthulyaSync, onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["athulya-sync-runs"] }); } });
   const updateRetry = (key: keyof CallingForm["retry"], value: string) => {
@@ -137,7 +139,27 @@ export function SettingsPage() {
           </Stack>
         </Stack>
       </CardContent></Card>}
-    </Stack> : tab === "api" ? <ApiAccessPage section="settings" /> : <Stack spacing={2.5}>
+    </Stack> : tab === "api" ? <Stack spacing={2.5}>
+      <ApiAccessPage section="settings" />
+      <Card><CardContent><Stack spacing={2}>
+        <Typography variant="h6">Test platform server</Typography>
+        <Typography variant="body2" color="text.secondary">Expose the mock schedule and attendance APIs through this app’s existing HTTPS API. It returns safe sample data with no callable caregiver; received test submissions stay in memory and clear when the mock service restarts.</Typography>
+        {mockPlatform.isError && <Alert severity="error">Could not load test server settings: {settingError(mockPlatform.error)}</Alert>}
+        {updateMockPlatform.isError && <Alert severity="error">Could not update the test server: {settingError(updateMockPlatform.error)}</Alert>}
+        {!mockPlatform.data?.configured && <Alert severity="warning">Configure a long random ATHULYA_MOCK_API_KEY in the VM .env file, then redeploy before enabling this server.</Alert>}
+        <FormControlLabel
+          label={mockPlatform.data?.enabled ? "Enabled" : "Disabled"}
+          control={<Switch checked={mockPlatform.data?.enabled ?? false} disabled={!mockPlatform.data?.configured || mockPlatform.isLoading || updateMockPlatform.isPending}
+            onChange={(_, enabled) => updateMockPlatform.mutate(enabled)} inputProps={{ "aria-label": "Enable test platform server" }} />}
+        />
+        {mockPlatform.data?.enabled && <>
+          <Typography variant="subtitle2">Test API base URL</Typography>
+          <Typography variant="body2" sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>{window.location.origin}/api/call-service/test-platform</Typography>
+          <Typography variant="body2" sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>GET /caremanager/clients · POST /check-in-out · GET /submissions</Typography>
+          <Typography variant="caption" color="text.secondary">Send ATHULYA_MOCK_API_KEY in the x-api-key header. Use this base URL and key in the Athulya integration settings to test schedule sync and attendance submissions.</Typography>
+        </>}
+      </Stack></CardContent></Card>
+    </Stack> : <Stack spacing={2.5}>
       <Alert severity="info">Athulya credentials stay encrypted on the server. Every sync imports one selected service date only. Automatic sync runs at 12:00 AM and 12:00 PM for the configured scope. Confirmed check-in and check-out events are posted separately. Use the local mock platform in development to validate schedule fetching and attendance POSTs safely.</Alert>
       {integration.isLoading && <CircularProgress size={24} />}
       {integration.isError && <Alert severity="error">Could not load Athulya settings: {settingError(integration.error)}</Alert>}

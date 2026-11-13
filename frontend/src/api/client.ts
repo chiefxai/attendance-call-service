@@ -137,6 +137,18 @@ export async function provisionCareManagerAccount(id: string, password: string) 
   return response.data;
 }
 
+export interface MockPlatformServerSettings { enabled: boolean; configured: boolean; }
+
+export async function fetchMockPlatformServerSettings() {
+  const response = await api.get<MockPlatformServerSettings>("/settings/mock-platform-server");
+  return response.data;
+}
+
+export async function setMockPlatformServerEnabled(enabled: boolean) {
+  const response = await api.put<MockPlatformServerSettings>("/settings/mock-platform-server", { enabled });
+  return response.data;
+}
+
 export async function fetchAthulyaIntegration() {
   const response = await api.get<AthulyaIntegrationSettings>("/integrations/athulya");
   return response.data;

@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const { localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
 
 const port = Math.max(1, Number(process.env.PORT) || 4000);
-const apiKey = String(process.env.ATHULYA_MOCK_API_KEY || "mock-athulya-api-key");
+const apiKey = String(process.env.ATHULYA_MOCK_API_KEY || "");
 const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
 const submissions = new Map();
 
@@ -18,7 +18,7 @@ function authorized(req, url) {
   const provided = String(req.headers["x-api-key"] || url.searchParams.get("api_key") || "");
   const expectedBuffer = Buffer.from(apiKey);
   const providedBuffer = Buffer.from(provided);
-  return expectedBuffer.length === providedBuffer.length && crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+  return expectedBuffer.length > 0 && expectedBuffer.length === providedBuffer.length && crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
 function scheduleFor(date) {

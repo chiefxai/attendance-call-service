@@ -33,6 +33,11 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   };
   router.use(async (req, res, next) => {
     if (req.method === "POST" && ["/answer", "/incoming/answer", "/care-manager-alert/answer", "/webhooks/call-status"].includes(req.path)) return next();
+    if (req.path === "/test-platform" || req.path.startsWith("/test-platform/")) {
+      if (!process.env.DEFAULT_ORGANIZATION_ID) return res.status(503).json({ error: "Default organization is not configured" });
+      req.orgId = process.env.DEFAULT_ORGANIZATION_ID;
+      return next();
+    }
 
     try {
       const cookieHeader = String(req.headers.cookie || "");
@@ -261,6 +266,59 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       const passwordHash = crypto.scryptSync(password, salt, 64).toString("hex");
       if (!await repository.resetCareManagerPassword(org(req), req.params.id, salt, passwordHash)) return res.status(404).json({ error: "Care Manager not found" });
       res.json({ success: true, sessionsRevoked: true });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/settings/mock-platform-server", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const setting = await repository.getMockPlatformServerSettings(org(req));
+      res.json({ enabled: setting.enabled, configured: Boolean(process.env.ATHULYA_MOCK_API_KEY && process.env.MOCK_PLATFORM_UPSTREAM_URL) });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.put("/settings/mock-platform-server", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled must be a boolean" });
+      const configured = Boolean(process.env.ATHULYA_MOCK_API_KEY && process.env.MOCK_PLATFORM_UPSTREAM_URL);
+      if (req.body.enabled && !configured) return res.status(400).json({ error: "Configure the mock platform API key and upstream URL on the server before enabling it." });
+      const setting = await repository.setMockPlatformServerEnabled(org(req), req.body.enabled, req.webUser?.id || null);
+      res.json({ enabled: setting.enabled, configured });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.use("/test-platform", async (req, res) => {
+    try {
+      const setting = await repository.getMockPlatformServerSettings(org(req));
+      if (!setting.enabled) return res.status(404).json({ error: "Test platform API is disabled" });
+      const expected = Buffer.from(String(process.env.ATHULYA_MOCK_API_KEY || ""));
+      const authorization = String(req.get("authorization") || "");
+      const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1] || "";
+      const supplied = Buffer.from(String(req.get("x-api-key") || bearer));
+      if (!expected.length || expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) {
+        return res.status(expected.length ? 401 : 503).json({ error: expected.length ? "Invalid test platform key" : "Test platform key is not configured" });
+      }
+      const relative = new URL(req.originalUrl, "http://service").pathname.split("/test-platform").pop() || "/";
+      const routeMap = {
+        "GET /caremanager/clients": "/api/caremanager/clients",
+        "POST /check-in-out": "/api/check-in-out",
+        "GET /submissions": "/mock/submissions",
+        "DELETE /submissions": "/mock/submissions",
+      };
+      const upstreamPath = routeMap[`${req.method} ${relative}`];
+      if (!upstreamPath) return res.status(404).json({ error: "Test platform route not found" });
+      const query = new URL(req.originalUrl, "http://service").searchParams;
+      query.delete("api_key");
+      const upstreamUrl = `${process.env.MOCK_PLATFORM_UPSTREAM_URL}${upstreamPath}${query.size ? `?${query}` : ""}`;
+      const headers = { "x-api-key": process.env.ATHULYA_MOCK_API_KEY, accept: "application/json" };
+      const idempotencyKey = req.get("idempotency-key");
+      if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
+      const options = { method: req.method, headers, signal: AbortSignal.timeout(10000) };
+      if (req.method === "POST") { headers["content-type"] = "application/json"; options.body = JSON.stringify(req.body || {}); }
+      const upstream = await fetch(upstreamUrl, options);
+      const responseText = await upstream.text();
+      res.status(upstream.status).set("Content-Type", upstream.headers.get("content-type") || "application/json").set("Cache-Control", "no-store").send(responseText);
     } catch (error) { fail(res, error); }
   });
 

@@ -44,6 +44,8 @@ const repositoryMethods = Object.freeze([
   "updateCareManager(organizationId, id, details)",
   "setCareManagerActive(organizationId, id, active)",
   "resetCareManagerPassword(organizationId, id, passwordSalt, passwordHash)",
+  "getMockPlatformServerSettings(organizationId)",
+  "setMockPlatformServerEnabled(organizationId, enabled, updatedBy)",
   "getAthulyaIntegration(organizationId)",
   "saveAthulyaIntegration(organizationId, settings)",
   "listAutoSyncAthulyaIntegrations()",

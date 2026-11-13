@@ -7,6 +7,7 @@ x-backend-environment: &backend-environment
   ATHULYA_CREDENTIALS_ENCRYPTION_KEY: ${ATHULYA_CREDENTIALS_ENCRYPTION_KEY:-}
   ATHULYA_MOCK_API_BASE_URL: ${ATHULYA_MOCK_API_BASE_URL:-}
   ATHULYA_MOCK_API_KEY: ${ATHULYA_MOCK_API_KEY:-}
+  MOCK_PLATFORM_UPSTREAM_URL: ${MOCK_PLATFORM_UPSTREAM_URL:-http://127.0.0.1:${ATHULYA_MOCK_PORT:-4010}}
   GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in .env}
   GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
   APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
@@ -64,7 +65,6 @@ x-backend-environment: &backend-environment
 
 services:
   mock-athulya:
-    profiles: [mock-platform]
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -73,7 +73,7 @@ services:
     environment:
       PORT: 4000
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
-      ATHULYA_MOCK_API_KEY: ${ATHULYA_MOCK_API_KEY:-mock-athulya-api-key}
+      ATHULYA_MOCK_API_KEY: ${ATHULYA_MOCK_API_KEY:-}
     ports:
       - "127.0.0.1:${ATHULYA_MOCK_PORT:-4010}:4000"
 
@@ -167,6 +167,8 @@ services:
         condition: service_completed_successfully
       backend-migrate:
         condition: service_completed_successfully
+      mock-athulya:
+        condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

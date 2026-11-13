@@ -241,6 +241,25 @@ class PostgresRepository {
     return Boolean(rows[0]);
   }
 
+  async getMockPlatformServerSettings(organizationId) {
+    const { rows } = await this.pool.query(
+      'SELECT enabled,updated_at AS "updatedAt" FROM mock_platform_server_settings WHERE organization_id=$1',
+      [organizationId],
+    );
+    return rows[0] || { enabled: false, updatedAt: null };
+  }
+
+  async setMockPlatformServerEnabled(organizationId, enabled, updatedBy = null) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO mock_platform_server_settings (organization_id,enabled,updated_by)
+       VALUES ($1,$2,$3) ON CONFLICT (organization_id) DO UPDATE
+       SET enabled=EXCLUDED.enabled,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+       RETURNING enabled,updated_at AS "updatedAt"`,
+      [organizationId, enabled, updatedBy],
+    );
+    return rows[0];
+  }
+
   async getAthulyaIntegration(organizationId) {
     const { rows } = await this.pool.query(
       `SELECT integration_name AS "integrationName",api_base_url AS "apiBaseUrl",encrypted_api_key AS "encryptedApiKey",
