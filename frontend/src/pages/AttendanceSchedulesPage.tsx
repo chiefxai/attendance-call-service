@@ -107,7 +107,7 @@ export function AttendanceSchedulesPage() {
     queryFn: () => fetchSessionArtifacts(record.sessionId),
     enabled: Boolean(selectedSchedule),
     retry: false,
-    refetchInterval: selectedSchedule ? 15_000 : false,
+    refetchInterval: selectedSchedule ? 15_000 : (false as const),
   })) });
   const counts = schedulesData.reduce((result, schedule) => {
     result[statusGroup(schedule.status)] += 1;
