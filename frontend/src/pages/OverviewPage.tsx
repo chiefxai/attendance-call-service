@@ -76,7 +76,7 @@ function buildOverviewCharts(records: AttendanceRecord[]) {
   };
 }
 
-export function OverviewPage({ showAgents = false, userRole = "admin" }: { showAgents?: boolean; userRole?: "admin" | "care_manager" }) {
+export function OverviewPage({ showAgents = false, userRole = "admin", embedded = false }: { showAgents?: boolean; userRole?: "admin" | "care_manager"; embedded?: boolean }) {
   const navigate = useNavigate();
   const [sessionId, setSessionId] = useState("");
   const [drilldown, setDrilldown] = useState<{ title: string; records: AttendanceRecord[] } | null>(null);
@@ -127,8 +127,9 @@ export function OverviewPage({ showAgents = false, userRole = "admin" }: { showA
   ];
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Operations dashboard" description="Monitor scheduled employee check-in and check-out calls from the live attendance service."
+    {!embedded && <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Operations dashboard" description="Monitor scheduled employee check-in and check-out calls from the live attendance service."
       actions={<><Chip label={new Date().toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })} variant="outlined" /><Button component={RouterLink} to="/attendance" variant="contained" endIcon={<ArrowForwardRoundedIcon />}>Open attendance</Button></>} />
+    }
     {userRole === "care_manager" && <SectionCard title="Care manager alerts" subtitle="Attendance calls that reached the unanswered-call limit need follow-up.">
       {careManagerAlerts.isError && <Alert severity="error">Could not load care manager alerts.</Alert>}
       {careManagerAlerts.data?.length === 0 && <Alert severity="success">No new care manager alerts.</Alert>}

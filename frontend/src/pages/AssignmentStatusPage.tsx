@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Divider, Grid, Stack, Typography } from "@mui/material";
@@ -8,9 +8,10 @@ import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import ArticleRoundedIcon from "@mui/icons-material/ArticleRounded";
-import { fetchAssignmentStatus, fetchCallRecording, fetchSessionArtifacts } from "../api/client";
+import { fetchAssignmentStatus, fetchSessionArtifacts } from "../api/client";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/OperationsUI";
+import { CallRecording } from "../components/CallRecording";
 
 function statusColor(status: string): "success" | "error" | "warning" | "default" {
   if (status === "confirmed" || status === "completed") return "success";
@@ -31,30 +32,6 @@ function formatSessionTime(value: string | null | undefined, timeZone?: string) 
   } catch {
     return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
   }
-}
-
-function CallRecording({ sessionId, attemptId }: { sessionId: string; attemptId: string }) {
-  const [requested, setRequested] = useState(false);
-  const recording = useQuery({
-    queryKey: ["call-recording", sessionId, attemptId],
-    queryFn: () => fetchCallRecording(sessionId, attemptId),
-    enabled: requested,
-    retry: false,
-  });
-  const [audioUrl, setAudioUrl] = useState("");
-
-  useEffect(() => {
-    if (!recording.data) return;
-    const url = URL.createObjectURL(recording.data);
-    setAudioUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [recording.data]);
-
-  if (recording.isError) return <Alert severity="error">Could not load this recording. Try refreshing the call logs.</Alert>;
-  if (audioUrl) return <Box component="audio" controls preload="none" src={audioUrl} sx={{ display: "block", width: "100%", mt: 1 }} />;
-  return <Button size="small" variant="outlined" disabled={recording.isFetching} onClick={() => setRequested(true)}>
-    {recording.isFetching ? "Loading recording…" : "Play recording"}
-  </Button>;
 }
 
 export function AssignmentStatusPage() {

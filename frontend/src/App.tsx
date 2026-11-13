@@ -12,7 +12,6 @@ import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import SupervisorAccountRoundedIcon from "@mui/icons-material/SupervisorAccountRounded";
-import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
@@ -26,19 +25,18 @@ import { AttendanceSchedulesPage } from "./pages/AttendanceSchedulesPage";
 import { PageHeaderTargetContext } from "./components/OperationsUI";
 import { LoginPage } from "./pages/LoginPage";
 import { CareManagersPage } from "./pages/CareManagersPage";
-import { ReportsPage } from "./pages/ReportsPage";
+import { OperationsPage } from "./pages/OperationsPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { fetchCurrentUser, signOut, type WebUser } from "./api/client";
 
 const drawerWidth = 252;
 const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnly?: boolean }> = [
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
-  { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
-  { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
+  { label: "Care Managers", path: "/care-managers", icon: <SupervisorAccountRoundedIcon />, adminOnly: true },
+  { label: "Caregivers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
+  { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
-  { label: "Reports", path: "/reports", icon: <AssessmentRoundedIcon /> },
-  { label: "Care Managers", path: "/care-managers", icon: <SupervisorAccountRoundedIcon />, adminOnly: true },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
 ];
@@ -111,11 +109,11 @@ function App() {
       <Box component="main" sx={{ flex: "1 1 auto", minWidth: 0, maxWidth: { xs: "100%", md: `calc(100% - ${drawerWidth}px)` }, boxSizing: "border-box", px: { xs: 1.5, sm: 3, lg: 5 }, pt: { xs: "128px", sm: "104px" }, pb: 6 }}>
         <PageHeaderTargetContext.Provider value={headerTarget}>
         <Routes>
-          <Route path="/" element={<OverviewPage userRole={user.role} />} />
+          <Route path="/" element={<OperationsPage userRole={user.role} />} />
           <Route path="/attendance" element={<AttendanceSchedulesPage />} />
           <Route path="/schedules" element={<AttendanceSchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/reports" element={<Navigate to="/?view=reports" replace />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
           <Route path="/enquiries" element={<Navigate to="/" replace />} />

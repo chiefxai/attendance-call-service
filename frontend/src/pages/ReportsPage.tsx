@@ -18,7 +18,7 @@ function downloadCsv(rows: AttendanceRecord[]) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function ReportsPage() {
+export function ReportsPage({ embedded = false }: { embedded?: boolean }) {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const summary = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary });
@@ -30,7 +30,8 @@ export function ReportsPage() {
   const sessionsComplete = rows.filter((row) => row.checkIn.status === "confirmed" && row.checkOut.status === "confirmed").length;
   const errors = query.error instanceof Error ? query.error.message : "Unable to load reports";
   return <Stack spacing={2.5}>
-    <PageHeader title="Reports" actions={<Button variant="contained" startIcon={<FileDownloadRoundedIcon />} disabled={!rows.length} onClick={() => downloadCsv(rows)}>Export CSV</Button>} />
+    {!embedded && <PageHeader title="Reports" actions={<Button variant="contained" startIcon={<FileDownloadRoundedIcon />} disabled={!rows.length} onClick={() => downloadCsv(rows)}>Export CSV</Button>} />}
+    {embedded && <Stack direction="row" justifyContent="flex-end"><Button variant="contained" startIcon={<FileDownloadRoundedIcon />} disabled={!rows.length} onClick={() => downloadCsv(rows)}>Export CSV</Button></Stack>}
     {(query.isError || summary.isError) && <Alert severity="error">{errors}</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 12, sm: 6, md: 3 }}><MetricCard label="Schedules" value={rows.length.toLocaleString()} detail="In the selected date range" icon={<GroupRoundedIcon />} /></Grid>
