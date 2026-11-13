@@ -43,7 +43,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         if (user) {
           if (user.mustChangePassword) return res.status(403).json({ error: "Change your temporary password before using the application." });
           req.orgId = user.organizationId;
-          req.webUser = { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin", mustChangePassword: false };
+          req.webUser = { id: user.id, email: user.email, displayName: user.displayName, role: user.role || "admin", careManagerExternalId: user.careManagerExternalId || null, mustChangePassword: false };
           return next();
         }
       }
@@ -91,6 +91,23 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     if (req.webUser?.role === "admin") return true;
     res.status(403).json({ error: "Admin access is required for this action." });
     return false;
+  };
+  const careManagerScope = (req) => req.webUser?.role === "care_manager"
+    ? (req.webUser.careManagerExternalId || "__unlinked_care_manager__")
+    : null;
+  const assertSessionVisible = async (req, sessionId, res) => {
+    const managerId = careManagerScope(req);
+    if (!managerId) return true;
+    const visible = await repository.isAttendanceSessionVisibleToCareManager(org(req), sessionId, managerId);
+    if (!visible) res.status(404).json({ error: "Assignment session not found" });
+    return visible;
+  };
+  const assertInboundVisible = async (req, callId, res) => {
+    const managerId = careManagerScope(req);
+    if (!managerId) return true;
+    const visible = await repository.isInboundCallVisibleToCareManager(org(req), callId, managerId);
+    if (!visible) res.status(404).json({ error: "Incoming call not found" });
+    return visible;
   };
   const fail = (res, error) => res.status(error.status || 500).json({ error: error.message || "Request failed" });
   const envNumber = (name, fallback) => process.env[name] !== undefined && process.env[name] !== "" && Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback;
@@ -166,6 +183,30 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   router.get("/care-managers", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try { res.json(await repository.listCareManagers(org(req))); } catch (error) { fail(res, error); }
+  });
+
+  router.post("/care-managers/:id/provision", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const organizationId = org(req);
+      const manager = (await repository.listCareManagers(organizationId)).find((item) => item.id === req.params.id);
+      if (!manager) return res.status(404).json({ error: "Care Manager not found." });
+      if (manager.userId) return res.status(409).json({ error: "This Care Manager already has an account." });
+      const phone = normalizeIndianMobile(manager.phone);
+      if (!phone) return res.status(409).json({ error: "A valid Indian mobile number must be synced for this Care Manager before providing an account." });
+      const password = String(req.body?.password || "");
+      if (password.length < 12 || password.length > 1024) return res.status(400).json({ error: "Temporary password must contain 12 to 1024 characters." });
+      const passwordSalt = crypto.randomBytes(16).toString("hex");
+      const passwordHash = crypto.scryptSync(password, passwordSalt, 64).toString("hex");
+      await repository.provisionCareManagerAccounts({ organizationId, managers: [{
+        athulyaId: manager.athulyaCareManagerId,
+        name: manager.name || `Care Manager ${manager.athulyaCareManagerId}`,
+        phone,
+        passwordSalt,
+        passwordHash,
+      }] });
+      res.status(201).json({ success: true, loginPhone: phone, active: false, mustChangePassword: true });
+    } catch (error) { fail(res, error); }
   });
 
   router.post("/care-managers", async (req, res) => {
@@ -341,19 +382,19 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   });
 
   router.get("/integrations/athulya/schedules", async (req, res) => {
-    try { res.json(await repository.listAthulyaSchedules(org(req), { fromDate: req.query.fromDate, toDate: req.query.toDate, limit: req.query.limit })); }
+    try { res.json(await repository.listAthulyaSchedules(org(req), { fromDate: req.query.fromDate, toDate: req.query.toDate, limit: req.query.limit, careManagerExternalId: careManagerScope(req) })); }
     catch (error) { fail(res, error); }
   });
 
   router.get("/dashboard/summary", async (req, res) => {
-    try { res.json(await repository.getOperationsSummary(org(req))); } catch (error) { fail(res, error); }
+    try { res.json(await repository.getOperationsSummary(org(req), { careManagerExternalId: careManagerScope(req) })); } catch (error) { fail(res, error); }
   });
 
   router.get("/assignments", async (req, res) => {
     try {
       res.json(await repository.listAttendanceSessions(org(req), {
         search: req.query.search || "", status: req.query.status || "all",
-        limit: req.query.limit || 100, offset: req.query.offset || 0,
+        limit: req.query.limit || 100, offset: req.query.offset || 0, careManagerExternalId: careManagerScope(req),
       }));
     } catch (error) { fail(res, error); }
   });
@@ -415,7 +456,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   });
 
   router.get("/staff", async (req, res) => {
-    try { res.json(await repository.listStaffDirectory(org(req), { search: req.query.search || "", status: req.query.status || "all", limit: req.query.limit || 100 })); }
+    try { res.json(await repository.listStaffDirectory(org(req), { search: req.query.search || "", status: req.query.status || "all", limit: req.query.limit || 100, careManagerExternalId: careManagerScope(req) })); }
     catch (error) { fail(res, error); }
   });
 
@@ -463,22 +504,22 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
   });
 
   router.get("/patients", async (req, res) => {
-    try { res.json(await repository.listPatientDirectory(org(req), { search: req.query.search || "", status: req.query.status || "all", limit: req.query.limit || 100 })); }
+    try { res.json(await repository.listPatientDirectory(org(req), { search: req.query.search || "", status: req.query.status || "all", limit: req.query.limit || 100, careManagerExternalId: careManagerScope(req) })); }
     catch (error) { fail(res, error); }
   });
 
   router.get("/supervision-queue", async (req, res) => {
-    try { res.json(await repository.listSupervisionQueue(org(req), { search: req.query.search || "", severity: req.query.severity || "all", limit: req.query.limit || 100 })); }
+    try { res.json(await repository.listSupervisionQueue(org(req), { search: req.query.search || "", severity: req.query.severity || "all", limit: req.query.limit || 100, careManagerExternalId: careManagerScope(req) })); }
     catch (error) { fail(res, error); }
   });
 
   router.get("/attendance/ledger", async (req, res) => {
-    try { res.json(await repository.listAttendanceLedger(org(req), { search: req.query.search || "", limit: req.query.limit || 100 })); }
+    try { res.json(await repository.listAttendanceLedger(org(req), { search: req.query.search || "", limit: req.query.limit || 100, careManagerExternalId: careManagerScope(req) })); }
     catch (error) { fail(res, error); }
   });
 
   router.get("/call-center", async (req, res) => {
-    try { res.json(await repository.getCallCenterData(org(req))); } catch (error) { fail(res, error); }
+    try { res.json(await repository.getCallCenterData(org(req), { careManagerExternalId: careManagerScope(req) })); } catch (error) { fail(res, error); }
   });
 
   function serializeIncomingCall(call, appointmentCalls = []) {
@@ -551,7 +592,7 @@ router.get("/activities", async (req, res) => {
 
     router.get("/incoming-calls", async (req, res) => {
     try {
-      const calls = await repository.listInboundCalls(org(req), req.query.limit || 100);
+      const calls = await repository.listInboundCalls(org(req), req.query.limit || 100, careManagerScope(req));
       res.json(await Promise.all(calls.map(async (call) => serializeIncomingCall(
         call, await repository.listAppointmentCallAttempts(call.id, org(req)),
       ))));
@@ -561,7 +602,7 @@ router.get("/activities", async (req, res) => {
   router.get("/incoming-calls/:id", async (req, res) => {
     try {
       const call = await repository.getInboundCall(req.params.id, org(req));
-      if (!call) return res.status(404).json({ error: "Incoming call not found" });
+      if (!call || !await assertInboundVisible(req, req.params.id, res)) return;
       res.json(serializeIncomingCall(call, await repository.listAppointmentCallAttempts(call.id, org(req))));
     } catch (error) { fail(res, error); }
   });
@@ -576,7 +617,7 @@ router.get("/activities", async (req, res) => {
       if (!staffId) return res.status(400).json({ error: "Choose a staff member to resolve this enquiry." });
       const organizationId = org(req);
       const pendingCall = await repository.getInboundCall(req.params.id, organizationId);
-      if (!pendingCall) return res.status(404).json({ error: "Incoming call not found" });
+      if (!pendingCall || !await assertInboundVisible(req, req.params.id, res)) return;
       const analysis = pendingCall.enquiryAnalysis || {};
       const requestedStart = new Date(analysis.requestedStartAt || "");
       const requestedEnd = new Date(analysis.requestedEndAt || "");
@@ -615,7 +656,8 @@ router.get("/activities", async (req, res) => {
   router.get("/incoming-calls/:id/recording", async (req, res) => {
     try {
       const call = await repository.getInboundCall(req.params.id, org(req));
-      if (!call?.recordingObjectKey) return res.status(404).json({ error: "Recording not found" });
+      if (!call || !await assertInboundVisible(req, req.params.id, res)) return;
+      if (!call.recordingObjectKey) return res.status(404).json({ error: "Recording not found" });
       const audio = await recordings.getObjectBuffer(call.recordingObjectKey);
       res.set("Content-Type", call.recordingContentType || "audio/wav");
       res.set("Content-Disposition", `inline; filename="${call.id}.wav"`);
@@ -628,7 +670,7 @@ router.get("/activities", async (req, res) => {
     try {
       const call = await repository.getInboundCall(req.params.id, org(req));
       const attempt = await repository.getAppointmentCallAttempt(req.params.attemptId);
-      if (!call || !attempt || attempt.inboundCallId !== call.id || attempt.organizationId !== org(req) || !attempt.recordingObjectKey) {
+      if (!call || !await assertInboundVisible(req, req.params.id, res) || !attempt || attempt.inboundCallId !== call.id || attempt.organizationId !== org(req) || !attempt.recordingObjectKey) {
         return res.status(404).json({ error: "Appointment call recording not found" });
       }
       const audio = await recordings.getObjectBuffer(attempt.recordingObjectKey);
@@ -775,7 +817,7 @@ router.get("/activities", async (req, res) => {
     try {
       const organizationId = org(req);
       const session = await repository.getAttendanceSession(req.params.id);
-      if (!session || session.organizationId !== organizationId) return res.status(404).json({ error: "Assignment session not found" });
+      if (!session || session.organizationId !== organizationId || !await assertSessionVisible(req, req.params.id, res)) return;
       const context = session.activeContext || {};
       res.json({
         sessionId: session.id,
@@ -808,7 +850,7 @@ router.get("/activities", async (req, res) => {
   router.get("/assignments/:id/artifacts", async (req, res) => {
     try {
       const artifacts = await repository.getSessionArtifacts(req.params.id);
-      if (!artifacts || artifacts.session.organizationId !== org(req)) return res.status(404).json({ error: "Assignment session not found" });
+      if (!artifacts || artifacts.session.organizationId !== org(req) || !await assertSessionVisible(req, req.params.id, res)) return;
       const baseUrl = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
       res.set("Cache-Control", "private, no-store");
       res.json({
@@ -839,6 +881,7 @@ router.get("/activities", async (req, res) => {
     try {
       const task = await repository.getAttendanceStageTask(req.params.id);
       if (!task || task.organizationId !== org(req)) return res.status(404).json({ error: "Attendance task not found" });
+      if (!await assertSessionVisible(req, task.assignmentSessionId, res)) return;
       res.set("Cache-Control", "private, no-store");
       res.json(task);
     } catch (error) { fail(res, error); }
@@ -847,7 +890,7 @@ router.get("/activities", async (req, res) => {
   router.get("/assignments/:id/recordings/:attemptId", async (req, res) => {
     try {
       const session = await repository.getAttendanceSession(req.params.id);
-      if (!session || session.organizationId !== org(req)) return res.status(404).json({ error: "Assignment session not found" });
+      if (!session || session.organizationId !== org(req) || !await assertSessionVisible(req, req.params.id, res)) return;
       const attempt = await repository.getCallAttempt(req.params.attemptId);
       if (!attempt || attempt.sessionId !== session.id || !attempt.recordingObjectKey) {
         return res.status(404).json({ error: "Recording is not available for this call attempt" });

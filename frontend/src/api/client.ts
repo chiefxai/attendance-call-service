@@ -130,6 +130,13 @@ export async function resetCareManagerPassword(id: string, password: string) {
   return response.data;
 }
 
+export async function provisionCareManagerAccount(id: string, password: string) {
+  const response = await api.post<{ success: boolean; loginPhone: string; active: boolean; mustChangePassword: boolean }>(
+    `/care-managers/${encodeURIComponent(id)}/provision`, { password },
+  );
+  return response.data;
+}
+
 export async function fetchAthulyaIntegration() {
   const response = await api.get<AthulyaIntegrationSettings>("/integrations/athulya");
   return response.data;

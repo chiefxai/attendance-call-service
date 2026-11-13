@@ -393,12 +393,12 @@ class PostgresRepository {
     finally { client.release(); }
   }
 
-  async listAthulyaSchedules(organizationId, { fromDate, toDate, limit = 500 } = {}) {
+  async listAthulyaSchedules(organizationId, { fromDate, toDate, limit = 500, careManagerExternalId = null } = {}) {
     const { rows } = await this.pool.query(
       `SELECT s.*,COALESCE(jsonb_agg(jsonb_build_object('id',c.athulya_caregiver_id,'name',c.caregiver_name,'phone',c.caregiver_phone,'status',c.caregiver_schedule_status)) FILTER (WHERE c.id IS NOT NULL),'[]'::jsonb) AS caregivers
        FROM athulya_schedules s LEFT JOIN athulya_schedule_caregivers c ON c.schedule_id=s.id
-       WHERE s.organization_id=$1 AND ($2::date IS NULL OR s.schedule_date >= $2::date) AND ($3::date IS NULL OR s.schedule_date <= $3::date)
-       GROUP BY s.id ORDER BY s.schedule_date,s.start_time LIMIT $4`, [organizationId, fromDate || null, toDate || null, Math.min(Math.max(Number(limit) || 500,1),5000)],
+       WHERE s.organization_id=$1 AND ($2::date IS NULL OR s.schedule_date >= $2::date) AND ($3::date IS NULL OR s.schedule_date <= $3::date) AND ($5::text IS NULL OR s.care_manager_external_id=$5)
+       GROUP BY s.id ORDER BY s.schedule_date,s.start_time LIMIT $4`, [organizationId, fromDate || null, toDate || null, Math.min(Math.max(Number(limit) || 500,1),5000), careManagerExternalId || null],
     );
     return rows.map((row) => ({ id: row.id, athulyaScheduleId: row.athulya_schedule_id, athulyaSchedulePk: row.athulya_schedule_pk,
       patient: { id: row.patient_external_id, uhid: row.patient_uhid, name: row.patient_name }, careManager: { id: row.care_manager_external_id, name: row.care_manager_name, phone: row.care_manager_phone },
@@ -445,11 +445,12 @@ class PostgresRepository {
        WHERE s.token_hash=$1 AND s.user_id=u.id AND s.revoked_at IS NULL
          AND s.expires_at>NOW() AND u.active=TRUE
       RETURNING u.id,u.organization_id,u.email,u.display_name,u.role,u.must_change_password,
-        (SELECT cm.phone FROM athulya_care_managers cm WHERE cm.app_user_id=u.id AND cm.organization_id=u.organization_id LIMIT 1) AS phone`,
+        (SELECT cm.phone FROM athulya_care_managers cm WHERE cm.app_user_id=u.id AND cm.organization_id=u.organization_id LIMIT 1) AS phone,
+        (SELECT cm.athulya_care_manager_id FROM athulya_care_managers cm WHERE cm.app_user_id=u.id AND cm.organization_id=u.organization_id LIMIT 1) AS care_manager_external_id`,
       [tokenHash],
     );
     const row = rows[0];
-    return row ? { id: row.id, organizationId: row.organization_id, email: row.email, displayName: row.display_name, role: row.role || "admin", phone: row.phone || null, mustChangePassword: row.must_change_password === true } : null;
+    return row ? { id: row.id, organizationId: row.organization_id, email: row.email, displayName: row.display_name, role: row.role || "admin", phone: row.phone || null, careManagerExternalId: row.care_manager_external_id || null, mustChangePassword: row.must_change_password === true } : null;
   }
 
   async revokeWebSession(tokenHash) {
@@ -954,13 +955,40 @@ class PostgresRepository {
       phoneNumber: row.phone_number, address: row.address || "", language: row.language || "en" } : null;
   }
 
-  async listInboundCalls(organizationId, limit = 100) {
+  async listInboundCalls(organizationId, limit = 100, careManagerExternalId = null) {
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const { rows } = await this.pool.query(
-      "SELECT * FROM inbound_calls WHERE organization_id=$1 AND retention_expires_at>NOW() ORDER BY started_at DESC LIMIT $2",
-      [organizationId, safeLimit],
+      `SELECT i.* FROM inbound_calls i
+       WHERE i.organization_id=$1 AND i.retention_expires_at>NOW()
+         AND ($3::text IS NULL OR EXISTS (
+           SELECT 1 FROM athulya_schedules s WHERE s.organization_id=i.organization_id
+             AND s.care_manager_external_id=$3 AND s.patient_external_id=i.patient->>'id'
+         ))
+       ORDER BY i.started_at DESC LIMIT $2`,
+      [organizationId, safeLimit, careManagerExternalId || null],
     );
     return rows.map((row) => this.mapInboundCall(row));
+  }
+
+  async isInboundCallVisibleToCareManager(organizationId, inboundCallId, careManagerExternalId) {
+    const { rows } = await this.pool.query(
+      `SELECT EXISTS(SELECT 1 FROM inbound_calls i JOIN athulya_schedules s
+         ON s.organization_id=i.organization_id AND s.patient_external_id=i.patient->>'id'
+       WHERE i.id=$1 AND i.organization_id=$2 AND i.retention_expires_at>NOW()
+         AND s.care_manager_external_id=$3) AS visible`,
+      [inboundCallId, organizationId, careManagerExternalId],
+    );
+    return rows[0]?.visible === true;
+  }
+
+  async isAttendanceSessionVisibleToCareManager(organizationId, sessionId, careManagerExternalId) {
+    const { rows } = await this.pool.query(
+      `SELECT EXISTS(SELECT 1 FROM attendance_sessions s JOIN athulya_schedules a
+         ON a.organization_id=s.organization_id AND a.athulya_schedule_id=s.external_assignment_id
+       WHERE s.id=$1 AND s.organization_id=$2 AND a.care_manager_external_id=$3) AS visible`,
+      [sessionId, organizationId, careManagerExternalId],
+    );
+    return rows[0]?.visible === true;
   }
 
   async claimInboundCallStream(id) {
@@ -1223,7 +1251,7 @@ class PostgresRepository {
       updatedAt: row.updated_at,
     };
   }
-  async listAttendanceSessions(organizationId, { search = "", status = "all", limit = 100, offset = 0 } = {}) {
+  async listAttendanceSessions(organizationId, { search = "", status = "all", limit = 100, offset = 0, careManagerExternalId = null } = {}) {
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const safeOffset = Math.max(Number(offset) || 0, 0);
     const r = await this.pool.query(
@@ -1235,12 +1263,13 @@ class PostgresRepository {
               OR COALESCE(s.employee->>'name','') ILIKE '%'||$2||'%' OR COALESCE(s.employee->>'id','') ILIKE '%'||$2||'%'
               OR COALESCE(s.patient->>'name','') ILIKE '%'||$2||'%' OR COALESCE(s.patient->>'id','') ILIKE '%'||$2||'%')
          AND ($3='all' OR s.check_in_status=$3 OR s.check_out_status=$3 OR s.session_status=$3)
+         AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$6))
        GROUP BY s.id ORDER BY s.scheduled_start_at DESC LIMIT $4 OFFSET $5`,
-      [organizationId, String(search || "").trim(), status, safeLimit, safeOffset],
+      [organizationId, String(search || "").trim(), status, safeLimit, safeOffset, careManagerExternalId || null],
     );
     return r.rows.map((row) => this.mapAttendanceSummary(row));
   }
-  async getOperationsSummary(organizationId) {
+  async getOperationsSummary(organizationId, { careManagerExternalId = null } = {}) {
     const timezone = process.env.APP_TIMEZONE || "Asia/Kolkata";
     const [sessions, calls, jobs, workforce] = await Promise.all([
       this.pool.query(
@@ -1253,7 +1282,7 @@ class PostgresRepository {
            COUNT(*) FILTER (WHERE check_out_status IN ('scheduled','calling','processing','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_pending,
            COUNT(*) FILTER (WHERE check_in_status IN ('not_answered','missed','review') OR check_out_status IN ('not_answered','missed','review'))::int AS exceptions
            ,COUNT(*) FILTER (WHERE session_status='completed')::int AS completed_schedules
-         FROM attendance_sessions CROSS JOIN bounds WHERE organization_id=$1`, [organizationId, timezone],
+         FROM attendance_sessions s CROSS JOIN bounds WHERE s.organization_id=$1 AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$3))`, [organizationId, timezone, careManagerExternalId || null],
       ),
       this.pool.query(
         `WITH bounds AS (SELECT date_trunc('day', NOW() AT TIME ZONE $2) AT TIME ZONE $2 AS day_start)
@@ -1261,13 +1290,14 @@ class PostgresRepository {
            COUNT(*) FILTER (WHERE LOWER(REPLACE(REPLACE(REPLACE(status,'-',''),'_',''),' ','')) IN ('ringing','inprogress','answered'))::int AS active_calls,
            COUNT(*) FILTER (WHERE LOWER(status)='completed')::int AS completed_calls,
            COALESCE(AVG(duration_seconds) FILTER (WHERE duration_seconds IS NOT NULL),0)::int AS average_duration_seconds
-         FROM attendance_call_attempts CROSS JOIN bounds WHERE organization_id=$1 AND created_at >= bounds.day_start AND created_at < bounds.day_start + INTERVAL '1 day'`, [organizationId, timezone],
+         FROM attendance_call_attempts a CROSS JOIN bounds WHERE a.organization_id=$1 AND a.created_at >= bounds.day_start AND a.created_at < bounds.day_start + INTERVAL '1 day' AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM attendance_sessions s JOIN athulya_schedules aps ON aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id WHERE s.id=a.session_id AND aps.care_manager_external_id=$3))`, [organizationId, timezone, careManagerExternalId || null],
       ),
-      this.pool.query("SELECT COUNT(*)::int AS waiting FROM attendance_jobs j JOIN attendance_sessions s ON j.payload->>'sessionId'=s.id::text WHERE s.organization_id=$1 AND j.job_type='place_call' AND j.status='queued'", [organizationId]),
+      this.pool.query("SELECT COUNT(*)::int AS waiting FROM attendance_jobs j JOIN attendance_sessions s ON j.payload->>'sessionId'=s.id::text WHERE s.organization_id=$1 AND j.job_type='place_call' AND j.status='queued' AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$2))", [organizationId, careManagerExternalId || null]),
       this.pool.query(
         `SELECT (SELECT COUNT(*)::int FROM staff_directory WHERE organization_id=$1 AND active=TRUE) AS caregivers,
           (SELECT COUNT(*)::int FROM patient_directory WHERE organization_id=$1 AND active=TRUE) AS patients,
-          (SELECT COUNT(*)::int FROM athulya_care_managers WHERE organization_id=$1 AND active=TRUE AND app_user_id IS NOT NULL) AS care_managers`, [organizationId],
+          (SELECT COUNT(*)::int FROM athulya_care_managers WHERE organization_id=$1 AND active=TRUE AND ($2::text IS NULL OR athulya_care_manager_id=$2)) AS care_managers,
+          (SELECT COUNT(*)::int FROM athulya_schedules WHERE organization_id=$1 AND LOWER(TRIM(schedule_status))='completed' AND ($2::text IS NULL OR care_manager_external_id=$2)) AS imported_completed_schedules`, [organizationId, careManagerExternalId || null],
       ),
     ]);
     const s = sessions.rows[0] || {};
@@ -1279,7 +1309,7 @@ class PostgresRepository {
       checkInsPending: s.check_ins_pending || 0,
       checkOutsPending: s.check_outs_pending || 0,
       exceptions: s.exceptions || 0,
-      completedSchedules: s.completed_schedules || 0,
+      completedSchedules: workforce.rows[0]?.imported_completed_schedules ?? s.completed_schedules ?? 0,
       callsToday: c.calls_today || 0,
       activeCalls: c.active_calls || 0,
       completedCalls: c.completed_calls || 0,
@@ -1366,14 +1396,14 @@ class PostgresRepository {
     } : null;
   }
 
-  async listStaffDirectory(organizationId, { search = "", status = "all", limit = 100 } = {}) {
+  async listStaffDirectory(organizationId, { search = "", status = "all", limit = 100, careManagerExternalId = null } = {}) {
     const [profiles, sessions] = await Promise.all([
       this.pool.query(
         `SELECT external_id,name,company_name,phone_number,address,language,branch FROM staff_directory
          WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
         [organizationId],
       ),
-      this.listAttendanceSessions(organizationId, { limit: 500 }),
+      this.listAttendanceSessions(organizationId, { limit: 500, careManagerExternalId }),
     ]);
     const records = new Map();
     for (const row of profiles.rows) {
@@ -1407,20 +1437,22 @@ class PostgresRepository {
         scheduledEndAt: session.scheduledEndAt,
       });
     }
+    const visibleStaff = new Set(sessions.flatMap((session) => [session.employee?.id, session.employee?.name]).filter(Boolean));
     return [...records.values()]
+      .filter((record) => (!careManagerExternalId || visibleStaff.has(record.id) || visibleStaff.has(record.name)))
       .filter((record) => (status === "all" || status === record.dutyStatus)
         && (!search || `${record.id} ${record.name} ${record.companyName} ${record.patientName} ${record.address}`.toLowerCase().includes(search.toLowerCase())))
       .slice(0, Math.min(Number(limit) || 100, 500));
   }
 
-  async listPatientDirectory(organizationId, { search = "", status = "all", limit = 100 } = {}) {
+  async listPatientDirectory(organizationId, { search = "", status = "all", limit = 100, careManagerExternalId = null } = {}) {
     const [profiles, sessions] = await Promise.all([
       this.pool.query(
         `SELECT external_id,name,phone_number,address,language,care_category,hub,athulya_patient_uhid,branch FROM patient_directory
          WHERE organization_id=$1 AND active=TRUE ORDER BY lower(name)`,
         [organizationId],
       ),
-      this.listAttendanceSessions(organizationId, { limit: 500 }),
+      this.listAttendanceSessions(organizationId, { limit: 500, careManagerExternalId }),
     ]);
     const records = new Map();
     for (const row of profiles.rows) {
@@ -1453,13 +1485,15 @@ class PostgresRepository {
         status: session.sessionStatus,
       });
     }
+    const visiblePatients = new Set(sessions.flatMap((session) => [session.patient?.id, session.patient?.name]).filter(Boolean));
     return [...records.values()]
+      .filter((record) => (!careManagerExternalId || visiblePatients.has(record.id) || visiblePatients.has(record.name)))
       .filter((record) => (status === "all" || status === record.status)
         && (!search || `${record.id} ${record.name} ${record.assignedStaff} ${record.address}`.toLowerCase().includes(search.toLowerCase())))
       .slice(0, Math.min(Number(limit) || 100, 500));
   }
-  async listSupervisionQueue(organizationId, { search = "", severity = "all", limit = 100 } = {}) {
-    const sessions = await this.listAttendanceSessions(organizationId, { limit: 500 });
+  async listSupervisionQueue(organizationId, { search = "", severity = "all", limit = 100, careManagerExternalId = null } = {}) {
+    const sessions = await this.listAttendanceSessions(organizationId, { limit: 500, careManagerExternalId });
     const items = [];
     for (const session of sessions) {
       for (const stage of ["checkIn", "checkOut"]) {
@@ -1515,11 +1549,11 @@ class PostgresRepository {
     }));
   }
 
-  async listAttendanceLedger(organizationId, { search = "", limit = 100 } = {}) {
-    const sessions = await this.listAttendanceSessions(organizationId, { search, status: "completed", limit });
+  async listAttendanceLedger(organizationId, { search = "", limit = 100, careManagerExternalId = null } = {}) {
+    const sessions = await this.listAttendanceSessions(organizationId, { search, status: "completed", limit, careManagerExternalId });
     return sessions.filter((session) => session.checkIn.status === "confirmed" && session.checkOut.status === "confirmed");
   }
-  async getCallCenterData(organizationId) {
+  async getCallCenterData(organizationId, { careManagerExternalId = null } = {}) {
     const [active, retries] = await Promise.all([
       this.pool.query(
         `SELECT a.id AS attempt_id,a.provider_call_id,a.stage,a.status,a.attempt_number,a.answered_at,a.created_at,
@@ -1527,16 +1561,16 @@ class PostgresRepository {
                 s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name,
                 s.patient->>'id' AS patient_id,s.active_context
          FROM attendance_call_attempts a JOIN attendance_sessions s ON s.id=a.session_id
-         WHERE a.organization_id=$1 AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('ringing','inprogress','answered')
-         ORDER BY a.created_at DESC LIMIT 100`, [organizationId],
+         WHERE a.organization_id=$1 AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('ringing','inprogress','answered') AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$2))
+         ORDER BY a.created_at DESC LIMIT 100`, [organizationId, careManagerExternalId || null],
       ),
       this.pool.query(
         `SELECT j.id,j.run_at,j.payload->>'stage' AS stage,j.payload->>'attemptNumber' AS attempt_number,
                 s.id AS session_id,s.external_assignment_id,s.language,s.employee->>'id' AS employee_id,
                 s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name
          FROM attendance_jobs j JOIN attendance_sessions s ON j.payload->>'sessionId'=s.id::text
-         WHERE s.organization_id=$1 AND j.job_type='place_call' AND j.status='queued'
-         ORDER BY j.run_at LIMIT 100`, [organizationId],
+         WHERE s.organization_id=$1 AND j.job_type='place_call' AND j.status='queued' AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$2))
+         ORDER BY j.run_at LIMIT 100`, [organizationId, careManagerExternalId || null],
       ),
     ]);
     return {

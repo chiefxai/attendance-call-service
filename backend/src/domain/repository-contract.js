@@ -61,6 +61,8 @@ const repositoryMethods = Object.freeze([
   "getAgentSessionContext(sessionId, stage)",
   "findPatientContactByPhone(organizationId, phoneNumber)",
   "createInboundCall(call)",
+  "isAttendanceSessionVisibleToCareManager(organizationId, sessionId, careManagerExternalId)",
+  "isInboundCallVisibleToCareManager(organizationId, inboundCallId, careManagerExternalId)",
   "getInboundCall(inboundCallId, organizationId)",
   "listInboundCalls(organizationId, limit)",
   "claimInboundCallStream(inboundCallId)",
