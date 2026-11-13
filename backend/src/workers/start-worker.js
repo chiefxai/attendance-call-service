@@ -52,7 +52,7 @@ async function main() {
     retry: config.callRetry,
     capacity: config.callCapacity,
     additionalHandlers: {
-      sync_athulya_schedules: createAthulyaScheduleSyncHandler({ repository }),
+      sync_athulya_schedules: createAthulyaScheduleSyncHandler({ repository, queue }),
     },
   });
   const worker = startWorkers({ queue, handlers, ...config.worker });

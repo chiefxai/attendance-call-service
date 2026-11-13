@@ -105,6 +105,46 @@ function zonedParts(date, timeZone) {
   return values;
 }
 
+function localScheduleDateTimeToUtc(dateValue, timeValue, timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata") {
+  const dateText = dateOnly(dateValue);
+  if (!dateText || timeValue == null || timeValue === "") return null;
+  const timeText = String(timeValue).trim();
+  const zonedDateTime = timeText.match(/^(\\d{4}-\\d{2}-\\d{2})[T ](\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?)((?:Z|[+-]\\d{2}:?\\d{2}))$/i);
+  if (zonedDateTime) {
+    const direct = new Date(timeText);
+    return Number.isFinite(direct.getTime()) ? direct.toISOString() : null;
+  }
+  const match = timeText.match(/^(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*(AM|PM)?$/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] || 0);
+  const meridiem = String(match[4] || "").toUpperCase();
+  if (minute > 59 || second > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    hour = hour % 12 + (meridiem === "PM" ? 12 : 0);
+  } else if (hour > 23) return null;
+  const [year, month, day] = dateText.split("-").map(Number);
+  const target = Date.UTC(year, month - 1, day, hour, minute, second);
+  let candidate = target;
+  try {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const parts = zonedParts(new Date(candidate), timeZone);
+      const represented = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+        Number(parts.hour), Number(parts.minute), Number(parts.second || 0));
+      const adjustment = target - represented;
+      candidate += adjustment;
+      if (adjustment === 0) break;
+    }
+    const resolved = new Date(candidate);
+    const parts = zonedParts(resolved, timeZone);
+    if (Number(parts.year) !== year || Number(parts.month) !== month || Number(parts.day) !== day
+      || Number(parts.hour) !== hour || Number(parts.minute) !== minute) return null;
+    return resolved.toISOString();
+  } catch { return null; }
+}
+
 function localDateInTimeZone(date = new Date(), timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata") {
   const parts = zonedParts(date, timeZone);
   return `${parts.year}-${parts.month}-${parts.day}`;
@@ -155,7 +195,7 @@ async function fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters = {}, fetchIm
   } finally { clearTimeout(timeout); }
 }
 
-function createAthulyaScheduleSyncHandler({ repository }) {
+function createAthulyaScheduleSyncHandler({ repository, queue }) {
   return async ({ runId, organizationId, filters = {} }) => {
     try {
       const settings = await repository.getAthulyaIntegration(organizationId);
@@ -166,8 +206,85 @@ function createAthulyaScheduleSyncHandler({ repository }) {
         filters,
       });
       const upserted = await repository.upsertAthulyaSchedules(organizationId, records);
+      const callSettings = await repository.getOrganizationCallSettings(organizationId);
+      const fromNumber = callSettings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER || "";
+      const activeAgents = (await repository.listAgents(organizationId)).filter((agent) => agent.active);
+      let scheduledCalls = 0;
+      let skippedSchedules = 0;
+      for (const item of records) {
+        const source = item.source || {};
+        const status = String(source.schedule_status || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
+        const scheduleId = String(source.schedule_id || "").trim();
+        const schedulePk = String(source.schedule_pk || "").trim();
+        if (!scheduleId) { skippedSchedules += 1; continue; }
+        if (["cancelled", "canceled", "completed", "complete"].includes(status)) {
+          await repository.cancelActiveAthulyaAttendanceSessions({ organizationId, scheduleId, schedulePk });
+          continue;
+        }
+        if (!["pending", "scheduled", "active", "confirmed", "approved", "assigned", "in_progress"].includes(status)) {
+          skippedSchedules += 1;
+          console.warn(`[athulya-sync] not scheduling calls for unrecognized schedule status schedule=${scheduleId} status=${status || "empty"}`);
+          continue;
+        }
+        const scheduledStartAt = localScheduleDateTimeToUtc(item.scheduleDate, source.start_time);
+        const scheduledEndAt = localScheduleDateTimeToUtc(item.scheduleDate, source.end_time);
+        if (!scheduledStartAt || !scheduledEndAt || new Date(scheduledEndAt) <= new Date(scheduledStartAt)) {
+          skippedSchedules += 1;
+          console.warn(`[athulya-sync] invalid schedule date or time; calls skipped schedule=${scheduleId}`);
+          continue;
+        }
+        if (!fromNumber || activeAgents.length === 0) {
+          skippedSchedules += 1;
+          console.warn(`[athulya-sync] caller ID or active attendance agent missing; calls skipped schedule=${scheduleId}`);
+          continue;
+        }
+        const patientId = String(source.patient_id || "").trim();
+        const patient = (patientId && await repository.getActivePatientDirectoryRecord(organizationId, patientId))
+          || { id: patientId, name: String(source.client_name || "").trim(), phoneNumber: "", address: "", language: "ta",
+            patientUhid: String(source.patient_uhid || "").trim(), branch: String(source.branch || "").trim() };
+        const caregivers = Array.isArray(item.caregivers) ? item.caregivers : [];
+        let scheduledForRecord = 0;
+        for (const caregiver of caregivers) {
+          const caregiverId = String(caregiver.id || "").trim();
+          if (!caregiverId) continue;
+          const staff = await repository.getActiveStaffDirectoryRecord(organizationId, caregiverId);
+          if (!staff?.phoneNumber) continue;
+          const language = String(staff.language || "ta").trim().toLowerCase();
+          const languagePrefix = language.slice(0, 2);
+          const agent = activeAgents.find((candidate) => String(candidate.language || "").trim().toLowerCase().startsWith(languagePrefix))
+            || activeAgents[0];
+          const result = await repository.createAthulyaAttendanceSession({
+            organizationId, scheduleId, schedulePk, caregiverId, staff, patient, agent, fromNumber,
+            scheduledStartAt, scheduledEndAt, language, sourceStatus: status,
+            metadata: {
+              careManagerId: String(source.care_manager_id || "").trim(),
+              branch: String(source.branch || "").trim(),
+              serviceName: String(source.service_name || "").trim(),
+              vendorCompany: String(source.vendor_company || "ATHULYA").trim() || "ATHULYA",
+            },
+          });
+          if (!result.session) {
+            skippedSchedules += 1;
+            console.warn(`[athulya-sync] schedule changed after calls started; manual review required schedule=${scheduleId} caregiver=${caregiverId}`);
+            continue;
+          }
+          for (const stage of ["check_in", "check_out"]) {
+            const stageTask = stage === "check_in" ? result.session.checkInTask : result.session.checkOutTask;
+            const runAt = new Date(stage === "check_in" ? result.session.scheduledStartAt : result.session.scheduledEndAt);
+            const job = await queue.enqueue("place_call", { sessionId: result.session.id, taskId: stageTask?.id, stage, attemptNumber: 1 }, {
+              idempotencyKey: `call:${result.session.id}:${stage}:1`, runAt,
+            });
+            if (job?.status === "queued" || job?.status === "running") scheduledCalls += 1;
+          }
+          scheduledForRecord += 1;
+        }
+        if (scheduledForRecord === 0) {
+          skippedSchedules += 1;
+          console.warn(`[athulya-sync] no active caregiver with a registered phone; calls skipped schedule=${scheduleId}`);
+        }
+      }
       await repository.finishAthulyaSyncRun(runId, { status: "succeeded", recordsReceived: records.length, recordsUpserted: upserted });
-      console.info(`[athulya-sync] completed run=${runId} records=${records.length} upserted=${upserted}`);
+      console.info(`[athulya-sync] completed run=${runId} records=${records.length} upserted=${upserted} callJobsQueued=${scheduledCalls} skipped=${skippedSchedules}`);
     } catch (error) {
       await repository.finishAthulyaSyncRun(runId, { status: "failed", errorMessage: String(error.message || error).slice(0, 2000) });
       throw error;
@@ -175,4 +292,4 @@ function createAthulyaScheduleSyncHandler({ repository }) {
   };
 }
 
-module.exports = { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, sourceRecords, caregiverRows, localDateInTimeZone, latestDueAthulyaSyncSlot, createAthulyaScheduleSyncHandler };
+module.exports = { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, sourceRecords, caregiverRows, localScheduleDateTimeToUtc, localDateInTimeZone, latestDueAthulyaSyncSlot, createAthulyaScheduleSyncHandler };

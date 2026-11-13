@@ -1,5 +1,7 @@
 "use strict";
 
+const crypto = require("node:crypto");
+
 function json(value) { return typeof value === "string" ? JSON.parse(value) : value; }
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -944,6 +946,21 @@ class PostgresRepository {
     return this.mapInboundCall(rows[0]);
   }
 
+  async getActivePatientDirectoryRecord(organizationId, patientId) {
+    const { rows } = await this.pool.query(
+      `SELECT external_id,name,phone_number,address,language,care_category,hub,athulya_patient_uhid,branch
+       FROM patient_directory WHERE organization_id=$1 AND external_id=$2 AND active=TRUE`,
+      [organizationId, patientId],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.external_id, name: row.name, phoneNumber: row.phone_number,
+      address: row.address || "", language: row.language || "ta",
+      patientUhid: row.athulya_patient_uhid || "", branch: row.branch || "",
+      careCategory: row.care_category || "", hub: row.hub || "",
+    } : null;
+  }
+
   async getActiveStaffDirectoryRecord(organizationId, staffId) {
     const { rows } = await this.pool.query(
       `SELECT external_id,name,company_name,phone_number,address,language
@@ -1089,6 +1106,91 @@ class PostgresRepository {
   async deleteExpiredInboundCall(id) {
     const { rowCount } = await this.pool.query("DELETE FROM inbound_calls WHERE id=$1 AND retention_expires_at<=NOW()", [id]);
     return rowCount === 1;
+  }
+
+  async cancelActiveAthulyaAttendanceSessions({ organizationId, scheduleId, schedulePk = "" }) {
+    const result = await this.pool.query(
+      `UPDATE attendance_sessions
+       SET session_status='cancelled',updated_at=NOW()
+       WHERE organization_id=$1 AND external_assignment_id=$2 AND session_status='active'
+         AND assignment_metadata->>'source'='athulya_schedule_sync'
+         AND COALESCE(assignment_metadata->>'athulyaSchedulePk','')=$3
+       RETURNING id`,
+      [organizationId, scheduleId, schedulePk],
+    );
+    for (const row of result.rows) {
+      await this.pool.query(
+        `INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+         VALUES ($1,$2,'attendance.athulya_schedule_cancelled',$3::jsonb)`,
+        [organizationId, row.id, JSON.stringify({ scheduleId, schedulePk })],
+      );
+    }
+    return result.rowCount;
+  }
+
+  async createAthulyaAttendanceSession({ organizationId, scheduleId, schedulePk = "", caregiverId, staff, patient,
+    agent, fromNumber, scheduledStartAt, scheduledEndAt, language, sourceStatus = "", metadata = {} }) {
+    const operationalIdentity = {
+      scheduleId, schedulePk, caregiverId, staff, patient, agentId: agent.id, fromNumber,
+      scheduledStartAt: new Date(scheduledStartAt).toISOString(),
+      scheduledEndAt: new Date(scheduledEndAt).toISOString(),
+      language, sourceStatus,
+    };
+    const scheduleVersion = `athulya-${crypto.createHash("sha256").update(stableJson(operationalIdentity)).digest("hex").slice(0, 24)}`;
+    const assignmentMetadata = {
+      source: "athulya_schedule_sync",
+      athulyaScheduleId: scheduleId,
+      athulyaSchedulePk: schedulePk,
+      athulyaCaregiverId: caregiverId,
+      ...metadata,
+    };
+    const assignment = {
+      organizationId, assignmentId: scheduleId, scheduleVersion, agentId: agent.id,
+      language, fromNumber, employee: staff, patient,
+      scheduledStartAt: operationalIdentity.scheduledStartAt,
+      scheduledEndAt: operationalIdentity.scheduledEndAt,
+      metadata: assignmentMetadata,
+    };
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const active = await client.query(
+        `SELECT id,schedule_version FROM attendance_sessions
+         WHERE organization_id=$1 AND external_assignment_id=$2 AND session_status='active'
+           AND assignment_metadata->>'source'='athulya_schedule_sync'
+           AND COALESCE(assignment_metadata->>'athulyaSchedulePk','')=$3
+           AND COALESCE(assignment_metadata->>'athulyaCaregiverId','')=$4
+         FOR UPDATE`,
+        [organizationId, scheduleId, schedulePk, caregiverId],
+      );
+      const stale = active.rows.filter((row) => row.schedule_version !== scheduleVersion);
+      for (const row of stale) {
+        const attempts = await client.query("SELECT COUNT(*)::int AS count FROM attendance_call_attempts WHERE session_id=$1", [row.id]);
+        if (Number(attempts.rows[0]?.count) > 0) {
+          await client.query("COMMIT");
+          return { session: null, skippedReason: "schedule_changed_after_call_attempt" };
+        }
+      }
+      for (const row of stale) {
+        await client.query(
+          "UPDATE attendance_sessions SET session_status='cancelled',updated_at=NOW() WHERE id=$1 AND session_status='active'",
+          [row.id],
+        );
+        await client.query(
+          `INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+           VALUES ($1,$2,'attendance.athulya_schedule_replaced',$3::jsonb)`,
+          [organizationId, row.id, JSON.stringify({ scheduleId, schedulePk, replacementVersion: scheduleVersion })],
+        );
+      }
+      const session = await this.createAttendanceSession(assignment, client);
+      await client.query("COMMIT");
+      return { session, skippedReason: null };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async createAttendanceSession(assignment, client = this.pool) {
