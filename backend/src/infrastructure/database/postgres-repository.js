@@ -1207,6 +1207,7 @@ class PostgresRepository {
       scheduledStartAt: new Date(scheduledStartAt).toISOString(),
       scheduledEndAt: new Date(scheduledEndAt).toISOString(),
       language, sourceStatus,
+      metadata: metadata || {},
     };
     const scheduleVersion = `athulya-${crypto.createHash("sha256").update(stableJson(operationalIdentity)).digest("hex").slice(0, 24)}`;
     const assignmentMetadata = {
