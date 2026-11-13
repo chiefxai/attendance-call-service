@@ -1420,6 +1420,8 @@ class PostgresRepository {
       sessionStatus: session.sessionStatus,
       backendDeliveryStatus: session.backendDeliveryStatus,
       callAttemptCount: Number(row.call_attempt_count || 0),
+      checkInAttemptCount: Number(row.check_in_attempt_count || 0),
+      checkOutAttemptCount: Number(row.check_out_attempt_count || 0),
       metadata: session.metadata || {},
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -1429,7 +1431,9 @@ class PostgresRepository {
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const safeOffset = Math.max(Number(offset) || 0, 0);
     const r = await this.pool.query(
-      `SELECT s.*, COUNT(a.id)::int AS call_attempt_count
+      `SELECT s.*, COUNT(a.id)::int AS call_attempt_count,
+         COUNT(a.id) FILTER (WHERE a.stage='check_in')::int AS check_in_attempt_count,
+         COUNT(a.id) FILTER (WHERE a.stage='check_out')::int AS check_out_attempt_count
        FROM attendance_sessions s
        LEFT JOIN attendance_call_attempts a ON a.session_id=s.id
        WHERE s.organization_id=$1

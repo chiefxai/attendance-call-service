@@ -412,6 +412,8 @@ export interface AttendanceRecord {
   sessionStatus: string;
   backendDeliveryStatus: string;
   callAttemptCount: number;
+  checkInAttemptCount: number;
+  checkOutAttemptCount: number;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

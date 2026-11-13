@@ -34,8 +34,8 @@ export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accen
 export function StatusChip({ status }: { status: string }) {
   const normalized = status.toLowerCase().replaceAll("_", " ");
   const color = ["verified", "confirmed", "completed", "active", "synced", "delivered"].includes(normalized) ? "success"
-    : ["not answered", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
-      : ["late", "delayed", "retrying", "pending", "queued", "in progress", "processing", "high"].includes(normalized) ? "warning" : "default";
+    : ["delayed", "not answered", "call not placed", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
+      : ["late", "retrying", "pending", "queued", "in progress", "processing", "high"].includes(normalized) ? "warning" : "default";
   return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={normalized} sx={{ textTransform: "capitalize", fontWeight: 650 }} />;
 }
 

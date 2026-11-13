@@ -14,12 +14,37 @@ function todayInIndia() {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+function scheduledInstant(dateValue: string | null | undefined, timeValue: string | null | undefined) {
+  if (!dateValue || !timeValue) return null;
+  const dateText = String(dateValue).slice(0, 10);
+  const rawTime = String(timeValue).trim();
+  if (/\d{4}-\d{2}-\d{2}T/.test(rawTime)) {
+    const parsed = new Date(rawTime);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const match = rawTime.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] || 0);
+  const meridiem = String(match[4] || "").toUpperCase();
+  if (minute > 59 || second > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    hour = (hour % 12) + (meridiem === "PM" ? 12 : 0);
+  } else if (hour > 23) return null;
+  const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+  const parsed = new Date(`${dateText}T${time}+05:30`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 type AttendanceStatus = "pending" | "check_in" | "check_out" | "processing" | "delayed" | "completed" | "cancelled";
 
 function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]): AttendanceStatus {
   const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\s_-]/g, "");
   if (["cancelled", "canceled"].includes(externalStatus)) return "cancelled";
-  if (!records.length) return "pending";
+  const checkInDue = scheduledInstant(schedule.date, schedule.startTime);
+  if (!records.length) return checkInDue && Date.now() >= checkInDue.getTime() ? "delayed" : "pending";
 
   const allComplete = records.every((record) => record.checkIn.status === "confirmed" && record.checkOut.status === "confirmed");
   if (allComplete) return "completed";
@@ -76,13 +101,28 @@ function dateTimeLabel(value: string | null | undefined) {
   }).format(date);
 }
 
-function AttendanceStage({ records, stage, scheduledTime, emptyLabel }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduledTime: string | null | undefined; emptyLabel: string }) {
-  if (!records.length) return <Typography variant="body2" color="text.secondary">{scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}</Typography>;
+function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLabel, canAssessCall }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduleDate: string | null; scheduledTime: string | null | undefined; emptyLabel: string; canAssessCall: boolean }) {
+  const dueAt = scheduledInstant(scheduleDate, scheduledTime);
+  const overdue = Boolean(dueAt && dueAt.getTime() <= Date.now());
+  if (!records.length) return <Stack spacing={0.5}>
+    <Typography variant="body2" color="text.secondary">{scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}</Typography>
+    {canAssessCall && overdue && <StatusChip status="call not placed" />}
+  </Stack>;
   return <Stack spacing={0.5}>
-    {records.map((record) => <Stack key={record.sessionId} direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
-      {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}:</Typography>}
-      <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{scheduleClock(record[stage].reportedAt || scheduledTime)}</Typography>
-    </Stack>)}
+    {records.map((record) => {
+      const stageStatus = record[stage];
+      const attemptCount = stage === "checkIn" ? record.checkInAttemptCount : record.checkOutAttemptCount;
+      const reason = stage === "checkIn" ? record.stageReasons.checkIn : record.stageReasons.checkOut;
+      const didNotAnswer = reason === "not_answered" || reason === "consecutive_no_answer_limit_reached" || stageStatus.status === "not_answered";
+      const wasNotPlaced = overdue && attemptCount === 0 && ["scheduled", "missed", "review"].includes(stageStatus.status);
+      return <Stack key={record.sessionId} direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+        {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}:</Typography>}
+        <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{scheduleClock(stageStatus.reportedAt || scheduledTime)}</Typography>
+        {didNotAnswer && <StatusChip status="not answered" />}
+        {wasNotPlaced && <StatusChip status="call not placed" />}
+        {stageStatus.status === "follow_up" && stageStatus.nextCallAt && <Typography variant="caption" color="error.main">Recall at {dateTimeLabel(stageStatus.nextCallAt)}</Typography>}
+      </Stack>;
+    })}
   </Stack>;
 }
 
@@ -176,8 +216,8 @@ export function AttendanceSchedulesPage() {
                 <TableCell>{schedule.patient.name || "—"}</TableCell>
                 <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell>
                 <TableCell>{schedule.service || "—"}</TableCell>
-                <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduledTime={schedule.startTime} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
-                <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduledTime={schedule.endTime} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
+                <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
+                <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
                 <TableCell><StatusChip status={statusesBySchedule.get(schedule.id) || "pending"} /></TableCell>
                 <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
               </TableRow>;
