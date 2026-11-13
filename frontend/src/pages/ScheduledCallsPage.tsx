@@ -4,7 +4,8 @@ import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, D
 import EventNoteRoundedIcon from "@mui/icons-material/EventNoteRounded";
 import PhoneInTalkRoundedIcon from "@mui/icons-material/PhoneInTalkRounded";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
-import { fetchAthulyaSchedules, fetchScheduledAthulyaCalls, type AthulyaSchedule, type ScheduledAthulyaCallItem } from "../api/client";
+import { fetchAthulyaSchedules, fetchScheduledAthulyaCalls, fetchSessionArtifacts, type AthulyaSchedule, type ScheduledAthulyaCallItem } from "../api/client";
+import { CallRecording } from "../components/CallRecording";
 import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
 
 const ZONE = "Asia/Kolkata";
@@ -85,6 +86,14 @@ export function ScheduledCallsPage() {
     refetchInterval: 10_000,
   });
 
+  const selectedSessionId = selectedRow?.systemItem?.sessionId || "";
+  const artifactsQuery = useQuery({
+    queryKey: ["session-artifacts", selectedSessionId],
+    queryFn: () => fetchSessionArtifacts(selectedSessionId),
+    enabled: Boolean(selectedSessionId),
+    retry: false,
+    refetchInterval: selectedRow ? 10_000 : false,
+  });
   const schedules = schedulesQuery.data || [];
   const systemCalls = systemCallsQuery.data?.items || [];
   const rows = useMemo<Row[]>(() => schedules.flatMap((schedule) => {
@@ -197,6 +206,42 @@ export function ScheduledCallsPage() {
                 <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Current call state</Typography><Typography>{selectedRow.systemItem?.activeCallStatus || "No active call"}</Typography></Grid>
               </Grid>
             </Box>
+            <Divider />
+            <Box>
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1 }}>Call recording and transcript · {selectedRow.stage}</Typography>
+              {!selectedSessionId && <Alert severity="info">No system session exists for this caregiver and call stage yet.</Alert>}
+              {selectedSessionId && artifactsQuery.isLoading && <LinearProgress />}
+              {selectedSessionId && artifactsQuery.isError && <Alert severity="error">Could not load the call recording and transcript.</Alert>}
+              {selectedSessionId && artifactsQuery.isSuccess && (() => {
+                const attempts = artifactsQuery.data.callAttempts.filter((attempt) => attempt.stage === selectedRow.stageKey);
+                if (!attempts.length) return <Alert severity="info">No call attempts have been recorded for this stage yet. This section refreshes automatically.</Alert>;
+                return <Stack spacing={1.5}>
+                  {attempts.map((attempt) => {
+                    const transcript = artifactsQuery.data.transcripts.find((item) => item.callAttemptId === attempt.id);
+                    return <Card key={attempt.id} variant="outlined" sx={{ p: 1.75, boxShadow: "none" }}>
+                      <Stack spacing={1.25}>
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                          <Typography variant="body2" fontWeight={700}>Attempt {attempt.attemptNumber}</Typography>
+                          <StatusChip status={attempt.status} />
+                          {attempt.durationSeconds != null && <Typography variant="caption" color="text.secondary">{attempt.durationSeconds}s</Typography>}
+                          {attempt.answeredAt && <Typography variant="caption" color="text.secondary">Answered {fullDateTime(attempt.answeredAt)}</Typography>}
+                        </Stack>
+                        {attempt.recordingAvailable
+                          ? <CallRecording sessionId={selectedSessionId} attemptId={attempt.id} />
+                          : <Typography variant="body2" color="text.secondary">Recording is not available for this attempt yet.</Typography>}
+                        <Box>
+                          <Typography variant="caption" fontWeight={700} color="text.secondary">TRANSCRIPT</Typography>
+                          {transcript?.text
+                            ? <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{transcript.text}</Typography>
+                            : <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Transcript is not available yet.</Typography>}
+                        </Box>
+                      </Stack>
+                    </Card>;
+                  })}
+                </Stack>;
+              })()}
+            </Box>
+
           </Stack>
         </DialogContent>
         <DialogActions><Button onClick={() => setSelectedRow(null)}>Close</Button></DialogActions>
