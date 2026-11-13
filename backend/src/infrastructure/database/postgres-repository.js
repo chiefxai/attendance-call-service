@@ -1696,6 +1696,65 @@ class PostgresRepository {
       maxConcurrentCalls: Number(process.env.MAX_CONCURRENT_CALLS) || 20,
     };
   }
+
+  async listScheduledAthulyaCallItems(organizationId, { date, timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata" }) {
+    const { rows } = await this.pool.query(
+      `SELECT s.id AS session_id,s.external_assignment_id AS assignment_id,
+        s.assignment_metadata->>'athulyaSchedulePk' AS schedule_pk,
+        s.assignment_metadata->>'athulyaCaregiverId' AS caregiver_id,
+        s.employee->>'name' AS caregiver_name,s.patient->>'name' AS patient_name,
+        t.stage,t.status AS task_status,t.scheduled_at,t.delivery_status,
+        NULLIF(t.active_context->>'nextCallAt','')::timestamptz AS next_call_at,
+        job.id AS queue_job_id,job.status AS queue_job_status,job.run_at AS queue_run_at,
+        job.attempt_number AS queued_attempt_number,
+        active.status AS active_call_status,active.attempt_number AS active_attempt_number,active.created_at AS active_started_at,
+        attempts.attempt_count,attempts.latest_attempt_number,attempts.latest_attempt_status
+       FROM attendance_sessions s
+       JOIN attendance_stage_tasks t ON t.assignment_session_id=s.id
+       LEFT JOIN LATERAL (
+         SELECT j.id,j.status,j.run_at,j.payload->>'attemptNumber' AS attempt_number
+         FROM attendance_jobs j
+         WHERE j.job_type='place_call' AND j.payload->>'taskId'=t.id::text
+           AND j.status IN ('queued','running')
+         ORDER BY j.run_at,j.created_at LIMIT 1
+       ) job ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT a.status,a.attempt_number,a.created_at
+         FROM attendance_call_attempts a
+         WHERE a.session_id=s.id AND a.stage=t.stage
+           AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('ringing','inprogress','answered','placing')
+         ORDER BY a.created_at DESC LIMIT 1
+       ) active ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS attempt_count,MAX(a.attempt_number)::int AS latest_attempt_number,
+           (ARRAY_AGG(a.status ORDER BY a.attempt_number DESC))[1] AS latest_attempt_status
+         FROM attendance_call_attempts a WHERE a.session_id=s.id AND a.stage=t.stage
+       ) attempts ON TRUE
+       WHERE s.organization_id=$1
+         AND s.assignment_metadata->>'source'='athulya_schedule_sync'
+         AND s.session_status<>'cancelled'
+         AND t.scheduled_at >= ($2::date::timestamp AT TIME ZONE $3)
+         AND t.scheduled_at < (($2::date + 1)::timestamp AT TIME ZONE $3)
+       ORDER BY t.scheduled_at,s.employee->>'name',t.stage
+       LIMIT 5000`,
+      [organizationId,date,timeZone],
+    );
+    return rows.map((row) => ({
+      sessionId: row.session_id, assignmentId: row.assignment_id, schedulePk: row.schedule_pk || "",
+      caregiverId: row.caregiver_id || "", caregiverName: row.caregiver_name || "Caregiver",
+      patientName: row.patient_name || "", stage: row.stage, taskStatus: row.task_status,
+      scheduledAt: row.scheduled_at, deliveryStatus: row.delivery_status,
+      nextCallAt: row.next_call_at, queueJobId: row.queue_job_id || null,
+      queueJobStatus: row.queue_job_status || null, queueRunAt: row.queue_run_at || null,
+      queuedAttemptNumber: row.queued_attempt_number == null ? null : Number(row.queued_attempt_number),
+      activeCallStatus: row.active_call_status || null,
+      activeAttemptNumber: row.active_attempt_number == null ? null : Number(row.active_attempt_number),
+      activeStartedAt: row.active_started_at || null, attemptCount: Number(row.attempt_count) || 0,
+      latestAttemptNumber: row.latest_attempt_number == null ? null : Number(row.latest_attempt_number),
+      latestAttemptStatus: row.latest_attempt_status || null,
+    }));
+  }
+
   async getAgentSessionContext(id, stage) {
     const session = await this.getAttendanceSession(id);
     if (!session) return null;

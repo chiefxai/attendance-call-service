@@ -522,6 +522,20 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     try { res.json(await repository.getCallCenterData(org(req), { careManagerExternalId: careManagerScope(req) })); } catch (error) { fail(res, error); }
   });
 
+
+  router.get("/scheduled-calls", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
+      const date = String(req.query.date || localDateInTimeZone(new Date(), timeZone)).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(date + "T00:00:00.000Z").toISOString().slice(0,10) !== date) {
+        return res.status(400).json({ error: "date must be a valid YYYY-MM-DD calendar date." });
+      }
+      const items = await repository.listScheduledAthulyaCallItems(org(req), { date, timeZone });
+      res.set("Cache-Control", "private, no-store").json({ date, timeZone, items });
+    } catch (error) { fail(res, error); }
+  });
+
   function serializeIncomingCall(call, appointmentCalls = []) {
     const hasRecording = Boolean(call.recordingObjectKey);
     const hasTranscript = Boolean(call.transcript?.trim());

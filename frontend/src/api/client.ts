@@ -162,6 +162,36 @@ export async function fetchAthulyaSyncRuns() {
   return response.data;
 }
 
+
+export interface ScheduledAthulyaCallItem {
+  sessionId: string;
+  assignmentId: string;
+  schedulePk: string;
+  caregiverId: string;
+  caregiverName: string;
+  patientName: string;
+  stage: "check_in" | "check_out";
+  taskStatus: string;
+  scheduledAt: string;
+  deliveryStatus: string;
+  nextCallAt: string | null;
+  queueJobId: string | null;
+  queueJobStatus: "queued" | "running" | null;
+  queueRunAt: string | null;
+  queuedAttemptNumber: number | null;
+  activeCallStatus: string | null;
+  activeAttemptNumber: number | null;
+  activeStartedAt: string | null;
+  attemptCount: number;
+  latestAttemptNumber: number | null;
+  latestAttemptStatus: string | null;
+}
+
+export async function fetchScheduledAthulyaCalls(date: string) {
+  const response = await api.get<{ date: string; timeZone: string; items: ScheduledAthulyaCallItem[] }>("/scheduled-calls", { params: { date } });
+  return response.data;
+}
+
 export async function fetchAthulyaSchedules(params: { fromDate?: string; toDate?: string } = {}) {
   const response = await api.get<AthulyaSchedule[]>("/integrations/athulya/schedules", { params });
   return response.data;

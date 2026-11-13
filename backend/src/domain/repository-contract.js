@@ -52,6 +52,7 @@ const repositoryMethods = Object.freeze([
   "finishAthulyaSyncRun(runId, result)",
   "upsertAthulyaSchedules(organizationId, records)",
   "listAthulyaSchedules(organizationId, filters)",
+  "listScheduledAthulyaCallItems(organizationId, filters)",
   "listAthulyaSyncRuns(organizationId, limit)",
   "listAthulyaAttendanceSubmissions(organizationId, filters)",
   "listCareActivities(organizationId, options)",
