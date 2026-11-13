@@ -6,6 +6,7 @@ import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton,
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
+import EventNoteRoundedIcon from "@mui/icons-material/EventNoteRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
@@ -22,6 +23,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
 import { AttendanceSchedulesPage } from "./pages/AttendanceSchedulesPage";
+import { ScheduledCallsPage } from "./pages/ScheduledCallsPage";
 import { PageHeaderTargetContext } from "./components/OperationsUI";
 import { LoginPage } from "./pages/LoginPage";
 import { CareManagersPage } from "./pages/CareManagersPage";
@@ -36,6 +38,7 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Care Givers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
+  { label: "Scheduled calls", path: "/scheduled-calls", icon: <EventNoteRoundedIcon />, adminOnly: true },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
@@ -111,6 +114,7 @@ function App() {
         <Routes>
           <Route path="/" element={<OperationsPage userRole={user.role} />} />
           <Route path="/attendance" element={<AttendanceSchedulesPage />} />
+          <Route path="/scheduled-calls" element={user.role === "admin" ? <ScheduledCallsPage /> : <Navigate to="/" replace />} />
           <Route path="/schedules" element={<AttendanceSchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
           <Route path="/reports" element={<Navigate to="/?view=reports" replace />} />
