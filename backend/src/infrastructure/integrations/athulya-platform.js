@@ -240,7 +240,7 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
         }
         const patientId = String(source.patient_id || "").trim();
         const patient = (patientId && await repository.getActivePatientDirectoryRecord(organizationId, patientId))
-          || { id: patientId, name: String(source.client_name || "").trim(), phoneNumber: "", address: "", language: "ta",
+          || { id: patientId, name: String(source.client_name || "").trim(), phoneNumber: "", address: String(source.patient_address || "").trim(), language: "ta",
             patientUhid: String(source.patient_uhid || "").trim(), branch: String(source.branch || "").trim() };
         const caregivers = Array.isArray(item.caregivers) ? item.caregivers : [];
         let scheduledForRecord = 0;

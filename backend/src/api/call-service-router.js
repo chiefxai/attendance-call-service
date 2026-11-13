@@ -275,7 +275,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         keyConfigured: Boolean(value.encryptedApiKey), apiKeyMasked: value.encryptedApiKey ? "••••••••" : "", updatedAt: value.updatedAt || null,
         lastSuccessfulScheduleSync: value.lastSuccessfulScheduleSync || null,
         lastSuccessfulAttendanceSubmission: value.lastSuccessfulAttendanceSubmission || null,
-        attendanceSubmissionStatus: "awaiting_api_specification" });
+        attendanceSubmissionStatus: value.enabled && value.encryptedApiKey ? "ready" : "not_configured" });
     } catch (error) { fail(res, error); }
   });
 
@@ -306,7 +306,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
         keyConfigured: Boolean(saved.encryptedApiKey), apiKeyMasked: saved.encryptedApiKey ? "••••••••" : "", updatedAt: saved.updatedAt,
         lastSuccessfulScheduleSync: saved.lastSuccessfulScheduleSync || null,
         lastSuccessfulAttendanceSubmission: saved.lastSuccessfulAttendanceSubmission || null,
-        attendanceSubmissionStatus: "awaiting_api_specification" });
+        attendanceSubmissionStatus: saved.enabled && saved.encryptedApiKey ? "ready" : "not_configured" });
     } catch (error) { fail(res, error); }
   });
 

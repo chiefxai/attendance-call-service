@@ -53,7 +53,7 @@ export interface AthulyaIntegrationSettings {
   updatedAt: string | null;
   lastSuccessfulScheduleSync: string | null;
   lastSuccessfulAttendanceSubmission: string | null;
-  attendanceSubmissionStatus: "awaiting_api_specification";
+  attendanceSubmissionStatus: "ready" | "not_configured";
 }
 
 export interface AthulyaSyncRun {
@@ -107,6 +107,11 @@ export interface AthulyaAttendanceSubmission {
 
 export async function fetchCareManagers() {
   const response = await api.get<CareManager[]>("/care-managers");
+  return response.data;
+}
+
+export async function provisionCareManagerAccount(id: string, password: string) {
+  const response = await api.post<{ success: boolean; loginPhone: string; active: boolean; mustChangePassword: boolean }>(`/care-managers/${encodeURIComponent(id)}/provision`, { password });
   return response.data;
 }
 

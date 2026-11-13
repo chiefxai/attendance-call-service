@@ -16,6 +16,7 @@ const {
   startWorkers,
   createAttendanceBackendClient,
   createAthulyaScheduleSyncHandler,
+  createAthulyaAttendanceClient,
   latestDueAthulyaSyncSlot,
 } = require("../index");
 
@@ -41,6 +42,7 @@ async function main() {
     location: process.env.VERTEX_SUMMARY_LOCATION || "global",
   });
   const backend = createAttendanceBackendClient();
+  const athulyaAttendanceClient = createAthulyaAttendanceClient({ repository });
   const handlers = createAttendanceHandlers({
     repository,
     queue,
@@ -49,6 +51,7 @@ async function main() {
     transcriber,
     postCallAgent,
     backend,
+    athulyaAttendanceClient,
     retry: config.callRetry,
     capacity: config.callCapacity,
     additionalHandlers: {

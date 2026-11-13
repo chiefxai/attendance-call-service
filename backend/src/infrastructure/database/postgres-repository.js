@@ -328,18 +328,20 @@ class PostgresRepository {
         if (!scheduleId) continue;
         const patientId = source.patient_id == null ? "" : String(source.patient_id).trim();
         const patientUhid = source.patient_uhid == null ? "" : String(source.patient_uhid).trim();
+        const patientAddress = source.patient_address == null ? "" : String(source.patient_address).trim();
         const careManagerId = source.care_manager_id == null ? "" : String(source.care_manager_id).trim();
         const careManagerName = source.care_manager_name == null ? "" : String(source.care_manager_name).trim();
         const careManagerPhone = source.care_manager_phone == null ? null : String(source.care_manager_phone).trim();
         if (patientId) await client.query(
           `INSERT INTO patient_directory (organization_id,external_id,name,phone_number,address,language,care_category,hub,athulya_patient_uhid,branch)
-           VALUES ($1,$2,$3,NULL,'','ta',$4,$5,$6,$7) ON CONFLICT (organization_id,external_id) DO UPDATE SET
+           VALUES ($1,$2,$3,NULL,$4,'ta',$5,$6,$7,$8) ON CONFLICT (organization_id,external_id) DO UPDATE SET
            name=CASE WHEN EXCLUDED.name<>'' THEN EXCLUDED.name ELSE patient_directory.name END,
+           address=CASE WHEN EXCLUDED.address<>'' THEN EXCLUDED.address ELSE patient_directory.address END,
            care_category=CASE WHEN EXCLUDED.care_category<>'' THEN EXCLUDED.care_category ELSE patient_directory.care_category END,
            hub=CASE WHEN EXCLUDED.hub<>'' THEN EXCLUDED.hub ELSE patient_directory.hub END,
            athulya_patient_uhid=CASE WHEN EXCLUDED.athulya_patient_uhid<>'' THEN EXCLUDED.athulya_patient_uhid ELSE patient_directory.athulya_patient_uhid END,
            branch=CASE WHEN EXCLUDED.branch<>'' THEN EXCLUDED.branch ELSE patient_directory.branch END,updated_at=NOW()`,
-          [organizationId,patientId,String(source.client_name ?? "").trim(),String(source.service_name ?? "").trim(),String(source.branch ?? "").trim(),patientUhid,String(source.branch ?? "").trim()],
+          [organizationId,patientId,String(source.client_name ?? "").trim(),patientAddress,String(source.service_name ?? "").trim(),String(source.branch ?? "").trim(),patientUhid,String(source.branch ?? "").trim()],
         );
         if (careManagerId) await client.query(
           `INSERT INTO athulya_care_managers (organization_id,athulya_care_manager_id,name,phone)
@@ -431,6 +433,49 @@ class PostgresRepository {
        ORDER BY e.created_at DESC LIMIT $8`, [organizationId,eventType,status,fromDate,toDate,caregiverId,patientId,Math.min(Number(limit) || 200,500)],
     );
     return rows;
+  }
+
+  async getAthulyaAttendanceSubmissionForEvent(sessionId, stage) {
+    const { rows } = await this.pool.query(
+      `SELECT e.id,e.organization_id AS "organizationId",e.event_type AS "eventType",e.event_at AS "eventAt",
+         e.status,e.attempt_count AS "attemptCount",e.idempotency_key AS "idempotencyKey",
+         COALESCE(NULLIF(s.athulya_schedule_pk,''),s.athulya_schedule_id) AS "scheduleId"
+       FROM attendance_sessions a
+       JOIN athulya_attendance_submissions e ON e.organization_id=a.organization_id
+         AND e.idempotency_key='attendance:'||a.id::text||':'||$2
+       JOIN athulya_schedules s ON s.id=e.schedule_id AND s.organization_id=e.organization_id
+       WHERE a.id=$1 AND $2 IN ('check_in','check_out')
+       LIMIT 1`, [sessionId, stage],
+    );
+    return rows[0] || null;
+  }
+
+  async startAthulyaAttendanceSubmission(id) {
+    const { rows } = await this.pool.query(
+      `UPDATE athulya_attendance_submissions SET status='processing',attempt_count=attempt_count+1,
+         next_attempt_at=NULL,error_message=NULL,updated_at=NOW()
+       WHERE id=$1 AND (status IN ('pending','retry_scheduled','failed','awaiting_api_specification')
+         OR (status='processing' AND updated_at<NOW()-INTERVAL '10 minutes'))
+       RETURNING id,attempt_count AS "attemptCount"`, [id],
+    );
+    return rows[0] || null;
+  }
+
+  async finishAthulyaAttendanceSubmission(id, { statusCode, responseBody, externalReference } = {}) {
+    await this.pool.query(
+      `UPDATE athulya_attendance_submissions SET status='synced',response_code=$2,response_body=$3::jsonb,
+         external_reference=$4,error_message=NULL,next_attempt_at=NULL,updated_at=NOW() WHERE id=$1`,
+      [id, statusCode || null, JSON.stringify(responseBody || {}), externalReference || null],
+    );
+  }
+
+  async failAthulyaAttendanceSubmission(id, { statusCode, errorMessage, terminal = false } = {}) {
+    await this.pool.query(
+      `UPDATE athulya_attendance_submissions SET status=$2,response_code=$3,
+         error_message=$4,next_attempt_at=CASE WHEN $2='retry_scheduled' THEN NOW()+INTERVAL '1 minute' ELSE NULL END,
+         updated_at=NOW() WHERE id=$1 AND status<>'synced'`,
+      [id, terminal ? 'failed' : 'retry_scheduled', statusCode || null, String(errorMessage || 'Athulya attendance submission failed').slice(0, 2000)],
+    );
   }
 
   async createWebSession(userId, tokenHash, expiresAt) {
@@ -2002,7 +2047,7 @@ class PostgresRepository {
       );
       await this.pool.query(
         `INSERT INTO athulya_attendance_submissions (organization_id,schedule_id,caregiver_id,event_type,event_at,status,idempotency_key)
-         SELECT s.organization_id,source.id,s.employee->>'id',$2,COALESCE($3::timestamptz,NOW()),'awaiting_api_specification',
+         SELECT s.organization_id,source.id,s.employee->>'id',$2,COALESCE($3::timestamptz,NOW()),'pending',
            'attendance:'||s.id::text||':'||$2
          FROM attendance_sessions s JOIN athulya_schedules source ON source.organization_id=s.organization_id
            AND (source.athulya_schedule_id=s.external_assignment_id OR source.athulya_schedule_pk=s.external_assignment_id)

@@ -70,7 +70,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
   return { action: "review", reason: "invalid_stage" };
 }
 
-function createAttendanceHandlers({ repository, queue, vobiz, recordings, transcriber, postCallAgent, backend, retry = {}, capacity = {}, additionalHandlers = {} }) {
+function createAttendanceHandlers({ repository, queue, vobiz, recordings, transcriber, postCallAgent, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
   const required = { repository, queue, vobiz, recordings, transcriber, postCallAgent, backend };
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
@@ -498,9 +498,38 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
 
   }
 
-  async function deliverAttendance({ sessionId, stage, callAttemptId }) {
+  async function deliverAttendance({ sessionId, stage, callAttemptId }, { job } = {}) {
     const session = await repository.getAttendanceSession(sessionId);
     if (!session || !["check_in", "check_out"].includes(stage) || !callAttemptId) return;
+    const submission = await repository.getAthulyaAttendanceSubmissionForEvent(sessionId, stage);
+    if (submission && submission.status !== "synced") {
+      if (!athulyaAttendanceClient) throw new Error("Athulya attendance client is not configured");
+      const claimed = await repository.startAthulyaAttendanceSubmission(submission.id);
+      if (!claimed) throw new Error("Athulya attendance submission is already being processed");
+      if (claimed) {
+        try {
+          const result = await athulyaAttendanceClient.sendAttendance({
+            organizationId: submission.organizationId,
+            scheduleId: submission.scheduleId,
+            type: submission.eventType,
+            timing: submission.eventAt,
+            idempotencyKey: submission.idempotencyKey,
+          });
+          await repository.finishAthulyaAttendanceSubmission(submission.id, {
+            statusCode: result.status,
+            responseBody: result.body,
+            externalReference: result.body?.schedule_id,
+          });
+        } catch (error) {
+          await repository.failAthulyaAttendanceSubmission(submission.id, {
+            statusCode: error.statusCode || null,
+            errorMessage: error.message,
+            terminal: Boolean(job && job.attempts >= job.max_attempts),
+          });
+          throw error;
+        }
+      }
+    }
     const payload = await repository.buildBackendAttendancePayload(sessionId, stage, callAttemptId);
     if (!payload) return;
     const result = await backend.sendAttendance(payload, {

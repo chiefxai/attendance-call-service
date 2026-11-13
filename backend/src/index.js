@@ -18,6 +18,7 @@ module.exports = {
   ...require("./infrastructure/storage/minio-recordings"),
   ...require("./infrastructure/integrations/attendance-backend-client"),
   ...require("./infrastructure/integrations/athulya-platform"),
+  ...require("./infrastructure/integrations/athulya-attendance-client"),
   ...require("./infrastructure/telephony/vobiz-client"),
   ...require("./infrastructure/telephony/vobiz-signature"),
   ...require("./agents/vertex-agent"),
