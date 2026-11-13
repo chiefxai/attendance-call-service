@@ -110,11 +110,6 @@ export async function fetchCareManagers() {
   return response.data;
 }
 
-export async function provisionCareManagerAccount(id: string, password: string) {
-  const response = await api.post<{ success: boolean; loginPhone: string; active: boolean; mustChangePassword: boolean }>(`/care-managers/${encodeURIComponent(id)}/provision`, { password });
-  return response.data;
-}
-
 export async function createCareManager(payload: { name: string; email: string; phone: string; athulyaCareManagerId: string; password: string }) {
   const response = await api.post<CareManager>("/care-managers", payload);
   return response.data;
