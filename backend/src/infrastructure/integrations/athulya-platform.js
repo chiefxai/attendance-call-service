@@ -100,7 +100,7 @@ function dateOnly(value) {
 function zonedParts(date, timeZone) {
   const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
     timeZone, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
   }).formatToParts(date).map(({ type, value }) => [type, value]));
   return values;
 }
@@ -109,12 +109,12 @@ function localScheduleDateTimeToUtc(dateValue, timeValue, timeZone = process.env
   const dateText = dateOnly(dateValue);
   if (!dateText || timeValue == null || timeValue === "") return null;
   const timeText = String(timeValue).trim();
-  const zonedDateTime = timeText.match(/^(\\d{4}-\\d{2}-\\d{2})[T ](\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?)((?:Z|[+-]\\d{2}:?\\d{2}))$/i);
+  const zonedDateTime = timeText.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)((?:Z|[+-]\d{2}:?\d{2}))$/i);
   if (zonedDateTime) {
     const direct = new Date(timeText);
     return Number.isFinite(direct.getTime()) ? direct.toISOString() : null;
   }
-  const match = timeText.match(/^(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*(AM|PM)?$/i);
+  const match = timeText.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
   if (!match) return null;
   let hour = Number(match[1]);
   const minute = Number(match[2]);
@@ -213,7 +213,7 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
       let skippedSchedules = 0;
       for (const item of records) {
         const source = item.source || {};
-        const status = String(source.schedule_status || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
+        const status = String(source.schedule_status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
         const scheduleId = String(source.schedule_id || "").trim();
         const schedulePk = String(source.schedule_pk || "").trim();
         if (!scheduleId) { skippedSchedules += 1; continue; }
