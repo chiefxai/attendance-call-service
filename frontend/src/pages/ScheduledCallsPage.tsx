@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Card, Chip, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import EventNoteRoundedIcon from "@mui/icons-material/EventNoteRounded";
 import PhoneInTalkRoundedIcon from "@mui/icons-material/PhoneInTalkRounded";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
@@ -64,6 +64,7 @@ type Row = {
   queueStatus: string;
   callTime: string;
   attemptNumber: number | null;
+  systemItem: ScheduledAthulyaCallItem | undefined;
 };
 
 export function ScheduledCallsPage() {
@@ -72,6 +73,7 @@ export function ScheduledCallsPage() {
   const [stageFilter, setStageFilter] = useState("all");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [selectedRow, setSelectedRow] = useState<Row | null>(null);
   const schedulesQuery = useQuery({
     queryKey: ["admin-scheduled-calls", "athulya", selectedDate],
     queryFn: () => fetchAthulyaSchedules({ fromDate: selectedDate, toDate: selectedDate }),
@@ -110,7 +112,7 @@ export function ScheduledCallsPage() {
       return {
         key: `${schedule.id}:${caregiver.id || "unassigned"}:${stageKey}`,
         schedule, caregiverName: caregiver.name || caregiver.phone || "—",
-        stage, stageKey, dutyTime, queueStatus: actualQueueStatus, callTime, attemptNumber,
+        stage, stageKey, dutyTime, queueStatus: actualQueueStatus, callTime, attemptNumber, systemItem: item,
       };
     })));
   }), [schedules, systemCalls]);
@@ -143,7 +145,7 @@ export function ScheduledCallsPage() {
       </Stack>
       <TableContainer sx={{ overflowX: "auto" }}>
         <Table size="small" sx={{ minWidth: 1120 }} aria-label="Athulya schedules and system call jobs">
-          <TableHead><TableRow>{["Schedule ID", "Patient", "Caregiver", "Service", "Call stage", "Duty time", "System queue", "Next system call"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
+          <TableHead><TableRow>{["Schedule ID", "Patient", "Caregiver", "Service", "Call stage", "Duty time", "System queue", "Next system call", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>
             {filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((row) => <TableRow key={row.key} hover>
               <TableCell><Typography variant="body2" fontWeight={650}>{row.schedule.athulyaScheduleId || row.schedule.athulyaSchedulePk}</Typography></TableCell>
@@ -154,14 +156,52 @@ export function ScheduledCallsPage() {
               <TableCell><Typography variant="body2">{row.dutyTime}</Typography>{row.schedule.date && <Typography variant="caption" color="text.secondary">{dateLabel(row.schedule.date)}</Typography>}</TableCell>
               <TableCell><StatusChip status={row.queueStatus} />{row.attemptNumber ? <Typography variant="caption" color="text.secondary" display="block">Attempt {row.attemptNumber}</Typography> : null}</TableCell>
               <TableCell><Typography variant="body2">{row.callTime}</Typography></TableCell>
+              <TableCell><Button size="small" onClick={() => setSelectedRow(row)}>View details</Button></TableCell>
             </TableRow>)}
-            {schedulesQuery.isSuccess && schedules.length === 0 && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5 }}>No Athulya schedules were imported for {dateText}. Run a manual sync for this date in Settings.</TableCell></TableRow>}
+            {schedulesQuery.isSuccess && schedules.length === 0 && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 5 }}>No Athulya schedules were imported for {dateText}. Run a manual sync for this date in Settings.</TableCell></TableRow>}
             {schedulesQuery.isSuccess && schedules.length > 0 && filtered.length === 0 && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5 }}>No call items match these filters.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </TableContainer>
       <TablePagination component="div" count={filtered.length} page={page} onPageChange={(_, next) => setPage(next)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Call items per page" />
     </Card>
+
+    <Dialog open={Boolean(selectedRow)} onClose={() => setSelectedRow(null)} fullWidth maxWidth="md">
+      {selectedRow && <>
+        <DialogTitle>Scheduled call details</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1 }}>Athulya duty</Typography>
+              <Grid container spacing={1.5}>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Schedule ID</Typography><Typography>{selectedRow.schedule.athulyaScheduleId || selectedRow.schedule.athulyaSchedulePk}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Call stage</Typography><Typography>{selectedRow.stage}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Patient</Typography><Typography>{selectedRow.schedule.patient.name || "—"}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Caregiver</Typography><Typography>{selectedRow.caregiverName}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Service</Typography><Typography>{selectedRow.schedule.service || "—"}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Duty date and time</Typography><Typography>{selectedRow.schedule.date ? dateLabel(selectedRow.schedule.date) : "—"} · {selectedRow.dutyTime}</Typography></Grid>
+              </Grid>
+            </Box>
+            <Divider />
+            <Box>
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1 }}>Our call scheduling</Typography>
+              <Grid container spacing={1.5}>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Queue status</Typography><Box><StatusChip status={selectedRow.queueStatus} /></Box></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Next system call</Typography><Typography>{selectedRow.callTime}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Queue job ID</Typography><Typography sx={{ overflowWrap: "anywhere" }}>{selectedRow.systemItem?.queueJobId || "No active queue job"}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Internal session ID</Typography><Typography sx={{ overflowWrap: "anywhere" }}>{selectedRow.systemItem?.sessionId || "No internal session found"}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Task status</Typography><Typography>{selectedRow.systemItem?.taskStatus || "No task created"}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Delivery status</Typography><Typography>{selectedRow.systemItem?.deliveryStatus || "—"}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Call attempts</Typography><Typography>{selectedRow.systemItem?.attemptCount ?? 0}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Latest attempt</Typography><Typography>{selectedRow.systemItem?.latestAttemptNumber ? `#${selectedRow.systemItem.latestAttemptNumber} · ${selectedRow.systemItem.latestAttemptStatus || "status unavailable"}` : "No attempts yet"}</Typography></Grid>
+                <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Current call state</Typography><Typography>{selectedRow.systemItem?.activeCallStatus || "No active call"}</Typography></Grid>
+              </Grid>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setSelectedRow(null)}>Close</Button></DialogActions>
+      </>}
+    </Dialog>
     <Alert severity="info">This view compares each Athulya duty with the actual job in our queue. “Queued” confirms our system has scheduled the call; “Next system call” shows the queue run time. The queue status refreshes every 10 seconds.</Alert>
   </Stack>;
 }
