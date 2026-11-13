@@ -66,7 +66,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
     return { action: "review", reason: "check_in_not_confirmed" };
   }
   if (stage === "check_out") {
-    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeNameConfirmed === true && outcome.employeeVerified !== false && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
+    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeVerified === true && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
       return { action: "confirm_stage", reportedAt: outcome.reportedDepartureTime || null };
     }
     if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {
@@ -450,6 +450,11 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     const endedAt = new Date(attempt.endedAt || attempt.updatedAt || Date.now());
     const callEndedAt = Number.isFinite(endedAt.getTime()) ? endedAt.toISOString() : new Date().toISOString();
     sessionContext.systemTimeAtCallEnd = callEndedAt;
+    sessionContext.callTargetRole = attempt.callTargetRole || "employee";
+    sessionContext.assignment = {
+      ...(sessionContext.assignment || {}),
+      timeZone: sessionContext.assignment?.timeZone || process.env.APP_TIMEZONE || "Asia/Kolkata",
+    };
     const outcome = await postCallAgent.extractCallOutcome({
       orgId: session.organizationId,
       sessionContext,
