@@ -1907,10 +1907,15 @@ class PostgresRepository {
     const callAttempt = artifacts.callAttempts.find((item) => item.id === callAttemptId && item.stage === stage);
     if (!callAttempt) return null;
     const transcript = artifacts.transcripts.find((item) => item.callAttemptId === callAttemptId) || null;
+    const assignment = artifacts.session;
+    const stageContext = assignment.activeContext?.[stage === "check_in" ? "checkIn" : "checkOut"] || {};
     return {
+      schedule_id: assignment.assignmentId,
+      type: stage,
+      timing: stageContext.reportedAt || null,
       eventType: stage,
       task,
-      assignment: artifacts.session,
+      assignment,
       callAttempt,
       transcript,
     };
