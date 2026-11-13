@@ -4,6 +4,21 @@ import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, D
 import { fetchAttendance, fetchAthulyaSchedules, type AttendanceRecord, type AthulyaSchedule } from "../api/client";
 import { PageHeader, StatusChip } from "../components/OperationsUI";
 
+function scheduleClock(value: string | null | undefined) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime()) && /[T ]/.test(value)) {
+    return new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" }).format(date);
+  }
+  const match = value.match(/^(\d{1,2}):(\d{2})/);
+  if (match) {
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour < 24 && minute < 60) return new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, hour, minute));
+  }
+  return value;
+}
+
 function matchingAttendance(schedule: AthulyaSchedule, records: AttendanceRecord[]) {
   const ids = new Set([schedule.athulyaScheduleId, schedule.athulyaSchedulePk].filter(Boolean));
   return records.filter((record) => ids.has(record.assignmentId));
@@ -14,7 +29,7 @@ function AttendanceStage({ records, stage, emptyLabel }: { records: AttendanceRe
   return <Stack spacing={0.5}>
     {records.map((record) => <Stack key={record.sessionId} direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
       {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}:</Typography>}
-      <StatusChip status={record[stage].status || "pending"} />
+      <StatusChip status={record[stage].status === "not_answered" ? "delayed" : record[stage].status || "pending"} />
     </Stack>)}
   </Stack>;
 }
@@ -45,24 +60,25 @@ export function AttendanceSchedulesPage() {
       {attendance.isError && <Alert severity="warning" sx={{ m: 2 }}>Our check-in and check-out statuses could not be loaded.</Alert>}
       <TableContainer sx={{ overflowX: "auto" }}>
         <Table size="small" sx={{ minWidth: 1100 }} aria-label="Athulya schedules and attendance">
-          <TableHead><TableRow>{["Date", "Patient", "Care Manager", "Caregivers", "Service", "Branch", "Athulya status", "Check-in", "Check-out", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
+          <TableHead><TableRow>{["Patient", "Care Manager", "Caregivers", "Service", "Branch", "Athulya status", "Check-in time", "Check-in status", "Check-out time", "Check-out status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>
             {pageRows.map((schedule) => {
               const localTasks = matchingAttendance(schedule, attendance.data || []);
               return <TableRow key={schedule.id} hover>
-                <TableCell>{schedule.date || "—"}</TableCell>
                 <TableCell>{schedule.patient.name || "—"}</TableCell>
                 <TableCell>{schedule.careManager.name || "—"}<Typography variant="caption" display="block" color="text.secondary">{schedule.careManager.phone || ""}</Typography></TableCell>
                 <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell>
                 <TableCell>{schedule.service || "—"}</TableCell>
                 <TableCell>{schedule.branch || "—"}</TableCell>
                 <TableCell><StatusChip status={schedule.status || "pending"} /></TableCell>
+                <TableCell>{scheduleClock(schedule.startTime)}</TableCell>
                 <TableCell><AttendanceStage records={localTasks} stage="checkIn" emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "Not scheduled"} /></TableCell>
+                <TableCell>{scheduleClock(schedule.endTime)}</TableCell>
                 <TableCell><AttendanceStage records={localTasks} stage="checkOut" emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "Not scheduled"} /></TableCell>
                 <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
               </TableRow>;
             })}
-            {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 5 }}>No Athulya schedules imported yet. An Admin can configure and sync schedules in Settings.</TableCell></TableRow>}
+            {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 5 }}>No Athulya schedules imported yet. An Admin can configure and sync schedules in Settings.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </TableContainer>

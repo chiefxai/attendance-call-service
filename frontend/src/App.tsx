@@ -9,7 +9,6 @@ import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
-import ContactSupportRoundedIcon from "@mui/icons-material/ContactSupportRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import SupervisorAccountRoundedIcon from "@mui/icons-material/SupervisorAccountRounded";
@@ -23,7 +22,6 @@ import { AssignmentStatusPage } from "./pages/AssignmentStatusPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
-import { EnquiriesPage } from "./pages/EnquiriesPage";
 import { AttendanceSchedulesPage } from "./pages/AttendanceSchedulesPage";
 import { PageHeaderTargetContext } from "./components/OperationsUI";
 import { LoginPage } from "./pages/LoginPage";
@@ -37,7 +35,6 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
   { label: "Staff records", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patient records", path: "/patients", icon: <ElderlyRoundedIcon /> },
-  { label: "Enquiries", path: "/enquiries", icon: <ContactSupportRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Reports", path: "/reports", icon: <AssessmentRoundedIcon /> },
@@ -121,7 +118,7 @@ function App() {
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
-          <Route path="/enquiries" element={<EnquiriesPage />} />
+          <Route path="/enquiries" element={<Navigate to="/" replace />} />
           <Route path="/care-activities" element={<Navigate to="/" replace />} />
           <Route path="/care-managers" element={user.role === "admin" ? <CareManagersPage /> : <Navigate to="/" replace />} />
           <Route path="/assignments/new" element={<Navigate to="/attendance" replace />} />

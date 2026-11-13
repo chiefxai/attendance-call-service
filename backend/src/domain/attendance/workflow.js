@@ -78,7 +78,10 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
 
   async function placeCall({ sessionId, taskId, stage, attemptNumber, capacityWaitCount = 0, consecutiveNoAnswer = 0 }) {
     const session = await repository.getAttendanceSession(sessionId);
-    if (!session || session.sessionStatus === "completed") return;
+    // Check-in and check-out are independent tasks. Exhausting check-in retries
+    // must not close the shared assignment; only an explicit cancellation or a
+    // fully completed session can suppress the later check-out call.
+    if (!session || ["completed", "cancelled"].includes(session.sessionStatus)) return;
     const task = stage === "check_in" ? session.checkInTask : session.checkOutTask;
     if (!task || (taskId && task.id !== taskId)) return;
     const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
