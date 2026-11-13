@@ -25,8 +25,9 @@ class PostgresRepository {
          u.must_change_password,cm.phone
        FROM web_users u
        LEFT JOIN athulya_care_managers cm ON cm.app_user_id=u.id AND cm.organization_id=u.organization_id
-       WHERE lower(COALESCE(u.email,''))=lower($1)
-          OR (u.role='care_manager' AND regexp_replace(COALESCE(cm.phone,''),'[^0-9]','','g') IN ($2,$3))
+       WHERE (lower(COALESCE(u.email,''))=lower($1)
+          OR (u.role='care_manager' AND regexp_replace(COALESCE(cm.phone,''),'[^0-9]','','g') IN ($2,$3)))
+         AND (u.role<>'care_manager' OR cm.active=TRUE)
        LIMIT 2`,
       [identifier, phoneCandidates[0], phoneCandidates[1]],
     );
@@ -116,21 +117,21 @@ class PostgresRepository {
           throw new Error(`Care Manager ID ${manager.athulyaId} is already linked to an application account.`);
         }
         const user = await client.query(
-          `INSERT INTO web_users (organization_id,email,display_name,password_salt,password_hash,role,must_change_password)
-           VALUES ($1,NULL,$2,$3,$4,'care_manager',TRUE)
+          `INSERT INTO web_users (organization_id,email,display_name,password_salt,password_hash,role,must_change_password,active)
+           VALUES ($1,NULL,$2,$3,$4,'care_manager',TRUE,FALSE)
            RETURNING id,display_name,role`,
           [organizationId, manager.name, manager.passwordSalt, manager.passwordHash],
         );
         if (existing.rows[0]) {
           await client.query(
-            `UPDATE athulya_care_managers SET app_user_id=$3,name=$4,phone=$5,active=TRUE,updated_at=NOW()
+            `UPDATE athulya_care_managers SET app_user_id=$3,name=$4,phone=$5,active=FALSE,updated_at=NOW()
              WHERE organization_id=$1 AND athulya_care_manager_id=$2`,
             [organizationId, manager.athulyaId, user.rows[0].id, manager.name, manager.phone],
           );
         } else {
           await client.query(
-            `INSERT INTO athulya_care_managers (organization_id,athulya_care_manager_id,app_user_id,name,phone)
-             VALUES ($1,$2,$3,$4,$5)`,
+            `INSERT INTO athulya_care_managers (organization_id,athulya_care_manager_id,app_user_id,name,phone,active)
+             VALUES ($1,$2,$3,$4,$5,FALSE)`,
             [organizationId, manager.athulyaId, user.rows[0].id, manager.name, manager.phone],
           );
         }
@@ -147,8 +148,8 @@ class PostgresRepository {
     try {
       await client.query("BEGIN");
       const { rows } = await client.query(
-        `INSERT INTO web_users (organization_id,email,display_name,password_salt,password_hash,role)
-         VALUES ($1,$2,$3,$4,$5,'care_manager')
+        `INSERT INTO web_users (organization_id,email,display_name,password_salt,password_hash,role,must_change_password,active)
+         VALUES ($1,$2,$3,$4,$5,'care_manager',TRUE,FALSE)
          RETURNING id,organization_id,email,display_name,active,role,created_at`,
         [organizationId, email, displayName, passwordSalt, passwordHash],
       );
@@ -157,7 +158,7 @@ class PostgresRepository {
         `INSERT INTO athulya_care_managers (organization_id,athulya_care_manager_id,app_user_id,name,email,phone)
          VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (organization_id,athulya_care_manager_id) DO UPDATE SET
-           app_user_id=EXCLUDED.app_user_id,name=EXCLUDED.name,email=EXCLUDED.email,phone=EXCLUDED.phone,active=TRUE,updated_at=NOW()
+           app_user_id=EXCLUDED.app_user_id,name=EXCLUDED.name,email=EXCLUDED.email,phone=EXCLUDED.phone,active=FALSE,updated_at=NOW()
          WHERE athulya_care_managers.app_user_id IS NULL
          RETURNING id`,
         [organizationId, athulyaId, user.id, displayName, email, phone],
@@ -205,15 +206,25 @@ class PostgresRepository {
     try {
       await client.query("BEGIN");
       const { rows } = await client.query(
-        `UPDATE athulya_care_managers SET active=$3,updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING app_user_id`,
+        `SELECT app_user_id FROM athulya_care_managers WHERE organization_id=$1 AND id=$2 FOR UPDATE`,
+        [organizationId, id],
+      );
+      if (!rows.length) { await client.query("ROLLBACK"); return false; }
+      if (active && !rows[0].app_user_id) {
+        const error = new Error("This Care Manager has no server-provisioned login account yet.");
+        error.status = 409;
+        throw error;
+      }
+      await client.query(
+        `UPDATE athulya_care_managers SET active=$3,updated_at=NOW() WHERE organization_id=$1 AND id=$2`,
         [organizationId, id, active],
       );
-      if (rows[0]?.app_user_id) {
+      if (rows[0].app_user_id) {
         await client.query("UPDATE web_users SET active=$2,updated_at=NOW() WHERE id=$1", [rows[0].app_user_id, active]);
         if (!active) await client.query("UPDATE web_sessions SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL", [rows[0].app_user_id]);
       }
       await client.query("COMMIT");
-      return rows.length > 0;
+      return true;
     } catch (error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(); }
   }
@@ -328,12 +339,12 @@ class PostgresRepository {
            branch=CASE WHEN EXCLUDED.branch<>'' THEN EXCLUDED.branch ELSE patient_directory.branch END,updated_at=NOW()`,
           [organizationId,patientId,String(source.client_name ?? "").trim(),String(source.service_name ?? "").trim(),String(source.branch ?? "").trim(),patientUhid,String(source.branch ?? "").trim()],
         );
-        if (careManagerId && careManagerName) await client.query(
+        if (careManagerId) await client.query(
           `INSERT INTO athulya_care_managers (organization_id,athulya_care_manager_id,name,phone)
            VALUES ($1,$2,$3,$4) ON CONFLICT (organization_id,athulya_care_manager_id) DO UPDATE SET
-           name=CASE WHEN EXCLUDED.name<>'' THEN EXCLUDED.name ELSE athulya_care_managers.name END,
+           name=CASE WHEN $5<>'' THEN EXCLUDED.name ELSE athulya_care_managers.name END,
            phone=COALESCE(NULLIF(EXCLUDED.phone,''),athulya_care_managers.phone),updated_at=NOW()`,
-          [organizationId,careManagerId,careManagerName,careManagerPhone],
+          [organizationId,careManagerId,careManagerName || `Care Manager ${careManagerId}`,careManagerPhone,careManagerName],
         );
         for (const caregiver of item.caregivers) {
           if (!caregiver.id) continue;
