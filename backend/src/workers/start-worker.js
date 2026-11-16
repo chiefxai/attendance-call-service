@@ -9,7 +9,7 @@ const {
   createPostgresPool,
   createVertexClientProvider,
   createVertexTranscriber,
-  createVobizClient,
+  createChiefVoiceClient,
   loadConfig,
   PostgresJobQueue,
   PostgresRepository,
@@ -29,7 +29,7 @@ async function main() {
     defaultMaxAttempts: config.worker.maxAttempts,
     retry: config.worker.retry,
   });
-  const vobiz = createVobizClient();
+  const chiefvoice = createChiefVoiceClient();
   const getClientForOrg = createVertexClientProvider();
   const recordings = createMinioRecordingStore();
   const transcriber = createVertexTranscriber({
@@ -46,7 +46,7 @@ async function main() {
   const handlers = createAttendanceHandlers({
     repository,
     queue,
-    vobiz,
+    chiefvoice,
     recordings,
     transcriber,
     postCallAgent,
