@@ -1065,12 +1065,6 @@ router.get("/activities", async (req, res) => {
       if (!eventId || !providerCallId || !rawStatus) {
         return res.status(400).json({ error: "ChiefVoice event ID, session/call ID, and status are required" });
       }
-      const firstDelivery = await repository.claimChiefVoiceWebhookEvent({
-        eventId: String(eventId),
-        providerCallId: String(providerCallId),
-        eventType: data.event_type || data.type || payload.event_type || payload.type,
-      });
-      if (!firstDelivery) return res.status(200).json({ received: true, duplicate: true });
       const providerStatus = String(rawStatus).replace(/^call[._-]/i, "").replace(/^post[._-]call[._-]/i, "");
       const result = await repository.updateCallByProviderId({
         provider: "chiefvoice", providerCallId: String(providerCallId), status: providerStatus,
@@ -1083,6 +1077,13 @@ router.get("/activities", async (req, res) => {
           RecordingUrl: data.recording_url || null,
         },
       });
+      if (!result) return res.status(404).json({ received: false });
+      const firstDelivery = await repository.claimChiefVoiceWebhookEvent({
+        eventId: String(eventId),
+        providerCallId: String(providerCallId),
+        eventType: data.event_type || data.type || payload.event_type || payload.type,
+      });
+      if (!firstDelivery) return res.status(200).json({ received: true, duplicate: true });
       if (result?.sessionId) {
         if (postCallResult && typeof postCallResult === "object") {
           const outcome = {
