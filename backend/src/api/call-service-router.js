@@ -2,11 +2,8 @@
 
 const crypto = require("node:crypto");
 
-const { createVobizClient } = require("../infrastructure/telephony/vobiz-client");
 const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
-const { verifyVobizWebhookSignature } = require("../infrastructure/telephony/vobiz-signature");
-const { createVobizLiveRuntime } = require("../realtime/vobiz-live-runtime");
 const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
 
 const AGENT_DEFAULTS = {
@@ -17,22 +14,21 @@ const AGENT_DEFAULTS = {
   runtimeConfig: {},
 };
 
-function createCallServiceRouter({ express, repository, queue, vobiz = createVobizClient(), verifyWebhook, getClientForOrg, recordings }) {
+function createCallServiceRouter({ express, repository, queue, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
   assertRepository(repository);
   if (!queue?.enqueue || !queue?.transaction) throw new Error("A transactional durable job queue is required");
 
   const router = express.Router();
-  router.use(express.json());
+  router.use(express.json({ verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
   router.use(express.urlencoded({ extended: false }));
-  const validateWebhook = verifyWebhook || ((req) => verifyVobizWebhookSignature(req, process.env.VOBIZ_AUTH_TOKEN));
   const validateAdminToken = (req) => {
     const expected = Buffer.from(process.env.API_KEY_ADMIN_TOKEN || "");
     const supplied = Buffer.from(String(req.get("x-api-admin-token") || ""));
     return expected.length > 0 && expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
   };
   router.use(async (req, res, next) => {
-    if (req.method === "POST" && ["/answer", "/incoming/answer", "/care-manager-alert/answer", "/webhooks/call-status"].includes(req.path)) return next();
+    if (req.method === "POST" && req.path === "/webhooks/chiefvoice") return next();
     if (req.path === "/test-platform" || req.path.startsWith("/test-platform/")) {
       if (!process.env.DEFAULT_ORGANIZATION_ID) return res.status(503).json({ error: "Default organization is not configured" });
       req.orgId = process.env.DEFAULT_ORGANIZATION_ID;
@@ -71,19 +67,6 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
       return next();
     } catch (error) { return next(error); }
   });
-  const liveRuntime = createVobizLiveRuntime({ repository, vobiz, verifyWebhook: validateWebhook, getClientForOrg, recordings, queue });
-  router.post("/answer", liveRuntime.answerHandler);
-  router.post("/incoming/answer", liveRuntime.incomingAnswerHandler);
-  router.post("/care-manager-alert/answer", async (req, res) => {
-    if (!await validateWebhook(req)) return res.status(401).send("Invalid Vobiz signature");
-    const message = String(req.query.message || "").trim().slice(0, 500);
-    if (!message) return res.status(400).send("Missing alert message");
-    const xml = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
-    res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Speak>${xml(message)}</Speak><Hangup/></Response>`);
-  });
-  router.handleVobizUpgrade = liveRuntime.handleUpgrade;
-  router.closeVobizLiveRuntime = liveRuntime.close;
-
   const org = (req) => {
     if (!req.orgId) {
       const error = new Error("Authenticated organization context is required");
@@ -120,7 +103,7 @@ function createCallServiceRouter({ express, repository, queue, vobiz = createVob
     const stored = await repository.getOrganizationCallSettings(organizationId);
     const storedRetry = stored.callRetry || {};
     return {
-      defaultFromNumber: stored.defaultFromNumber ?? process.env.VOBIZ_FROM_NUMBER ?? "",
+      defaultFromNumber: stored.defaultFromNumber ?? process.env.CHIEFVOICE_CALLER_ID ?? "",
       allowInboundCalls: stored.allowInboundCalls ?? true,
       allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
       requireHumanVerificationForStaffBooking: stored.requireHumanVerificationForStaffBooking ?? false,
@@ -712,8 +695,8 @@ router.get("/activities", async (req, res) => {
           || agents.find((item) => item.active);
         if (!attendanceAgent) return res.status(409).json({ error: "Configure an active attendance voice agent before assigning this enquiry." });
         const settings = await repository.getOrganizationCallSettings(organizationId);
-        const fromNumber = settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER;
-        if (!fromNumber) return res.status(409).json({ error: "Configure the default Vobiz caller ID in Settings before assigning this enquiry." });
+        const fromNumber = settings.defaultFromNumber || process.env.CHIEFVOICE_CALLER_ID;
+        if (!fromNumber) return res.status(409).json({ error: "Configure the default ChiefVoice caller ID in Settings before assigning this enquiry." });
         const session = await repository.saveAppointmentAttendanceSchedule({
           inboundCallId: req.params.id, organizationId, staff, attendanceAgent, fromNumber,
         });
@@ -1062,42 +1045,74 @@ router.get("/activities", async (req, res) => {
     } catch (error) { fail(res, error); }
   });
 
-  // Vobiz posts call lifecycle fields here. Treat call IDs as provider data and
-  // resolve them through the repository before updating tenant-owned records.
-  router.post("/webhooks/call-status", async (req, res) => {
+  // ChiefVoice sends a signed callback after the post-call template finishes.
+  // Verify HMAC-SHA256 over the exact raw request body.
+  router.post("/webhooks/chiefvoice", async (req, res) => {
     try {
-      if (!await validateWebhook(req)) return res.status(401).json({ error: "Invalid Vobiz webhook signature" });
-      const providerCallId = req.body?.CallUUID || req.body?.call_uuid || req.body?.RequestUUID;
-      const providerStatus = req.body?.CallStatus || req.body?.status;
-      if (!providerCallId || !providerStatus) return res.status(400).json({ error: "Call ID and call status are required" });
+      const secret = String(process.env.CHIEFVOICE_WEBHOOK_SECRET || "");
+      const supplied = String(req.get("x-chiefvoice-signature") || req.get("x-webhook-signature") || "").replace(/^sha256=/i, "");
+      if (!secret || !req.rawBody || !/^[a-f0-9]{64}$/i.test(supplied)) return res.status(401).json({ error: "Invalid ChiefVoice webhook signature" });
+      const expected = crypto.createHmac("sha256", secret).update(req.rawBody).digest();
+      const received = Buffer.from(supplied, "hex");
+      if (received.length !== expected.length || !crypto.timingSafeEqual(expected, received)) return res.status(401).json({ error: "Invalid ChiefVoice webhook signature" });
+
+      const payload = req.body || {};
+      const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
+      const providerCallId = data.session_id || data.call_id || data.callId || data.id;
+      const postCallResult = data.post_call_result || data.postCallResult || data.post_call?.result || data.result || data.analysis?.result;
+      const rawStatus = data.call_status || data.status || data.state || (postCallResult ? "completed" : "");
+      if (!providerCallId || !rawStatus) return res.status(400).json({ error: "ChiefVoice session/call ID and status are required" });
+      const providerStatus = String(rawStatus).replace(/^call[._-]/i, "").replace(/^post[._-]call[._-]/i, "");
       const result = await repository.updateCallByProviderId({
-        provider: "vobiz",
-        providerCallId,
-        status: providerStatus,
-        durationSeconds: req.body?.DialDuration || req.body?.duration || null,
-        endedAt: req.body?.EndTime || null,
-        rawEvent: req.body || {},
+        provider: "chiefvoice", providerCallId: String(providerCallId), status: providerStatus,
+        durationSeconds: data.duration_seconds || data.duration || null,
+        endedAt: data.ended_at || data.end_time || null,
+        rawEvent: {
+          status: providerStatus,
+          AnswerTime: data.answered_at || data.answer_time || null,
+          EndTime: data.ended_at || data.end_time || null,
+          RecordingUrl: data.recording_url || null,
+        },
       });
-      const status = String(req.body?.CallStatus || req.body?.status || "").toLowerCase().replace(/[\s_-]+/g, "");
-      const terminal = Boolean(req.body?.EndTime || ["completed", "noanswer", "busy", "failed", "timeout", "canceled", "cancelled"].includes(status));
-      if (result?.sessionId && terminal) {
-        if (["completed", "answered"].includes(status)) {
+      if (result?.sessionId) {
+        if (postCallResult && typeof postCallResult === "object") {
+          const outcome = {
+            ...postCallResult,
+            employeeIntent: postCallResult.employeeIntent ?? postCallResult.employee_intent,
+            employeeNameConfirmed: postCallResult.employeeNameConfirmed ?? postCallResult.employee_name_confirmed,
+            patientNameConfirmed: postCallResult.patientNameConfirmed ?? postCallResult.patient_name_confirmed,
+            addressConfirmed: postCallResult.addressConfirmed ?? postCallResult.address_confirmed,
+            employeeVerified: postCallResult.employeeVerified ?? postCallResult.employee_verified,
+            clientVerified: postCallResult.clientVerified ?? postCallResult.client_verified,
+            reachedPatient: postCallResult.reachedPatient ?? postCallResult.reached_patient,
+            dutyComplete: postCallResult.dutyComplete ?? postCallResult.duty_complete,
+            reportedArrivalTime: postCallResult.reportedArrivalTime ?? postCallResult.reported_arrival_time,
+            reportedDepartureTime: postCallResult.reportedDepartureTime ?? postCallResult.reported_departure_time,
+            reportedArrivalTimeMentioned: postCallResult.reportedArrivalTimeMentioned ?? postCallResult.reported_arrival_time_mentioned,
+            reportedDepartureTimeMentioned: postCallResult.reportedDepartureTimeMentioned ?? postCallResult.reported_departure_time_mentioned,
+            requestedCallbackAt: postCallResult.requestedCallbackAt ?? postCallResult.requested_callback_at,
+            exceptionCode: postCallResult.exceptionCode ?? postCallResult.exception_code,
+          };
+          await repository.saveCallOutcome(result.id, outcome);
+          if (typeof data.transcript === "string" && data.transcript.trim()) {
+            const session = await repository.getAttendanceSession(result.sessionId);
+            await repository.saveTranscript({
+              organizationId: result.organizationId || session.organizationId,
+              sessionId: result.sessionId, callAttemptId: result.id,
+              language: data.language || session.language, text: data.transcript,
+            });
+          }
           const session = await repository.getAttendanceSession(result.sessionId);
           const currentStageStatus = result.stage === "check_in" ? session?.checkInStatus : session?.checkOutStatus;
           if (currentStageStatus === "calling") {
             await repository.setStageStatus(result.sessionId, result.stage, "processing", {
-              reason: "call_ended_processing",
-              callAttemptId: result.id,
+              reason: "chiefvoice_post_call_completed", callAttemptId: result.id,
             });
           }
+          await queue.enqueue("extract_intent", { callAttemptId: result.id }, { idempotencyKey: `extract:${result.id}` });
+        } else {
+          await queue.enqueue("process_call_result", { callAttemptId: result.id }, { idempotencyKey: `call-result:${result.id}` });
         }
-        await queue.enqueue("process_call_result", { callAttemptId: result.id }, { idempotencyKey: `call-result:${result.id}` });
-        if (result.recordingUrl || result.recordingObjectKey) {
-          await queue.enqueue("transcribe_call", { callAttemptId: result.id }, { idempotencyKey: `transcribe:${result.id}` });
-        }
-      }
-      if (result?.appointmentCall && terminal && ["noanswer", "busy", "failed", "timeout", "canceled", "cancelled"].includes(status)) {
-        await queue.enqueue("process_appointment_call", { appointmentCallId: result.id }, { idempotencyKey: `appointment-result:${result.id}` });
       }
       res.status(result ? 200 : 404).json({ received: Boolean(result) });
     } catch (error) { fail(res, error); }
