@@ -6,7 +6,6 @@ import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton,
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
-import EventNoteRoundedIcon from "@mui/icons-material/EventNoteRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
