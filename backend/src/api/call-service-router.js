@@ -809,7 +809,7 @@ router.get("/activities", async (req, res) => {
     try {
       const organizationId = org(req);
       const body = req.body || {};
-      const required = ["assignmentId", "agentId", "language", "scheduledStartAt", "scheduledEndAt"];
+      const required = ["assignmentId", "language", "scheduledStartAt", "scheduledEndAt"];
       const missing = required.filter((key) => !body[key]);
       const callingSettings = await getEffectiveCallingSettings(organizationId);
       const fromNumber = body.fromNumber || callingSettings.defaultFromNumber;
@@ -830,8 +830,6 @@ router.get("/activities", async (req, res) => {
       if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
         return res.status(400).json({ error: "scheduledStartAt and scheduledEndAt must be valid, ordered timestamps" });
       }
-      const agent = await repository.getAgent(organizationId, body.agentId);
-      if (!agent?.active) return res.status(400).json({ error: "An active agent in this organization is required" });
       const session = await queue.transaction(async (client) => {
         await repository.assertEmployeeScheduleAvailable({
           organizationId,
@@ -851,7 +849,7 @@ router.get("/activities", async (req, res) => {
         }, client);
         const created = await repository.createAttendanceSession({
           organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
-          agentId: body.agentId, fromNumber, language: body.language,
+          agentId: "chiefvoice", fromNumber, language: body.language,
           employee: { ...body.employee, companyName: employeeCompanyName, phoneNumber: employeePhone },
           patient: { ...body.patient, phoneNumber: patientPhone || undefined }, scheduledStartAt: startAt,
           scheduledEndAt: endAt, metadata: body.metadata || {},
