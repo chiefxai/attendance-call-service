@@ -104,20 +104,7 @@ export function SettingsPage() {
               sx={{ alignItems: "flex-start", m: 0, "& .MuiSwitch-root": { mr: 1 } }}
             />
           </Box>
-          <Box sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
-            <FormControlLabel
-              control={<Switch checked={form.allowNonPatientInboundCalls} disabled={!form.allowInboundCalls} onChange={(_, checked) => setForm((current) => ({ ...current, allowNonPatientInboundCalls: checked }))} />}
-              label={<Box><Typography fontWeight={650}>Allow non-patient incoming calls</Typography><Typography variant="body2" color="text.secondary">When enabled, answer calls from numbers that don’t match a registered patient. When disabled, reject them immediately.</Typography></Box>}
-              sx={{ alignItems: "flex-start", m: 0, "& .MuiSwitch-root": { mr: 1 } }}
-            />
-          </Box>
-          <Box sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
-            <FormControlLabel
-              control={<Switch checked={form.requireHumanVerificationForStaffBooking} onChange={(_, checked) => setForm((current) => ({ ...current, requireHumanVerificationForStaffBooking: checked }))} />}
-              label={<Box><Typography fontWeight={650}>Require human verification for staff booking</Typography><Typography variant="body2" color="text.secondary">When enabled, the system shows suggested staff for a person to review and assign. When disabled, the booking agent calls suggested staff in order and schedules attendance after the first clear acceptance. Cases with no available staff or unclear confirmation still need human review.</Typography></Box>}
-              sx={{ alignItems: "flex-start", m: 0, "& .MuiSwitch-root": { mr: 1 } }}
-            />
-          </Box>
+          <Alert severity="info">Inbound patient calling and automated appointment-agent calls are not enabled in this ChiefVoice attendance integration. Scheduled employee check-in and check-out calls use ChiefVoice.</Alert>
           <Box><Typography variant="h6">No-answer retry policy</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>The retry delay grows exponentially and stops at the configured attempt limit. {settings.data.source.retry === "settings" ? "Workspace override is active." : "Values currently come from .env."}</Typography></Box>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel id="unanswered-escalation-label">After unanswered calls</InputLabel><Select labelId="unanswered-escalation-label" label="After unanswered calls" value={form.unansweredCallEscalation} onChange={(event) => setForm((current) => ({ ...current, unansweredCallEscalation: event.target.value as CallingForm["unansweredCallEscalation"] }))}><MenuItem value="platform_notification">Notify care manager in this app</MenuItem><MenuItem value="call_care_manager">Call the care manager</MenuItem></Select></FormControl></Grid>
