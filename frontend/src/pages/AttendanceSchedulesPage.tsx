@@ -52,7 +52,7 @@ function stageIsDelayed(schedule: AthulyaSchedule, records: AttendanceRecord[], 
 }
 
 function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]): AttendanceStatus {
-  const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\\s_-]/g, "");
+  const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\s_-]/g, "");
   if (["cancelled", "canceled"].includes(externalStatus)) return "cancelled";
 
   const checkInDue = scheduledInstant(schedule.date, schedule.startTime);
