@@ -276,7 +276,7 @@ export function AttendanceSchedulesPage() {
                 <TableCell>
                   <Stack spacing={0.5} alignItems="flex-start">
                     {(() => {
-                      const status = statusesBySchedule.get(schedule.id) || "pending";
+                      const status = statusesBySchedule.get(schedule.id) || "upcoming";
                       return <>
                         <StatusChip status={status} />
                         {delayedBySchedule.get(schedule.id) && <StatusChip status="delayed" />}
