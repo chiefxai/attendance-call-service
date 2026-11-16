@@ -8,7 +8,6 @@ const {
   createPostgresPool,
   PostgresRepository,
   PostgresJobQueue,
-  createVertexClientProvider,
   createMinioRecordingStore,
   loadConfig,
 } = require("./index");
@@ -25,9 +24,8 @@ async function main() {
     defaultMaxAttempts: config.worker.maxAttempts,
     retry: config.worker.retry,
   });
-  const getClientForOrg = createVertexClientProvider();
   const recordings = createMinioRecordingStore();
-  const router = createCallServiceRouter({ express, repository, queue, getClientForOrg, recordings });
+  const router = createCallServiceRouter({ express, repository, queue, recordings });
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
@@ -41,22 +39,9 @@ async function main() {
   });
   app.use("/api/auth", createAuthRouter({ express, repository }));
   // Platform integrations authenticate with service keys; the web UI uses HttpOnly session cookies.
-  app.use("/api/call-service/incoming/answer", (req, res, next) => {
-    const startedAt = process.hrtime.bigint();
-    console.info(`[vobiz-inbound-http] received method=${req.method} contentType=${req.get("content-type") || "unknown"}`);
-    res.once("finish", () => {
-      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-      console.info(`[vobiz-inbound-http] response method=${req.method} status=${res.statusCode} durationMs=${durationMs.toFixed(1)}`);
-    });
-    next();
-  });
   app.use("/api/call-service", router);
 
   const server = http.createServer(app);
-  server.on("upgrade", (request, socket, head) => {
-    const handled = router.handleVobizUpgrade(request, socket, head);
-    if (!handled) socket.destroy();
-  });
   server.on("error", (error) => console.error("[attendance-api] server error", error.message));
   pool.on("error", (error) => console.error("[attendance-api] postgres pool error", error.message));
 
@@ -74,7 +59,6 @@ async function main() {
     stopping = true;
     console.log(`[attendance-api] received ${signal}; shutting down`);
     server.close(async () => {
-      router.closeVobizLiveRuntime();
       await pool.end();
       process.exit(0);
     });
