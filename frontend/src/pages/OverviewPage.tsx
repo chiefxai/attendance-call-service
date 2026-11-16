@@ -8,7 +8,7 @@ import HowToRegRoundedIcon from "@mui/icons-material/HowToRegRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import CrisisAlertRoundedIcon from "@mui/icons-material/CrisisAlertRounded";
 import CallRoundedIcon from "@mui/icons-material/CallRounded";
-import { fetchAgents, fetchAttendance, fetchCareManagerNotifications, fetchOperationsSummary, markCareManagerNotificationRead, type AttendanceRecord, type OperationsSummary } from "../api/client";
+import { fetchAttendance, fetchCareManagerNotifications, fetchOperationsSummary, markCareManagerNotificationRead, type AttendanceRecord, type OperationsSummary } from "../api/client";
 import { AttendanceStatusChart, AttendanceTrendChart, LanguageOutcomeChart, RetryVolumeChart, type AttendanceChartStatus } from "../components/BusinessCharts";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 
@@ -80,7 +80,6 @@ export function OverviewPage({ showAgents = false, userRole = "admin", embedded 
   const navigate = useNavigate();
   const [sessionId, setSessionId] = useState("");
   const [drilldown, setDrilldown] = useState<{ title: string; records: AttendanceRecord[] } | null>(null);
-  const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: fetchAgents });
   const summaryQuery = useQuery({ queryKey: ["operations-summary"], queryFn: fetchOperationsSummary, refetchInterval: 15_000 });
   const attendanceQuery = useQuery({ queryKey: ["attendance", "recent"], queryFn: () => fetchAttendance({ limit: 500 }), refetchInterval: 15_000 });
   const queryClient = useQueryClient();
@@ -103,16 +102,6 @@ export function OverviewPage({ showAgents = false, userRole = "admin", embedded 
     const attempts = record.callAttemptCount || 0;
     return bucket === "0" ? attempts === 0 : bucket === "1–2" ? attempts >= 1 && attempts <= 2 : bucket === "3–4" ? attempts >= 3 && attempts <= 4 : attempts >= 5;
   });
-
-  if (showAgents) return <Stack spacing={3}>
-    <PageHeader eyebrow="AI OPERATIONS" title="Calling agents" description="Agents configured for this authenticated workspace." />
-    {agentsQuery.isError && <Alert severity="error">Could not load agents: {agentsQuery.error.message}</Alert>}
-    <SectionCard title="Configured agents" subtitle="Agent configuration is managed through the backend API.">
-      {agentsQuery.isLoading ? <LinearProgress /> : null}
-      {agentsQuery.isSuccess && agentsQuery.data.length === 0 ? <Alert severity="info">No agents are configured yet. Create an agent through the backend before scheduling assignments.</Alert> : null}
-      {agentsQuery.data?.map((agent) => <Stack key={agent.id} direction="row" justifyContent="space-between" alignItems="center" sx={{ borderTop: "1px solid #edf0f4", py: 1.7 }}><Box><Typography fontWeight={700}>{agent.name}</Typography><Typography variant="body2" color="text.secondary">{agent.language.toUpperCase()} · {agent.voice || "Default voice"}</Typography></Box><StatusChip status={agent.active ? "active" : "inactive"} /></Stack>)}
-    </SectionCard>
-  </Stack>;
 
   const metrics = [
     { label: "Scheduled today", value: metricValue(summary?.scheduledToday), detail: "Assignments scheduled for today · click to view", icon: <GroupRoundedIcon />, onClick: () => openRecords("Scheduled today", (record) => dateKey(record.scheduledStartAt) === todayKey) },
