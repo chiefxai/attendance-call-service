@@ -77,8 +77,8 @@ function chooseAttendanceAction(stage, outcome = {}) {
   return { action: "review", reason: "invalid_stage" };
 }
 
-function createAttendanceHandlers({ repository, queue, vobiz, recordings, transcriber, postCallAgent, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
-  const required = { repository, queue, vobiz, recordings, transcriber, postCallAgent, backend };
+function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, transcriber, postCallAgent, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
+  const required = { repository, queue, chiefvoice, recordings, transcriber, postCallAgent, backend };
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
   const taskFor = (session, stage) => stage === "check_in" ? session?.checkInTask : session?.checkOutTask;
@@ -125,17 +125,25 @@ function createAttendanceHandlers({ repository, queue, vobiz, recordings, transc
     await repository.setStageStatus(sessionId, stage, "calling", { currentCallAttemptId: attempt.id, attemptNumber });
     const person = session.employee || {};
     try {
-      const call = await vobiz.createCall({
+      const callContext = {
+        employee: { name: person.name || person.fullName || "", phone_number: person.phoneNumber },
+        patient: { name: session.patient?.name || "", address: session.patient?.address || "" },
+        assignment: session.assignmentMetadata || {},
+        schedule: { start_at: session.scheduledStartAt, end_at: session.scheduledEndAt },
+        language: session.language,
+        organization_id: session.organizationId,
+      };
+      const call = await chiefvoice.createOutboundCall({
         to: person.phoneNumber,
         from: agent.fromNumber || session.fromNumber,
-        agentId: agent.id,
         sessionId,
         stage,
         callAttemptId: attempt.id,
+        context: callContext,
       });
-      const providerCallId = call.call_uuid || call.request_uuid;
-      if (!providerCallId) throw new Error("Vobiz response did not include a call ID; reconcile before retrying");
-      await repository.attachProviderCallId(attempt.id, providerCallId, call);
+      const providerCallId = call.session_id || call.call_id || call.id;
+      if (!providerCallId) throw new Error("ChiefVoice response did not include session_id; reconcile before retrying");
+      await repository.attachProviderCallId(attempt.id, providerCallId, call, "chiefvoice");
     } catch (error) {
       // A timeout may mean Vobiz accepted the request but its response was
       // lost. Do not blindly redial; mark the placement for reconciliation.
