@@ -370,21 +370,6 @@ export interface CareActivity {
   updatedAt: string;
 }
 
-export interface AgentLanguagePrompt {
-  dialect: string;
-  systemPrompt: string;
-}
-
-export interface Agent {
-  id: string;
-  name: string;
-  active: boolean;
-  language: string;
-  voice?: string | null;
-  systemPrompt?: string;
-  languagePrompts?: Record<string, AgentLanguagePrompt>;
-}
-
 export interface AssignmentPayload {
   assignmentId: string;
   fromNumber?: string;
@@ -673,21 +658,6 @@ export function incomingCallRecordingUrl(id: string) {
 
 export function appointmentCallRecordingUrl(id: string, attemptId: string) {
   return `${api.defaults.baseURL || "/api/call-service"}/incoming-calls/${encodeURIComponent(id)}/appointment-attempts/${encodeURIComponent(attemptId)}/recording`;
-}
-
-export async function fetchAgents() {
-  const response = await api.get<Agent[]>("/agents");
-  return response.data;
-}
-
-export async function createAgent(agent: Pick<Agent, "name" | "language" | "voice" | "systemPrompt" | "languagePrompts">) {
-  const response = await api.post<Agent>("/agents", agent);
-  return response.data;
-}
-
-export async function updateAgent(agentId: string, update: Pick<Agent, "name" | "language" | "voice" | "systemPrompt" | "languagePrompts">) {
-  const response = await api.patch<Agent>(`/agents/${agentId}`, update);
-  return response.data;
 }
 
 export interface EmployeeScheduleOverlap {
