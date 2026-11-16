@@ -44,13 +44,13 @@ function scheduleFor(date) {
     branch: "Mock Chennai Branch",
     care_plan: "Mock test data",
     active_service_status: "long_term",
-    // Completed fixtures are imported for display and connection testing,
-    // but cannot enqueue outbound Vobiz calls.
+    // Keep the fixture completed so a mock sync imports the caregiver and schedule
+    // without queuing real outbound calls to the test phone number.
     schedule_status: "Completed",
-    caregiver_schedule_status: "",
-    caregiver_ids: "",
-    caregiver_names: "",
-    caregiver_phones: "",
+    caregiver_schedule_status: "Assigned",
+    caregiver_ids: "MOCK-CAREGIVER-001",
+    caregiver_names: "Mock Caregiver",
+    caregiver_phones: "+916384670687",
     vendor_company: "ATHULYA",
   };
 }
