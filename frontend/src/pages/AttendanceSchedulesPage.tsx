@@ -278,13 +278,9 @@ export function AttendanceSchedulesPage() {
                     {(() => {
                       const status = statusesBySchedule.get(schedule.id) || "pending";
                       const stageRecords = matchingAttendance(schedule, attendance.data || []);
-                      const hasNotAnswered = stageRecords.some((record) => record.checkIn.status === "not_answered" || record.checkOut.status === "not_answered");
-                      const hasReview = stageRecords.some((record) => record.checkIn.status === "review" || record.checkOut.status === "review");
                       return <>
                         <StatusChip status={status} />
-                        {hasNotAnswered && status !== "not_answered" && <StatusChip status="not_answered" />}
-                        {hasReview && status !== "review" && <StatusChip status="review" />}
-                        {delayedBySchedule.get(schedule.id) && !["delayed", "not_placed"].includes(status) && <StatusChip status="delayed" />}
+                        {delayedBySchedule.get(schedule.id) && <StatusChip status="delayed" />}
                       </>;
                     })()}
                     {delayedBySchedule.get(schedule.id) && nextCallBySchedule.get(schedule.id) && <Typography variant="caption" color="error.main">Next call {dateTimeLabel(nextCallBySchedule.get(schedule.id))}</Typography>}
