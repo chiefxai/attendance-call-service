@@ -14,6 +14,7 @@ import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
 import SupervisorAccountRoundedIcon from "@mui/icons-material/SupervisorAccountRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
+import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { CallCenterPage } from "./pages/CallCenterPage";
@@ -28,6 +29,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { CareManagersPage } from "./pages/CareManagersPage";
 import { OperationsPage } from "./pages/OperationsPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
+import MockSchedulesPage from "./pages/MockSchedulesPage";
 import { fetchCurrentUser, signOut, type WebUser } from "./api/client";
 
 const drawerWidth = 252;
@@ -37,6 +39,7 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Care Givers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
+  { label: "Mock schedules", path: "/mock-schedules", icon: <ScienceRoundedIcon />, adminOnly: true },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
@@ -112,6 +115,7 @@ function App() {
         <Routes>
           <Route path="/" element={<OperationsPage userRole={user.role} />} />
           <Route path="/attendance" element={<AttendanceSchedulesPage />} />
+          <Route path="/mock-schedules" element={user.role === "admin" ? <MockSchedulesPage /> : <Navigate to="/" replace />} />
           <Route path="/scheduled-calls" element={user.role === "admin" ? <ScheduledCallsPage /> : <Navigate to="/" replace />} />
           <Route path="/schedules" element={<AttendanceSchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
