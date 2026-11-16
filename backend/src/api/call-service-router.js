@@ -297,6 +297,30 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     } catch (error) { fail(res, error); }
   });
 
+  const proxyMockScheduleRequest = async (req, res, method, scheduleId = null) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const setting = await repository.getMockPlatformServerSettings(org(req));
+      if (!setting.enabled) return res.status(409).json({ error: "Enable the mock test server before managing mock schedules." });
+      const key = String(process.env.ATHULYA_MOCK_API_KEY || "");
+      const base = String(process.env.MOCK_PLATFORM_UPSTREAM_URL || "");
+      if (!key || !base) return res.status(503).json({ error: "Mock server credentials or upstream URL are not configured." });
+      const suffix = scheduleId ? `/${encodeURIComponent(scheduleId)}` : "";
+      const upstream = await fetch(`${base}/mock/schedules${suffix}`, {
+        method,
+        headers: { "x-api-key": key, accept: "application/json", ...(method !== "GET" && method !== "DELETE" ? { "content-type": "application/json" } : {}) },
+        ...(method !== "GET" && method !== "DELETE" ? { body: JSON.stringify(req.body || {}) } : {}),
+        signal: AbortSignal.timeout(10000),
+      });
+      const responseText = await upstream.text();
+      res.status(upstream.status).set("Content-Type", upstream.headers.get("content-type") || "application/json").set("Cache-Control", "no-store").send(responseText);
+    } catch (error) { fail(res, error); }
+  };
+  router.get("/mock-schedules", (req, res) => proxyMockScheduleRequest(req, res, "GET"));
+  router.post("/mock-schedules", (req, res) => proxyMockScheduleRequest(req, res, "POST"));
+  router.put("/mock-schedules/:id", (req, res) => proxyMockScheduleRequest(req, res, "PUT", req.params.id));
+  router.delete("/mock-schedules/:id", (req, res) => proxyMockScheduleRequest(req, res, "DELETE", req.params.id));
+
   router.get("/integrations/athulya", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
