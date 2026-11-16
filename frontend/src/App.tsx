@@ -124,8 +124,6 @@ function App() {
           <Route path="/reports" element={<Navigate to="/?view=reports" replace />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
-          <Route path="/enquiries" element={<Navigate to="/" replace />} />
-          <Route path="/care-activities" element={<Navigate to="/" replace />} />
           <Route path="/care-managers" element={user.role === "admin" ? <CareManagersPage /> : <Navigate to="/" replace />} />
           <Route path="/assignments/new" element={<Navigate to="/attendance" replace />} />
           <Route path="/settings" element={user.role === "admin" ? <SettingsPage /> : <Navigate to="/" replace />} />

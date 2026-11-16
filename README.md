@@ -74,4 +74,4 @@ In a second terminal, run `npm run worker`.
 
 - Do not commit `.env`, API keys, webhook signing secrets, or provider credentials.
 - Configure the live and post-call prompts in ChiefVoice templates; this service only supplies per-call context and the structured output schema.
-- The former Vobiz media/webhook runtime and local Gemini/Vertex agent pipeline have been removed. Legacy inbound patient-call and appointment-agent processing is not part of this ChiefVoice attendance flow.
+- The former Vobiz media/webhook runtime and local Gemini/Vertex agent pipeline have been removed. ChiefVoice is used for outbound attendance calls only.

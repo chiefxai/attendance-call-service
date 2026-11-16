@@ -82,13 +82,6 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     if (!visible) res.status(404).json({ error: "Assignment session not found" });
     return visible;
   };
-  const assertInboundVisible = async (req, callId, res) => {
-    const managerId = careManagerScope(req);
-    if (!managerId) return true;
-    const visible = await repository.isInboundCallVisibleToCareManager(org(req), callId, managerId);
-    if (!visible) res.status(404).json({ error: "Incoming call not found" });
-    return visible;
-  };
   const fail = (res, error) => res.status(error.status || 500).json({ error: error.message || "Request failed" });
   const envNumber = (name, fallback) => process.env[name] !== undefined && process.env[name] !== "" && Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback;
   const getEffectiveCallingSettings = async (organizationId) => {
@@ -96,9 +89,6 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     const storedRetry = stored.callRetry || {};
     return {
       defaultFromNumber: stored.defaultFromNumber ?? process.env.CHIEFVOICE_CALLER_ID ?? "",
-      allowInboundCalls: stored.allowInboundCalls ?? true,
-      allowNonPatientInboundCalls: stored.allowNonPatientInboundCalls ?? false,
-      requireHumanVerificationForStaffBooking: stored.requireHumanVerificationForStaffBooking ?? false,
       unansweredCallEscalation: stored.unansweredCallEscalation ?? "call_care_manager",
       retry: {
         maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 3),
@@ -601,162 +591,6 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     } catch (error) { fail(res, error); }
   });
 
-  function serializeIncomingCall(call, appointmentCalls = []) {
-    const hasRecording = Boolean(call.recordingObjectKey);
-    const hasTranscript = Boolean(call.transcript?.trim());
-    const terminalStatus = ["failed", "no_answer", "canceled", "cancelled"].includes(call.status);
-    const status = terminalStatus ? call.status
-      : (["ringing", "in_progress"].includes(call.status) || !hasRecording || !hasTranscript ? "processing" : "ready");
-    return {
-      id: call.id, status, fromNumber: call.fromNumber, patient: call.patient || null,
-      language: call.language, startedAt: call.startedAt, answeredAt: call.answeredAt,
-      endedAt: call.endedAt, durationSeconds: call.durationSeconds,
-      hasRecording, hasTranscript, transcript: call.transcript || null,
-      transcriptLanguage: call.transcriptLanguage || null,
-      enquiryStatus: call.enquiryStatus,
-      resolvedStaff: call.resolvedStaff || null,
-      resolvedAt: call.resolvedAt || null,
-      enquiryAnalysisStatus: call.enquiryAnalysisStatus || "pending",
-      enquiryAnalysis: call.enquiryAnalysis || {},
-      staffSuggestions: call.staffSuggestions || [],
-      bookingStatus: call.bookingStatus || "not_started",
-      bookingStaff: call.bookingStaff || null,
-      bookingScheduleSessionId: call.bookingScheduleSessionId || null,
-      appointmentCalls,
-    };
-  }
-
-router.get("/activities", async (req, res) => {
-    try { res.set("Cache-Control", "private, no-store").json(await repository.listCareActivities(org(req), { includeInactive: req.query.includeInactive === "true" })); }
-    catch (error) { fail(res, error); }
-  });
-
-  router.post("/activities", async (req, res) => {
-    const name = String(req.body?.name || "").trim();
-    const description = String(req.body?.description || "").trim();
-    const durationMinutes = Number(req.body?.durationMinutes);
-    const rawAliases = req.body?.aliases ?? [];
-    if (!Array.isArray(rawAliases) || rawAliases.length > 30 || rawAliases.some((alias) => typeof alias !== "string" || !alias.trim() || alias.trim().length > 120)) return res.status(400).json({ error: "Aliases must be up to 30 non-empty names, each at most 120 characters." });
-    const aliases = [...new Map(rawAliases.map((alias) => [alias.trim().toLocaleLowerCase(), alias.trim()])).values()];
-    if (!name || name.length > 120) return res.status(400).json({ error: "Activity name is required and must be at most 120 characters." });
-    if (description.length > 500) return res.status(400).json({ error: "Description must be at most 500 characters." });
-    if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
-    try { return res.status(201).json(await repository.createCareActivity(org(req), { name, aliases, description, durationMinutes })); }
-    catch (error) {
-      if (error.code === "23505") return res.status(409).json({ error: "An activity with this name already exists." });
-      return fail(res, error);
-    }
-  });
-
-  router.put("/activities/:id", async (req, res) => {
-    const name = String(req.body?.name || "").trim();
-    const description = String(req.body?.description || "").trim();
-    const durationMinutes = Number(req.body?.durationMinutes);
-    const rawAliases = req.body?.aliases ?? [];
-    if (!Array.isArray(rawAliases) || rawAliases.length > 30 || rawAliases.some((alias) => typeof alias !== "string" || !alias.trim() || alias.trim().length > 120)) return res.status(400).json({ error: "Aliases must be up to 30 non-empty names, each at most 120 characters." });
-    const aliases = [...new Map(rawAliases.map((alias) => [alias.trim().toLocaleLowerCase(), alias.trim()])).values()];
-    if (!name || name.length > 120) return res.status(400).json({ error: "Activity name is required and must be at most 120 characters." });
-    if (description.length > 500) return res.status(400).json({ error: "Description must be at most 500 characters." });
-    if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) return res.status(400).json({ error: "Duration must be between 1 and 10080 minutes." });
-    if (req.body?.active !== undefined && typeof req.body.active !== "boolean") return res.status(400).json({ error: "active must be a boolean." });
-    try {
-      const activity = await repository.updateCareActivity(org(req), req.params.id, { name, aliases, description, durationMinutes, active: req.body?.active });
-      if (!activity) return res.status(404).json({ error: "Activity not found." });
-      return res.json(activity);
-    } catch (error) {
-      if (error.code === "23505") return res.status(409).json({ error: "An activity with this name already exists." });
-      return fail(res, error);
-    }
-  });
-
-    router.get("/incoming-calls", async (req, res) => {
-    try {
-      const calls = await repository.listInboundCalls(org(req), req.query.limit || 100, careManagerScope(req));
-      res.json(await Promise.all(calls.map(async (call) => serializeIncomingCall(
-        call, await repository.listAppointmentCallAttempts(call.id, org(req)),
-      ))));
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/incoming-calls/:id", async (req, res) => {
-    try {
-      const call = await repository.getInboundCall(req.params.id, org(req));
-      if (!call || !await assertInboundVisible(req, req.params.id, res)) return;
-      res.json(serializeIncomingCall(call, await repository.listAppointmentCallAttempts(call.id, org(req))));
-    } catch (error) { fail(res, error); }
-  });
-
-  router.post("/incoming-calls/:id/resolve", async (req, res) => {
-    try {
-      const body = req.body || {};
-      if (Object.keys(body).some((key) => key !== "staffId")) {
-        return res.status(400).json({ error: "Only staffId is accepted; enquiry status is controlled by the system." });
-      }
-      const staffId = String(body.staffId || "").trim();
-      if (!staffId) return res.status(400).json({ error: "Choose a staff member to resolve this enquiry." });
-      const organizationId = org(req);
-      const pendingCall = await repository.getInboundCall(req.params.id, organizationId);
-      if (!pendingCall || !await assertInboundVisible(req, req.params.id, res)) return;
-      const analysis = pendingCall.enquiryAnalysis || {};
-      const requestedStart = new Date(analysis.requestedStartAt || "");
-      const requestedEnd = new Date(analysis.requestedEndAt || "");
-      const canSchedule = Boolean(analysis.activityId && Number.isFinite(requestedStart.getTime())
-        && (Number.isFinite(requestedEnd.getTime()) || Number(analysis.durationMinutes) > 0));
-      if (canSchedule) {
-        const staff = await repository.getActiveStaffDirectoryRecord(organizationId, staffId);
-        if (!staff) return res.status(400).json({ error: "Selected staff member is not active in this organization." });
-        if (!staff.phoneNumber) return res.status(400).json({ error: "Selected staff member has no registered phone number." });
-        const attendanceAgent = { id: "chiefvoice", language: staff.language || pendingCall.language || "en" };
-        const settings = await repository.getOrganizationCallSettings(organizationId);
-        const fromNumber = settings.defaultFromNumber || process.env.CHIEFVOICE_CALLER_ID;
-        if (!fromNumber) return res.status(409).json({ error: "Configure the default ChiefVoice caller ID in Settings before assigning this enquiry." });
-        const session = await repository.saveAppointmentAttendanceSchedule({
-          inboundCallId: req.params.id, organizationId, staff, attendanceAgent, fromNumber,
-        });
-        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkInTask?.id, stage: "check_in", attemptNumber: 1 }, {
-          idempotencyKey: `call:${session.id}:check_in:1`, runAt: new Date(session.scheduledStartAt),
-        });
-        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkOutTask?.id, stage: "check_out", attemptNumber: 1 }, {
-          idempotencyKey: `call:${session.id}:check_out:1`, runAt: new Date(session.scheduledEndAt),
-        });
-        const updated = await repository.getInboundCall(req.params.id, organizationId);
-        return res.json({ id: updated.id, enquiryStatus: updated.enquiryStatus, resolvedStaff: updated.resolvedStaff,
-          resolvedAt: updated.resolvedAt, bookingStatus: updated.bookingStatus, bookingScheduleSessionId: session.id });
-      }
-      const call = await repository.resolveInboundEnquiry(req.params.id, organizationId, staffId);
-      if (!call) return res.status(404).json({ error: "Incoming call not found" });
-      res.json({ id: call.id, enquiryStatus: call.enquiryStatus, resolvedStaff: call.resolvedStaff, resolvedAt: call.resolvedAt });
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/incoming-calls/:id/recording", async (req, res) => {
-    try {
-      const call = await repository.getInboundCall(req.params.id, org(req));
-      if (!call || !await assertInboundVisible(req, req.params.id, res)) return;
-      if (!call.recordingObjectKey) return res.status(404).json({ error: "Recording not found" });
-      const audio = await recordings.getObjectBuffer(call.recordingObjectKey);
-      res.set("Content-Type", call.recordingContentType || "audio/wav");
-      res.set("Content-Disposition", `inline; filename="${call.id}.wav"`);
-      res.set("Cache-Control", "private, no-store");
-      res.send(audio);
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/incoming-calls/:id/appointment-attempts/:attemptId/recording", async (req, res) => {
-    try {
-      const call = await repository.getInboundCall(req.params.id, org(req));
-      const attempt = await repository.getAppointmentCallAttempt(req.params.attemptId);
-      if (!call || !await assertInboundVisible(req, req.params.id, res) || !attempt || attempt.inboundCallId !== call.id || attempt.organizationId !== org(req) || !attempt.recordingObjectKey) {
-        return res.status(404).json({ error: "Appointment call recording not found" });
-      }
-      const audio = await recordings.getObjectBuffer(attempt.recordingObjectKey);
-      res.set("Content-Type", attempt.recordingContentType || "audio/wav");
-      res.set("Content-Disposition", `inline; filename="appointment-${attempt.id}.wav"`);
-      res.set("Cache-Control", "private, no-store");
-      res.send(audio);
-    } catch (error) { fail(res, error); }
-  });
-
   router.get("/settings/calling", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try { res.set("Cache-Control", "private, no-store").json(await getEffectiveCallingSettings(org(req))); }
@@ -774,15 +608,6 @@ router.get("/activities", async (req, res) => {
       }
       const retry = body.retry;
       if (!retry || typeof retry !== "object") return res.status(400).json({ error: "retry settings are required" });
-      if (body.allowNonPatientInboundCalls !== undefined && typeof body.allowNonPatientInboundCalls !== "boolean") {
-        return res.status(400).json({ error: "allowNonPatientInboundCalls must be a boolean" });
-      }
-      if (body.allowInboundCalls !== undefined && typeof body.allowInboundCalls !== "boolean") {
-        return res.status(400).json({ error: "allowInboundCalls must be a boolean" });
-      }
-      if (body.requireHumanVerificationForStaffBooking !== undefined && typeof body.requireHumanVerificationForStaffBooking !== "boolean") {
-        return res.status(400).json({ error: "requireHumanVerificationForStaffBooking must be a boolean" });
-      }
       if (body.unansweredCallEscalation !== undefined && !["platform_notification", "call_care_manager"].includes(body.unansweredCallEscalation)) {
         return res.status(400).json({ error: "unansweredCallEscalation must be platform_notification or call_care_manager" });
       }
@@ -800,9 +625,6 @@ router.get("/activities", async (req, res) => {
       await repository.saveOrganizationCallSettings(organizationId, {
         defaultFromNumber,
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
-        allowInboundCalls: body.allowInboundCalls ?? existingSettings.allowInboundCalls ?? true,
-        allowNonPatientInboundCalls: body.allowNonPatientInboundCalls ?? existingSettings.allowNonPatientInboundCalls ?? false,
-        requireHumanVerificationForStaffBooking: body.requireHumanVerificationForStaffBooking ?? existingSettings.requireHumanVerificationForStaffBooking ?? false,
         unansweredCallEscalation: body.unansweredCallEscalation ?? existingSettings.unansweredCallEscalation ?? "call_care_manager",
       });
       res.json(await getEffectiveCallingSettings(organizationId));
@@ -813,7 +635,7 @@ router.get("/activities", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, allowInboundCalls: true, allowNonPatientInboundCalls: false, requireHumanVerificationForStaffBooking: false, unansweredCallEscalation: "call_care_manager" });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, unansweredCallEscalation: "call_care_manager" });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });

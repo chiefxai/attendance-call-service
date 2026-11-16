@@ -94,25 +94,6 @@ async function main() {
   const autoSyncTimer = setInterval(() => { void scheduleAthulyaSyncs(); }, autoSyncIntervalMs);
   autoSyncTimer.unref?.();
   void scheduleAthulyaSyncs();
-  async function purgeExpiredInboundCalls() {
-    const expired = await repository.listExpiredInboundCalls(100);
-    for (const call of expired) {
-      try {
-        if (call.recordingObjectKey) await recordings.deleteObject(call.recordingObjectKey);
-        for (const key of call.appointmentRecordingKeys || []) await recordings.deleteObject(key);
-        await repository.deleteExpiredInboundCall(call.id);
-        console.info(`[attendance-worker] purged expired inbound call ${call.id}`);
-      } catch (error) {
-        console.error(`[attendance-worker] inbound retention purge failed call=${call.id}`, error.message);
-      }
-    }
-  }
-  const retentionIntervalMs = Number(process.env.RETENTION_SCAN_INTERVAL_MS);
-  const retentionTimer = setInterval(() => purgeExpiredInboundCalls().catch((error) => {
-    console.error("[attendance-worker] inbound retention scan failed", error.message);
-  }), Number.isSafeInteger(retentionIntervalMs) && retentionIntervalMs >= 60_000 ? retentionIntervalMs : 60 * 60 * 1000);
-  retentionTimer.unref?.();
-  void purgeExpiredInboundCalls().catch((error) => console.error("[attendance-worker] inbound retention scan failed", error.message));
   pool.on("error", (error) => console.error("[attendance-worker] postgres pool error", error.message));
   console.log(`[attendance-worker] started ${worker.workerIds.length} consumers`);
   const reconcileIntervalMs = Math.max(1_000, Number(process.env.OVERDUE_CALL_RECONCILE_INTERVAL_MS) || 15_000);
@@ -175,7 +156,6 @@ async function main() {
     clearInterval(overdueCallTimer);
     clearInterval(autoSyncTimer);
     console.log(`[attendance-worker] received ${signal}; shutting down`);
-    clearInterval(retentionTimer);
     await worker.stop();
     await pool.end();
     process.exit(0);

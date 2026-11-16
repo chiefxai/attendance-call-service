@@ -352,67 +352,6 @@ export interface SessionArtifacts {
   logs: SessionAuditLog[];
 }
 
-export interface IncomingPatientCall {
-  id: string;
-  status: "processing" | "ready" | "failed" | "no_answer" | "canceled" | "cancelled";
-  fromNumber: string;
-  patient: { id?: string | null; name?: string | null; phoneNumber?: string | null; address?: string | null; careCategory?: string | null; hub?: string | null } | null;
-  language: string;
-  startedAt: string;
-  answeredAt: string | null;
-  endedAt: string | null;
-  durationSeconds: number | null;
-  enquiryStatus: "processing" | "need_review" | "suggestion" | "shortage" | "resolved";
-  resolvedStaff: { id: string; name: string; phoneNumber: string | null; address: string; language: string } | null;
-  resolvedAt: string | null;
-  hasRecording: boolean;
-  hasTranscript: boolean;
-  transcript: string | null;
-  transcriptLanguage: string | null;
-  enquiryAnalysisStatus: "pending" | "processing" | "complete" | "needs_details" | "failed";
-  enquiryAnalysis: {
-    activityId?: string | null;
-    activityName?: string | null;
-    durationMinutes?: number | null;
-    timeZone?: string | null;
-    requestedLocalDate?: string | null;
-    requestedLocalTime?: string | null;
-    requestedStartAt?: string | null;
-    requestedEndAt?: string | null;
-    needsSummary?: string;
-    requiresHumanFollowUp?: boolean;
-    missingDetails?: string[];
-  };
-  staffSuggestions: Array<{
-    id: string;
-    name: string;
-    phoneNumber: string | null;
-    address: string;
-    language: string;
-    locationMatch: "same_district" | "same_region" | "other_region";
-  }>;
-  bookingStatus: "not_started" | "calling" | "scheduled" | "not_answered" | "no_staff_available" | "needs_review";
-  bookingStaff: { id: string; name: string; phoneNumber: string; address?: string; language?: string } | null;
-  bookingScheduleSessionId: string | null;
-  appointmentCalls: Array<{
-    id: string; candidateIndex: number; staff: { id: string; name: string; phoneNumber: string | null; address?: string };
-    providerCallId: string | null; status: string; answeredAt: string | null; endedAt: string | null;
-    durationSeconds: number | null; transcript: string | null; outcome: Record<string, unknown>; recordingObjectKey: string | null;
-  }>;
-}
-export type IncomingCall = IncomingPatientCall;
-
-export interface CareActivity {
-  id: string;
-  name: string;
-  aliases: string[];
-  description: string;
-  durationMinutes: number;
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface AssignmentPayload {
   assignmentId: string;
   fromNumber?: string;
@@ -448,9 +387,6 @@ export interface AttendanceRecord {
 
 export interface CallingSettings {
   defaultFromNumber: string;
-  allowInboundCalls: boolean;
-  allowNonPatientInboundCalls: boolean;
-  requireHumanVerificationForStaffBooking: boolean;
   unansweredCallEscalation: "platform_notification" | "call_care_manager";
   retry: {
     maxConsecutiveNoAnswer: number;
@@ -667,40 +603,6 @@ export async function fetchAttendanceLedger(params: { search?: string; limit?: n
 export async function fetchCallCenterData() {
   const response = await api.get<CallCenterData>("/call-center");
   return response.data;
-}
-
-export async function fetchCareActivities(includeInactive = true) {
-  const response = await api.get<CareActivity[]>("/activities", { params: { includeInactive } });
-  return response.data;
-}
-
-export async function createCareActivity(activity: Pick<CareActivity, "name" | "aliases" | "description" | "durationMinutes">) {
-  const response = await api.post<CareActivity>("/activities", activity);
-  return response.data;
-}
-
-export async function updateCareActivity(id: string, activity: Pick<CareActivity, "name" | "aliases" | "description" | "durationMinutes" | "active">) {
-  const response = await api.put<CareActivity>("/activities/" + encodeURIComponent(id), activity);
-  return response.data;
-}
-export async function fetchIncomingCalls(limit = 100) {
-  const response = await api.get<IncomingPatientCall[]>("/incoming-calls", { params: { limit } });
-  return response.data;
-}
-
-export async function resolveIncomingEnquiry(id: string, staffId: string) {
-  const response = await api.post<{ id: string; enquiryStatus: IncomingCall["enquiryStatus"]; resolvedStaff: NonNullable<IncomingCall["resolvedStaff"]>; resolvedAt: string; bookingStatus?: IncomingCall["bookingStatus"]; bookingScheduleSessionId?: string | null }>(
-    `/incoming-calls/${encodeURIComponent(id)}/resolve`, { staffId },
-  );
-  return response.data;
-}
-
-export function incomingCallRecordingUrl(id: string) {
-  return `${api.defaults.baseURL || "/api/call-service"}/incoming-calls/${encodeURIComponent(id)}/recording`;
-}
-
-export function appointmentCallRecordingUrl(id: string, attemptId: string) {
-  return `${api.defaults.baseURL || "/api/call-service"}/incoming-calls/${encodeURIComponent(id)}/appointment-attempts/${encodeURIComponent(attemptId)}/recording`;
 }
 
 export interface EmployeeScheduleOverlap {

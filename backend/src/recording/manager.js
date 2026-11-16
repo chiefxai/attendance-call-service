@@ -149,7 +149,7 @@ function createCallRecorder({
     const out = Buffer.alloc(mixed.length * 2);
     for (let i = 0; i < mixed.length; i++) {
       // Average only the tracks that are actually present at this sample.
-      // A single-sided inbound call therefore keeps full volume instead of
+      // A single-sided call therefore keeps full volume instead of
       // being unnecessarily attenuated, while overlapping caller/agent
       // speech cannot clip the 16-bit output.
       const count = contributors[i] || 1;

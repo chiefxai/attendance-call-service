@@ -118,8 +118,8 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
     <SectionCard title="Documentation sections" subtitle="Choose a topic, then follow the endpoint examples below.">
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
         {[
-          ["#auth", "Authentication"], ["#directory", "Staff & patients"], ["#activities", "Care activities"],
-          ["#assignments", "Assignments"], ["#session-data", "Session data"], ["#enquiries", "Patient enquiries"],
+          ["#auth", "Authentication"], ["#directory", "Staff & patients"],
+          ["#assignments", "Assignments"], ["#session-data", "Session data"],
           ["#callbacks", "Completion callback"], ["#errors", "Errors & retries"],
         ].map(([href, label]) => <Button key={href} size="small" variant="outlined" href={href}>{label}</Button>)}
       </Stack>
@@ -153,21 +153,6 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
           </Grid>
         </Grid>
         <Typography variant="caption" color="text.secondary">Staff IDs and patient IDs must be unique within the organization. Indian phone numbers may be entered as 10 digits (9876543210), with the country code 91 (919876543210), or +91 (+919876543210); the service validates and normalizes them to +91 followed by 10 digits. Patient phone number is optional. Supported languages are English, Tamil, Malayalam, and Telugu.</Typography>
-      </Stack>
-    </SectionCard>
-    </Box>
-
-    <Box id="activities" sx={{ scrollMarginTop: 100 }}>
-    <SectionCard title="Manage care activities" subtitle="Define activity names, aliases and standard durations used to interpret patient requests and find staff availability.">
-      <Stack spacing={1.25}>
-        <Typography variant="body2"><Box component="code">GET /api/call-service/activities</Box> lists activities. Add one with <Box component="code">POST /api/call-service/activities</Box>; update one with <Box component="code">PUT /api/call-service/activities/&#123;ACTIVITY_ID&#125;</Box>.</Typography>
-        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{`{
-  "name": "Personal care",
-  "description": "Assistance with washing and dressing",
-  "aliases": ["bathing help", "daily hygiene"],
-  "durationMinutes": 60
-}`}</Box></Paper>
-        <Typography variant="caption" color="text.secondary">Duration must be 1–10080 minutes. Aliases let the post-call agent map different caller wording to the same activity. Updates may include <Box component="code">active</Box> to enable or disable an activity.</Typography>
       </Stack>
     </SectionCard>
     </Box>
@@ -246,17 +231,6 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
         </SectionCard>
       </Grid>
     </Grid>
-    </Box>
-
-    <Box id="enquiries" sx={{ scrollMarginTop: 100 }}>
-    <SectionCard title="Patient enquiries and staff booking" subtitle="Read inbound patient enquiries, suggested staff and the automated availability call sequence.">
-      <Stack spacing={1.25}>
-        <Typography variant="body2"><Box component="code">GET /api/call-service/incoming-calls</Box> lists enquiries; <Box component="code">GET /api/call-service/incoming-calls/&#123;CALL_ID&#125;</Box> returns one enquiry with transcript, analysis, suggested staff and appointment-call attempts.</Typography>
-        <Typography variant="body2">To resolve an enquiry manually, send <Box component="code">POST /api/call-service/incoming-calls/&#123;CALL_ID&#125;/resolve</Box> with <Box component="code">&#123; "staffId": "STAFF-1001" &#125;</Box>. The server controls enquiry statuses; clients cannot set them directly.</Typography>
-        <Typography variant="body2">Inbound audio: <Box component="code">GET /api/call-service/incoming-calls/&#123;CALL_ID&#125;/recording</Box>. Appointment-staff call audio: <Box component="code">GET /api/call-service/incoming-calls/&#123;CALL_ID&#125;/appointment-attempts/&#123;ATTEMPT_ID&#125;/recording</Box>.</Typography>
-        <Typography variant="caption" color="text.secondary">Appointment calls try suggested staff sequentially. A confirmed available response creates the attendance session and queues its check-in and check-out calls. Unanswered calls or exhausted candidates are exposed for human follow-up.</Typography>
-      </Stack>
-    </SectionCard>
     </Box>
 
     <Box id="callbacks" sx={{ scrollMarginTop: 100 }}>

@@ -14,9 +14,6 @@ type SyncScope = "all" | "branch" | "care_manager";
 type IntegrationForm = Pick<AthulyaIntegrationSettings, "integrationName" | "apiBaseUrl" | "enabled" | "autoSyncEnabled" | "autoSyncScope" | "autoSyncScopeId"> & { apiKey: string };
 const emptySettings: CallingForm = {
   defaultFromNumber: "",
-  allowInboundCalls: true,
-  allowNonPatientInboundCalls: false,
-  requireHumanVerificationForStaffBooking: false,
   unansweredCallEscalation: "call_care_manager",
   retry: { maxConsecutiveNoAnswer: 3, initialMinutes: 3, multiplier: 1.2, maxMinutes: 30 },
 };
@@ -43,7 +40,7 @@ export function SettingsPage() {
   const schedules = useQuery({ queryKey: ["athulya-schedules", syncFilters.scheduleDate], queryFn: () => fetchAthulyaSchedules({ fromDate: syncFilters.scheduleDate || undefined, toDate: syncFilters.scheduleDate || undefined }), enabled: tab === "athulya", retry: false });
   useEffect(() => {
     if (!settings.data) return;
-    setForm({ defaultFromNumber: settings.data.defaultFromNumber, allowInboundCalls: settings.data.allowInboundCalls, allowNonPatientInboundCalls: settings.data.allowNonPatientInboundCalls, requireHumanVerificationForStaffBooking: settings.data.requireHumanVerificationForStaffBooking, unansweredCallEscalation: settings.data.unansweredCallEscalation, retry: settings.data.retry });
+    setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, retry: settings.data.retry });
   }, [settings.data]);
   useEffect(() => {
     if (integration.data) setIntegrationForm({ integrationName: integration.data.integrationName, apiBaseUrl: integration.data.apiBaseUrl, enabled: integration.data.enabled, autoSyncEnabled: integration.data.autoSyncEnabled, autoSyncScope: integration.data.autoSyncScope, autoSyncScopeId: integration.data.autoSyncScopeId, apiKey: "" });
@@ -97,14 +94,6 @@ export function SettingsPage() {
             helperText={settings.data.source.defaultFromNumber === "settings" ? "Workspace setting override · E.164 format" : "Using .env fallback · saving here overrides it"}
             inputProps={{ inputMode: "tel" }}
           />
-          <Box sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
-            <FormControlLabel
-              control={<Switch checked={form.allowInboundCalls} onChange={(_, checked) => setForm((current) => ({ ...current, allowInboundCalls: checked }))} />}
-              label={<Box><Typography fontWeight={650}>Allow incoming calls</Typography><Typography variant="body2" color="text.secondary">When disabled, reject all inbound calls, including calls from registered patients. Outbound attendance and staff availability calls are unaffected.</Typography></Box>}
-              sx={{ alignItems: "flex-start", m: 0, "& .MuiSwitch-root": { mr: 1 } }}
-            />
-          </Box>
-          <Alert severity="info">Inbound patient calling and automated appointment-agent calls are not enabled in this ChiefVoice attendance integration. Scheduled employee check-in and check-out calls use ChiefVoice.</Alert>
           <Box><Typography variant="h6">No-answer retry policy</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>The retry delay grows exponentially and stops at the configured attempt limit. {settings.data.source.retry === "settings" ? "Workspace override is active." : "Values currently come from .env."}</Typography></Box>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}><FormControl fullWidth size="small"><InputLabel id="unanswered-escalation-label">After unanswered calls</InputLabel><Select labelId="unanswered-escalation-label" label="After unanswered calls" value={form.unansweredCallEscalation} onChange={(event) => setForm((current) => ({ ...current, unansweredCallEscalation: event.target.value as CallingForm["unansweredCallEscalation"] }))}><MenuItem value="platform_notification">Notify care manager in this app</MenuItem><MenuItem value="call_care_manager">Call the care manager</MenuItem></Select></FormControl></Grid>
