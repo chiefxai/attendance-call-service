@@ -146,6 +146,7 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       if (stageStatus.status === "confirmed") displayStatus = stageName;
       else if (stageStatus.status === "scheduled") displayStatus = wasNotPlaced ? "call not placed" : "upcoming";
       else if (employeeRequestedDelay) displayStatus = "delayed";
+      else if (retryScheduled && reason === "not_answered") displayStatus = "not answered";
       else if (retryScheduled) displayStatus = "retry scheduled";
       else if (stageStatus.status === "review") displayStatus = "needs review";
 
