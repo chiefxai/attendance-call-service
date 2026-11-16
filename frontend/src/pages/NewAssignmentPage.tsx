@@ -4,7 +4,7 @@ import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Grid, Me
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import { AxiosError } from "axios";
-import { createAssignment, fetchAgents, fetchEmployeeScheduleOverlap, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
+import { createAssignment, fetchEmployeeScheduleOverlap, fetchPatients, fetchStaff, type AssignmentPayload } from "../api/client";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
@@ -12,7 +12,6 @@ import { AddressFields } from "../components/AddressFields";
 
 interface FormValues {
   assignmentId: string;
-  agentId: string;
   fromNumber: string;
   language: string;
   scheduledStartAt: string;
@@ -61,13 +60,13 @@ const now = new Date();
 const shiftEnd = new Date(now.getTime() + 8 * 60 * 60_000);
 
 const createInitialValues = (): FormValues => ({
-  assignmentId: crypto.randomUUID(), agentId: "", fromNumber: "", language: "ta",
+  assignmentId: crypto.randomUUID(), fromNumber: "", language: "ta",
   scheduledStartAt: localInputValue(now), scheduledEndAt: localInputValue(shiftEnd),
   employeeId: "", employeeName: "", employeeCompanyName: "ATHULYA", employeePhone: "", employeeAddress: "",
   patientId: "", patientName: "", patientPhone: "", patientAddress: "",
 });
 
-const BULK_HEADERS = ["assignmentId", "agentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeeCompanyName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress", "timeZone"];
+const BULK_HEADERS = ["assignmentId", "fromNumber", "language", "scheduledStartAt", "scheduledEndAt", "employeeId", "employeeName", "employeeCompanyName", "employeePhone", "employeeAddress", "patientId", "patientName", "patientPhone", "patientAddress", "timeZone"];
 const MAX_BULK_ROWS = 200;
 interface BulkAssignmentRow { line: number; payload?: AssignmentPayload; errors: string[]; }
 interface BulkAssignmentResult { sessionId?: string; error?: string; }
@@ -98,7 +97,7 @@ function parseCsvRows(input: string): string[][] {
   return rows;
 }
 
-function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows: BulkAssignmentRow[]; error?: string } {
+function parseBulkAssignments(csv: string): { rows: BulkAssignmentRow[]; error?: string } {
   let sourceRows: string[][];
   try { sourceRows = parseCsvRows(csv); }
   catch (error) { return { rows: [], error: error instanceof Error ? error.message : "Could not read this CSV." }; }
@@ -116,7 +115,6 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
     const get = (field: string) => cells[indexes.get(field) ?? -1]?.trim() || "";
     const line = index + 2;
     const assignmentId = get("assignmentId");
-    const agentId = get("agentId");
     const language = languageMap[get("language").toLowerCase()];
     const startValue = get("scheduledStartAt");
     const endValue = get("scheduledEndAt");
@@ -134,7 +132,6 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
     if (!assignmentId) errors.push("assignmentId is required");
     else if (seenAssignments.has(assignmentId)) errors.push("assignmentId is duplicated in this file");
     else seenAssignments.add(assignmentId);
-    if (!agentId || !activeAgentIds.has(agentId)) errors.push("agentId must match an active agent");
     if (!language) errors.push("language must be ta, en, ml, or te");
     if (!startValue || !hasTimezone(startValue) || !Number.isFinite(startAt)) errors.push("scheduledStartAt must be ISO 8601 with a timezone");
     if (!endValue || !hasTimezone(endValue) || !Number.isFinite(endAt)) errors.push("scheduledEndAt must be ISO 8601 with a timezone");
@@ -145,7 +142,7 @@ function parseBulkAssignments(csv: string, activeAgentIds: Set<string>): { rows:
       if (!get(field)) errors.push(field + " is required");
     }
     const payload: AssignmentPayload = {
-      assignmentId, agentId, fromNumber: get("fromNumber"), language: language || "en",
+      assignmentId, fromNumber: get("fromNumber"), language: language || "en",
       scheduledStartAt: Number.isFinite(startAt) ? new Date(startAt).toISOString() : "",
       scheduledEndAt: Number.isFinite(endAt) ? new Date(endAt).toISOString() : "",
       metadata: { timeZone: assignmentTimeZone },
@@ -197,14 +194,6 @@ export function NewAssignmentPage() {
     }), 400);
     return () => window.clearTimeout(timer);
   }, [form.employeeId, form.scheduledStartAt, form.scheduledEndAt, form.assignmentId]);
-  const agents = useQuery({ queryKey: ["agents"], queryFn: fetchAgents, retry: 0 });
-  useEffect(() => {
-    const activeAgents = agents.data?.filter((agent) => agent.active) || [];
-    if (!activeAgents.length) return;
-    setForm((current) => current.agentId && activeAgents.some((agent) => agent.id === current.agentId)
-      ? current
-      : { ...current, agentId: activeAgents[0].id });
-  }, [agents.data]);
   const staff = useQuery({ queryKey: ["staff"], queryFn: () => fetchStaff({ limit: 500 }), retry: 0 });
   const patients = useQuery({ queryKey: ["patients"], queryFn: () => fetchPatients({ limit: 500 }), retry: 0 });
   const overlapStartMs = new Date(overlapWindow.startAt).getTime();
@@ -227,7 +216,6 @@ export function NewAssignmentPage() {
     onSuccess: (result) => navigate(`/sessions/${result.sessionId}`),
   });
   const update = (key: keyof FormValues) => (value: string) => setForm((current) => ({ ...current, [key]: value }));
-  const activeAgentIds = new Set(agents.data?.filter((agent) => agent.active).map((agent) => agent.id) || []);
   const validBulkCount = bulkRows.filter((row) => row.payload && !bulkResults[row.line]?.sessionId).length;
   const completedBulkCount = Object.values(bulkResults).filter((result) => result.sessionId).length;
   const handleBulkFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -237,7 +225,7 @@ export function NewAssignmentPage() {
     setBulkRows([]); setBulkResults({}); setBulkFileError("");
     if (file.size > 5 * 1024 * 1024) { setBulkFileError("CSV file must be 5 MB or smaller."); return; }
     try {
-      const parsed = parseBulkAssignments(await file.text(), activeAgentIds);
+      const parsed = parseBulkAssignments(await file.text());
       setBulkRows(parsed.rows); setBulkFileError(parsed.error || "");
     } catch (error) { setBulkFileError(requestError(error)); }
   };
@@ -266,7 +254,7 @@ export function NewAssignmentPage() {
     setPhoneError("");
     setPatientPhoneError("");
     const payload: AssignmentPayload = {
-      assignmentId: form.assignmentId.trim(), agentId: form.agentId, fromNumber: form.fromNumber.trim(),
+      assignmentId: form.assignmentId.trim(), fromNumber: form.fromNumber.trim(),
       language: form.language, scheduledStartAt: toUtcIso(form.scheduledStartAt),
       scheduledEndAt: toUtcIso(form.scheduledEndAt), metadata: { timeZone: getBrowserTimeZone() },
       employee: { id: form.employeeId.trim(), name: form.employeeName.trim(), companyName: form.employeeCompanyName.trim() || "ATHULYA", phoneNumber: employeePhone, address: form.employeeAddress.trim() },
@@ -308,7 +296,6 @@ export function NewAssignmentPage() {
     <Stack spacing={3}>
       <PageHeader eyebrow="SCHEDULE OUTBOUND CALLS" title="New assignment" description="Add the shift and contact details. The AI calls the employee at check-in and check-out times." />
       {mutation.isError && <Alert severity="error">Assignment could not be scheduled: {errorMessage}</Alert>}
-      {agents.isError && <Alert severity="warning">Unable to load agents. Verify the API connection and workspace access.</Alert>}
       {(staff.isError || patients.isError) && <Alert severity="warning">Saved staff or patient records could not be loaded. You can still enter the details manually.</Alert>}
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         <Button variant={mode === "single" ? "contained" : "outlined"} onClick={() => setMode("single")} disabled={mutation.isPending || bulkRunning}>Single assignment</Button>
@@ -318,11 +305,11 @@ export function NewAssignmentPage() {
       <Box component="form" onSubmit={submit}>
         <Stack spacing={2.5}>
           <Card><CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-            <Typography variant="h6">Shift and calling setup</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>Choose the active voice agent, language, and scheduled shift. Times are entered in {getBrowserTimeZone()} and sent to the API in UTC.</Typography>
+            <Typography variant="h6">Shift and calling setup</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .4, mb: 2.5 }}>Choose the call language and scheduled shift. Times are entered in {getBrowserTimeZone()} and sent to the API in UTC.</Typography>
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6 }}><FormField label="Assignment ID" value={form.assignmentId} onChange={update("assignmentId")} required readOnly helperText="Generated automatically" /></Grid>
-              <Grid size={{ xs: 12, sm: 6 }}><TextField select fullWidth size="small" label="Calling agent" required value={form.agentId} onChange={(event) => update("agentId")(event.target.value)} disabled={agents.isLoading || agents.data?.length === 0}><MenuItem value="" disabled>Select an active agent</MenuItem>{agents.data?.filter((agent) => agent.active).map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.name}</MenuItem>)}</TextField></Grid>
-              <Grid size={{ xs: 12, sm: 6 }}><FormField label="Vobiz caller ID override (optional)" value={form.fromNumber} onChange={update("fromNumber")} helperText="Leave blank to use VOBIZ_FROM_NUMBER from the backend .env file." /></Grid>
+              
+              <Grid size={{ xs: 12, sm: 6 }}><FormField label="ChiefVoice caller ID override (optional)" value={form.fromNumber} onChange={update("fromNumber")} helperText="Leave blank to use CHIEFVOICE_CALLER_ID from the backend .env file." /></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><TextField select fullWidth size="small" label="Call language" value={form.language} onChange={(event) => update("language")(event.target.value)}>{[{ value: "ta", label: "Tamil" }, { value: "en", label: "English" }, { value: "ml", label: "Malayalam" }, { value: "te", label: "Telugu" }].map((language) => <MenuItem key={language.value} value={language.value}>{language.label}</MenuItem>)}</TextField></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><FormField label="Scheduled check-in" value={form.scheduledStartAt} onChange={update("scheduledStartAt")} type="datetime-local" required /></Grid>
               <Grid size={{ xs: 12, sm: 6 }}><FormField label="Scheduled check-out" value={form.scheduledEndAt} onChange={update("scheduledEndAt")} type="datetime-local" required /></Grid>
@@ -366,7 +353,7 @@ export function NewAssignmentPage() {
           </CardContent></Card>
           <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={2}>
             <Typography variant="caption" color="text.secondary">Calls are queued for the employee only.</Typography>
-            <Button type="submit" variant="contained" endIcon={mutation.isPending ? <CircularProgress size={16} color="inherit" /> : <ArrowForwardRoundedIcon />} disabled={mutation.isPending || employeeOverlap.data?.overlap === true || agents.isLoading || !agents.data?.some((agent) => agent.id === form.agentId && agent.active)} sx={{ px: 2.5, py: 1.1 }}>{mutation.isPending ? "Scheduling…" : "Create assignment"}</Button>
+            <Button type="submit" variant="contained" endIcon={mutation.isPending ? <CircularProgress size={16} color="inherit" /> : <ArrowForwardRoundedIcon />} disabled={mutation.isPending || employeeOverlap.data?.overlap === true} sx={{ px: 2.5, py: 1.1 }}>{mutation.isPending ? "Scheduling…" : "Create assignment"}</Button>
           </Stack>
         </Stack>
       </Box>
@@ -379,7 +366,7 @@ export function NewAssignmentPage() {
             <Alert severity="info">Use the template columns exactly. Dates must be ISO 8601 with a timezone, such as 2026-11-12T08:00:00+05:30. The optional timeZone column accepts an IANA name such as Asia/Kolkata; blank defaults to your browser timezone.</Alert>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
               <Button variant="outlined" onClick={downloadBulkTemplate} disabled={bulkRunning}>Download CSV template</Button>
-              <Button component="label" variant="contained" startIcon={<UploadFileRoundedIcon />} disabled={bulkRunning || agents.isLoading || agents.isError}>
+              <Button component="label" variant="contained" startIcon={<UploadFileRoundedIcon />} disabled={bulkRunning}>
                 Choose CSV file <input hidden type="file" accept=".csv,text/csv" onChange={handleBulkFile} />
               </Button>
             </Stack>
@@ -408,7 +395,7 @@ export function NewAssignmentPage() {
                   </Box>;
                 })}
               </Stack>
-              <Button variant="contained" onClick={() => void submitBulk()} disabled={bulkRunning || agents.isLoading || validBulkCount === 0} endIcon={bulkRunning ? <CircularProgress size={16} color="inherit" /> : undefined}>
+              <Button variant="contained" onClick={() => void submitBulk()} disabled={bulkRunning || validBulkCount === 0} endIcon={bulkRunning ? <CircularProgress size={16} color="inherit" /> : undefined}>
                 {bulkRunning ? "Creating sessions…" : "Create " + validBulkCount + " valid sessions"}
               </Button>
             </>}
