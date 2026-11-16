@@ -8,6 +8,7 @@ const port = Math.max(1, Number(process.env.PORT) || 4000);
 const apiKey = String(process.env.ATHULYA_MOCK_API_KEY || "");
 const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
 const submissions = new Map();
+const schedules = new Map();
 
 function json(res, status, body) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
@@ -55,6 +56,22 @@ function scheduleFor(date) {
   };
 }
 
+const today = localDateInTimeZone(new Date(), timeZone);
+schedules.set(scheduleFor(today).schedule_id, scheduleFor(today));
+
+function normalizeSchedule(input, existing = {}) {
+  const date = String(input.schedule_date || existing.schedule_date || today).slice(0, 10);
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) throw Object.assign(new Error("schedule_date must use YYYY-MM-DD"), { status: 400 });
+  const value = { ...scheduleFor(date), ...existing, ...input, schedule_date: date };
+  value.schedule_id = String(input.schedule_id || existing.schedule_id || `MOCK-${date.replaceAll("-", "")}-${crypto.randomUUID().slice(0, 8)}`);
+  value.schedule_pk = String(input.schedule_pk || existing.schedule_pk || `MOCK-PK-${value.schedule_id}`);
+  for (const field of ["client_name", "patient_id", "caregiver_ids", "caregiver_names", "caregiver_phones"]) {
+    value[field] = String(value[field] ?? "").trim();
+  }
+  if (!value.client_name || !value.patient_id) throw Object.assign(new Error("client_name and patient_id are required"), { status: 400 });
+  return value;
+}
+
 async function readJson(req) {
   const chunks = [];
   let size = 0;
@@ -79,16 +96,44 @@ const server = http.createServer(async (req, res) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(requestedTo) || requestedFrom > requestedTo) {
       return json(res, 400, { status: "error", message: "Use valid from_date and to_date values (YYYY-MM-DD)" });
     }
-    const date = requestedFrom;
-    const record = scheduleFor(date);
     const careManagerId = url.searchParams.get("care_manager_id");
     const branchId = url.searchParams.get("branch_id");
     const clientId = url.searchParams.get("client_id");
-    const matches = (!careManagerId || careManagerId === record.care_manager_id)
+    const data = [...schedules.values()].filter((record) => record.schedule_date >= requestedFrom && record.schedule_date <= requestedTo
+      && (!careManagerId || careManagerId === record.care_manager_id)
       && (!branchId || branchId === record.branch)
-      && (!clientId || clientId === record.patient_id);
-    const data = matches && date <= requestedTo ? [record] : [];
+      && (!clientId || clientId === record.patient_id));
     return json(res, 200, { status: "success", current_date: today, date_from: requestedFrom, date_to: requestedTo, total: data.length, data });
+  }
+
+  if (url.pathname === "/mock/schedules" && req.method === "GET") {
+    return json(res, 200, { total: schedules.size, data: [...schedules.values()].sort((a, b) => a.schedule_date.localeCompare(b.schedule_date)) });
+  }
+  if (url.pathname === "/mock/schedules" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      const record = normalizeSchedule(body);
+      if (schedules.has(record.schedule_id)) return json(res, 409, { status: "error", message: "schedule_id already exists" });
+      schedules.set(record.schedule_id, record);
+      return json(res, 201, { status: "success", data: record });
+    } catch (error) { return json(res, error.status || 400, { status: "error", message: error.message }); }
+  }
+  const scheduleMatch = /^\\/mock\\/schedules\\/([^/]+)$/.exec(url.pathname);
+  if (scheduleMatch && req.method === "PUT") {
+    try {
+      const id = decodeURIComponent(scheduleMatch[1]);
+      const existing = schedules.get(id);
+      if (!existing) return json(res, 404, { status: "error", message: "Schedule not found" });
+      const record = normalizeSchedule(await readJson(req), existing);
+      record.schedule_id = id;
+      schedules.set(id, record);
+      return json(res, 200, { status: "success", data: record });
+    } catch (error) { return json(res, error.status || 400, { status: "error", message: error.message }); }
+  }
+  if (scheduleMatch && req.method === "DELETE") {
+    const id = decodeURIComponent(scheduleMatch[1]);
+    if (!schedules.delete(id)) return json(res, 404, { status: "error", message: "Schedule not found" });
+    return json(res, 200, { status: "success", message: "Schedule deleted" });
   }
 
   if (req.method === "POST" && url.pathname === "/api/check-in-out") {
