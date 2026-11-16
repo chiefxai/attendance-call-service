@@ -341,7 +341,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
             console.error(`[attendance-worker] ChiefVoice care-manager escalation failed session=${session.id} stage=${stage}: ${error.message}`);
           }
         }
-      }      } else if (notifications.length) {
+      } else if (notifications.length) {
         console.info(`[attendance-worker] care-manager platform notification created session=${session.id} stage=${stage} recipients=${notifications.length}`);
       }
       await repository.setStageStatus(sessionId, stage, "not_answered", {
