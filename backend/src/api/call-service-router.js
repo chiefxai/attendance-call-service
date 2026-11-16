@@ -810,7 +810,7 @@ router.get("/activities", async (req, res) => {
       const patientPhoneInput = String(body.patient?.phoneNumber || "").trim();
       const patientPhone = patientPhoneInput ? normalizeIndianMobile(patientPhoneInput) : "";
       if (missing.length || !fromNumber || !body.employee?.id || !body.employee?.name || !body.patient?.id || !body.patient?.name || !body.patient?.address) {
-        return res.status(400).json({ error: "Assignment requires assignmentId, agentId, language, scheduledStartAt, scheduledEndAt, employee identity, patient identity and address, and either fromNumber or the default caller ID in Settings/.env" });
+        return res.status(400).json({ error: "Assignment requires assignmentId, language, scheduledStartAt, scheduledEndAt, employee identity, patient identity and address, and either fromNumber or the default ChiefVoice caller ID in Settings/.env" });
       }
       if (!employeePhone) return res.status(400).json({ error: "Enter a valid 10-digit Indian employee mobile number, optionally prefixed with 91 or +91." });
       if (patientPhoneInput && !patientPhone) return res.status(400).json({ error: "Enter a valid 10-digit Indian patient mobile number, optionally prefixed with 91 or +91." });
