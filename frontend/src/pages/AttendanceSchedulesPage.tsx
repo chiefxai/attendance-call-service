@@ -202,16 +202,6 @@ export function AttendanceSchedulesPage() {
     refetchInterval: selectedSchedule ? 15_000 : (false as const),
   })) });
   const statusesBySchedule = new Map(schedulesData.map((schedule) => [schedule.id, scheduleStatus(schedule, matchingAttendance(schedule, attendance.data || []))]));
-  const delayedBySchedule = new Map(schedulesData.map((schedule) => {
-    const records = matchingAttendance(schedule, attendance.data || []);
-    return [schedule.id, stageIsDelayed(records, "checkIn") || stageIsDelayed(records, "checkOut")];
-  }));
-  const nextCallBySchedule = new Map(schedulesData.map((schedule) => {
-    const nextCalls = matchingAttendance(schedule, attendance.data || []).flatMap((record) => [record.checkIn.nextCallAt, record.checkOut.nextCallAt])
-      .filter((value): value is string => Boolean(value) && new Date(value as string).getTime() >= Date.now())
-      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-    return [schedule.id, nextCalls[0] || null];
-  }));
   const counts = schedulesData.reduce((result, schedule) => {
     const status = statusesBySchedule.get(schedule.id) || "upcoming";
     result[status] += 1;
