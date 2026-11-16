@@ -277,7 +277,6 @@ export function AttendanceSchedulesPage() {
                   <Stack spacing={0.5} alignItems="flex-start">
                     {(() => {
                       const status = statusesBySchedule.get(schedule.id) || "pending";
-                      const stageRecords = matchingAttendance(schedule, attendance.data || []);
                       return <>
                         <StatusChip status={status} />
                         {delayedBySchedule.get(schedule.id) && <StatusChip status="delayed" />}
