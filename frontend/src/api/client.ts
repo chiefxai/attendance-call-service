@@ -387,7 +387,6 @@ export interface Agent {
 
 export interface AssignmentPayload {
   assignmentId: string;
-  agentId: string;
   fromNumber?: string;
   language: string;
   scheduledStartAt: string;
