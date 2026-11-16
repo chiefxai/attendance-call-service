@@ -662,8 +662,47 @@ router.get("/activities", async (req, res) => {
     } catch (error) { fail(res, error); }
   });
 
-  router.post("/incoming-calls/:id/resolve", (_req, res) => {
-    res.status(410).json({ error: "Legacy inbound appointment booking is disabled. Create attendance assignments through the ChiefVoice outbound workflow." });
+  router.post("/incoming-calls/:id/resolve", async (req, res) => {
+    try {
+      const body = req.body || {};
+      if (Object.keys(body).some((key) => key !== "staffId")) {
+        return res.status(400).json({ error: "Only staffId is accepted; enquiry status is controlled by the system." });
+      }
+      const staffId = String(body.staffId || "").trim();
+      if (!staffId) return res.status(400).json({ error: "Choose a staff member to resolve this enquiry." });
+      const organizationId = org(req);
+      const pendingCall = await repository.getInboundCall(req.params.id, organizationId);
+      if (!pendingCall || !await assertInboundVisible(req, req.params.id, res)) return;
+      const analysis = pendingCall.enquiryAnalysis || {};
+      const requestedStart = new Date(analysis.requestedStartAt || "");
+      const requestedEnd = new Date(analysis.requestedEndAt || "");
+      const canSchedule = Boolean(analysis.activityId && Number.isFinite(requestedStart.getTime())
+        && (Number.isFinite(requestedEnd.getTime()) || Number(analysis.durationMinutes) > 0));
+      if (canSchedule) {
+        const staff = await repository.getActiveStaffDirectoryRecord(organizationId, staffId);
+        if (!staff) return res.status(400).json({ error: "Selected staff member is not active in this organization." });
+        if (!staff.phoneNumber) return res.status(400).json({ error: "Selected staff member has no registered phone number." });
+        const attendanceAgent = { id: "chiefvoice", language: staff.language || pendingCall.language || "en" };
+        const settings = await repository.getOrganizationCallSettings(organizationId);
+        const fromNumber = settings.defaultFromNumber || process.env.CHIEFVOICE_CALLER_ID;
+        if (!fromNumber) return res.status(409).json({ error: "Configure the default ChiefVoice caller ID in Settings before assigning this enquiry." });
+        const session = await repository.saveAppointmentAttendanceSchedule({
+          inboundCallId: req.params.id, organizationId, staff, attendanceAgent, fromNumber,
+        });
+        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkInTask?.id, stage: "check_in", attemptNumber: 1 }, {
+          idempotencyKey: `call:${session.id}:check_in:1`, runAt: new Date(session.scheduledStartAt),
+        });
+        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkOutTask?.id, stage: "check_out", attemptNumber: 1 }, {
+          idempotencyKey: `call:${session.id}:check_out:1`, runAt: new Date(session.scheduledEndAt),
+        });
+        const updated = await repository.getInboundCall(req.params.id, organizationId);
+        return res.json({ id: updated.id, enquiryStatus: updated.enquiryStatus, resolvedStaff: updated.resolvedStaff,
+          resolvedAt: updated.resolvedAt, bookingStatus: updated.bookingStatus, bookingScheduleSessionId: session.id });
+      }
+      const call = await repository.resolveInboundEnquiry(req.params.id, organizationId, staffId);
+      if (!call) return res.status(404).json({ error: "Incoming call not found" });
+      res.json({ id: call.id, enquiryStatus: call.enquiryStatus, resolvedStaff: call.resolvedStaff, resolvedAt: call.resolvedAt });
+    } catch (error) { fail(res, error); }
   });
 
   router.get("/incoming-calls/:id/recording", async (req, res) => {
