@@ -31,9 +31,9 @@ Register this public URL in ChiefVoice:
 POST https://<public-domain>/api/call-service/webhooks/chiefvoice
 ```
 
-Set `CHIEFVOICE_WEBHOOK_SECRET` to the webhook signing secret. The current receiver expects HMAC-SHA256 of the exact raw JSON body in `x-chiefvoice-signature` (hex or `sha256=<hex>`). It accepts a call/session identifier in `session_id`, `call_id`, `callId`, or `id`, a call state in `call_status`, `status`, or `state`, and a structured result in `post_call_result`, `postCallResult`, `post_call.result`, or `result`. Result fields may be camelCase or snake_case.
+Set `CHIEFVOICE_WEBHOOK_SECRET` to the webhook signing secret. The current receiver expects HMAC-SHA256 of the exact raw JSON body in `x-chiefvoice-signature` (hex or `sha256=<hex>`). It requires an event identifier (`event_id` or `eventId`) and accepts a call/session identifier in `session_id`, `call_id`, `callId`, or `id`, a call state in `call_status`, `status`, or `state`, and a structured result in `post_call_result`, `postCallResult`, `post_call.result`, or `result`. Result fields may be camelCase or snake_case.
 
-The webhook updates the attempt using provider `chiefvoice`, stores the post-call result, and queues deterministic attendance validation. Repeated callbacks are safe: result writes are upserts and queue jobs use stable idempotency keys.
+The webhook updates the attempt using provider `chiefvoice`, stores the post-call result, and queues deterministic attendance validation. Repeated callbacks are deduplicated in `chiefvoice_webhook_events` by event ID; result writes and queue jobs also use stable idempotency keys.
 
 ## Environment
 
