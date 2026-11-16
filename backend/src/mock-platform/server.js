@@ -118,7 +118,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 201, { status: "success", data: record });
     } catch (error) { return json(res, error.status || 400, { status: "error", message: error.message }); }
   }
-  const scheduleMatch = /^\\/mock\\/schedules\\/([^/]+)$/.exec(url.pathname);
+  const scheduleMatch = url.pathname.startsWith("/mock/schedules/") ? [url.pathname, url.pathname.slice("/mock/schedules/".length)] : null;
   if (scheduleMatch && req.method === "PUT") {
     try {
       const id = decodeURIComponent(scheduleMatch[1]);
