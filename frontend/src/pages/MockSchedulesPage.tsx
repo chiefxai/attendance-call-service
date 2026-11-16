@@ -97,9 +97,9 @@ export function MockSchedulesPage() {
       </Alert>
       {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
       <Grid container spacing={2}>
-        <Grid item xs={12} sm={4}><MetricCard label="Mock schedules" value={String(metrics.total)} icon={<AddRoundedIcon />} /></Grid>
-        <Grid item xs={12} sm={4}><MetricCard label="With caregiver" value={String(metrics.assigned)} icon={<EditRoundedIcon />} /></Grid>
-        <Grid item xs={12} sm={4}><MetricCard label="Completed / safe" value={String(metrics.completed)} icon={<SyncRoundedIcon />} /></Grid>
+        <Grid size={{ xs: 12, sm: 4 }}><MetricCard label="Mock schedules" value={String(metrics.total)} icon={<AddRoundedIcon />} /></Grid>
+        <Grid size={{ xs: 12, sm: 4 }}><MetricCard label="With caregiver" value={String(metrics.assigned)} icon={<EditRoundedIcon />} /></Grid>
+        <Grid size={{ xs: 12, sm: 4 }}><MetricCard label="Completed / safe" value={String(metrics.completed)} icon={<SyncRoundedIcon />} /></Grid>
       </Grid>
       <Card variant="outlined">
         <CardContent>
@@ -150,9 +150,9 @@ export function MockSchedulesPage() {
               <Chip size="small" color={latestRun.status === "succeeded" ? "success" : latestRun.status === "failed" ? "error" : "info"} label={latestRun.status} />
             </Stack>
             <Grid container spacing={2} sx={{ mt: 0.5 }}>
-              <Grid item xs={6} sm={3}><Typography variant="caption" color="text.secondary">Received</Typography><Typography variant="h6">{latestRun.recordsReceived}</Typography></Grid>
-              <Grid item xs={6} sm={3}><Typography variant="caption" color="text.secondary">Saved / updated</Typography><Typography variant="h6">{latestRun.recordsUpserted}</Typography></Grid>
-              <Grid item xs={12} sm={6}><Typography variant="caption" color="text.secondary">Started</Typography><Typography variant="body2">{new Date(latestRun.startedAt).toLocaleString()}</Typography></Grid>
+              <Grid size={{ xs: 6, sm: 3 }}><Typography variant="caption" color="text.secondary">Received</Typography><Typography variant="h6">{latestRun.recordsReceived}</Typography></Grid>
+              <Grid size={{ xs: 6, sm: 3 }}><Typography variant="caption" color="text.secondary">Saved / updated</Typography><Typography variant="h6">{latestRun.recordsUpserted}</Typography></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Started</Typography><Typography variant="body2">{new Date(latestRun.startedAt).toLocaleString()}</Typography></Grid>
             </Grid>
             {latestRun.errorMessage && <Alert severity="error" sx={{ mt: 1 }}>{latestRun.errorMessage}</Alert>}
           </Box>}
@@ -179,11 +179,11 @@ export function MockSchedulesPage() {
         <DialogTitle>{editing ? "Edit mock schedule" : "Add mock schedule"}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ pt: 1 }}>
-            {fields.map((field) => <Grid item xs={12} sm={6} key={field.key}>
+            {fields.map((field) => <Grid size={{ xs: 12, sm: 6 }} key={field.key}>
               <TextField fullWidth size="small" type={field.type || "text"} label={field.label} value={String(form[field.key] ?? "")}
                 onChange={(e) => setField(field.key, e.target.value)} InputLabelProps={field.type === "date" ? { shrink: true } : undefined} />
             </Grid>)}
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField select fullWidth size="small" label="Schedule status" value={String(form.schedule_status || "Completed")} onChange={(e) => setField("schedule_status", e.target.value)}>
                 {["Completed", "Scheduled", "Assigned", "Cancelled"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
               </TextField>
