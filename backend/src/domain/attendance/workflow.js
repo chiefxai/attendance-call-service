@@ -1,9 +1,6 @@
 "use strict";
 
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
-const { createPostCallTools } = require("../../agents/post-call-tools");
-const { createAppointmentBookingTools } = require("../../agents/appointment-booking-tools");
-const { localDateTimeToUtc } = require("./local-time");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -77,8 +74,8 @@ function chooseAttendanceAction(stage, outcome = {}) {
   return { action: "review", reason: "invalid_stage" };
 }
 
-function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, transcriber, postCallAgent, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
-  const required = { repository, queue, chiefvoice, recordings, transcriber, postCallAgent, backend };
+function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
+  const required = { repository, queue, chiefvoice, backend };
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
   const taskFor = (session, stage) => stage === "check_in" ? session?.checkInTask : session?.checkOutTask;
@@ -93,11 +90,6 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
     if (!task || (taskId && task.id !== taskId)) return;
     const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
     if (["confirmed", "missed", "not_answered", "review"].includes(stageStatus)) return;
-    const agent = await repository.getAgent(session.organizationId, session.agentId);
-    if (!agent?.active) {
-      await repository.setStageStatus(sessionId, stage, "review", { reason: "agent_missing_or_inactive" });
-      throw new Error("The assigned calling agent is missing or inactive");
-    }
     const attempt = await repository.createCallAttempt({
       organizationId: session.organizationId, sessionId, stage, attemptNumber,
       callTargetRole: "employee", scheduledAt: new Date(), consecutiveNoAnswer,
@@ -135,7 +127,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
       };
       const call = await chiefvoice.createOutboundCall({
         to: person.phoneNumber,
-        from: agent.fromNumber || session.fromNumber,
+        from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
         sessionId,
         stage,
         callAttemptId: attempt.id,
@@ -145,7 +137,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
       if (!providerCallId) throw new Error("ChiefVoice response did not include session_id; reconcile before retrying");
       await repository.attachProviderCallId(attempt.id, providerCallId, call, "chiefvoice");
     } catch (error) {
-      // A timeout may mean Vobiz accepted the request but its response was
+      // A timeout may mean ChiefVoice accepted the request but its response was
       // lost. Do not blindly redial; mark the placement for reconciliation.
       await repository.markCallPlacementFailed(attempt.id, error.message);
       await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_unknown", callAttemptId: attempt.id });
@@ -158,9 +150,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
     if (!attempt) return;
     if (classifyCallStatus(attempt.status) === "not_answered") {
       const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
-      const organizationSettings = repository.getOrganizationCallSettings
-        ? await repository.getOrganizationCallSettings(attempt.organizationId)
-        : {};
+      const organizationSettings = repository.getOrganizationCallSettings ? await repository.getOrganizationCallSettings(attempt.organizationId) : {};
       const retrySettings = organizationSettings.callRetry || {};
       const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
       const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
@@ -168,9 +158,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
       const maxConsecutiveNoAnswer = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
       const config = { initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000 };
       if (noAnswerCount >= maxConsecutiveNoAnswer) {
-        await repository.setStageStatus(attempt.sessionId, attempt.stage, "not_answered", {
-          reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: noAnswerCount,
-        });
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "not_answered", { reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: noAnswerCount });
         await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, { idempotencyKey: `evaluate:${attempt.sessionId}:not-answered:${attempt.stage}` });
         return;
       }
@@ -183,310 +171,35 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
       return;
     }
     if (classifyCallStatus(attempt.status) !== "answered") return;
-    if (!attempt.recordingUrl && !attempt.recordingObjectKey) {
-      await queue.enqueue("wait_for_recording", { callAttemptId, pollNumber: 1 }, {
-        idempotencyKey: `recording-wait:${callAttemptId}:1`,
-        runAt: new Date(Date.now() + (retry.recordingWaitMs || 15_000)),
-      });
+    if (!attempt.outcome) {
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", { reason: "chiefvoice_post_call_result_missing", callAttemptId });
+      await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, { idempotencyKey: `evaluate:${attempt.sessionId}:missing-result:${callAttemptId}` });
       return;
     }
-    await queue.enqueue("transcribe_call", { callAttemptId }, { idempotencyKey: `transcribe:${callAttemptId}` });
+    await queue.enqueue("evaluate_attendance", { sessionId: attempt.sessionId, callAttemptId }, { idempotencyKey: `decision:${callAttemptId}` });
   }
-
-  async function waitForRecording({ callAttemptId, pollNumber }) {
-    const attempt = await repository.getCallAttempt(callAttemptId);
-    if (!attempt) return;
-    if (attempt.recordingUrl || attempt.recordingObjectKey) {
-      await queue.enqueue("transcribe_call", { callAttemptId }, { idempotencyKey: `transcribe:${callAttemptId}` });
-      return;
-    }
-    if (pollNumber >= (retry.recordingWaitMaxAttempts || 4)) {
-      await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", { reason: "recording_unavailable", callAttemptId });
-        await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, { idempotencyKey: `evaluate:${attempt.sessionId}:recording-unavailable:${attempt.id}` });
-      return;
-    }
-    const nextPoll = pollNumber + 1;
-    await queue.enqueue("wait_for_recording", { callAttemptId, pollNumber: nextPoll }, {
-      idempotencyKey: `recording-wait:${callAttemptId}:${nextPoll}`,
-      runAt: new Date(Date.now() + (retry.recordingWaitMs || 15_000)),
-    });
-  }
-
-  async function transcribeCall({ callAttemptId }) {
-    const attempt = await repository.getCallAttempt(callAttemptId);
-    if (!attempt) return;
-    const session = await repository.getAttendanceSession(attempt.sessionId);
-    const object = attempt.recordingObjectKey
-      ? { key: attempt.recordingObjectKey, contentType: attempt.recordingContentType }
-      : await recordings.importProviderRecording(attempt.recordingUrl, { organizationId: session.organizationId, sessionId: session.id, callAttemptId });
-    if (object?.key && !attempt.recordingObjectKey) await repository.setRecordingObjectKey(callAttemptId, object.key, object.contentType);
-    const transcript = await transcriber.transcribe(object, { language: session.language, organizationId: session.organizationId });
-    await repository.saveTranscript({
-      organizationId: session.organizationId, sessionId: session.id, callAttemptId,
-      language: transcript.language || session.language, text: transcript.text,
-    });
-    console.info(`[attendance-worker] transcript saved callAttempt=${callAttemptId} characters=${transcript.text.length} language=${transcript.language || session.language}`);
-    await queue.enqueue("extract_intent", { callAttemptId }, { idempotencyKey: `extract:${callAttemptId}` });
-  }
-
-  async function transcribeInboundCall({ inboundCallId, organizationId }) {
-    const call = await repository.getInboundCall(inboundCallId, organizationId || process.env.DEFAULT_ORGANIZATION_ID);
-    if (!call?.recordingObjectKey) throw new Error("Inbound call recording is not available");
-    const transcript = await transcriber.transcribe(
-      { key: call.recordingObjectKey, contentType: call.recordingContentType || "audio/wav" },
-      { organizationId: call.organizationId, language: call.language, speakerLabels: "caller and AI agent" },
-    );
-    await repository.saveInboundCallTranscript(inboundCallId, {
-      text: transcript.text, language: transcript.language || call.language,
-    }, call.organizationId);
-    const activities = await repository.listCareActivities(call.organizationId);
-    const analysis = await postCallAgent.extractPatientEnquiry({
-      patientContext: call.patient || {}, transcript: transcript.text, activities,
-      referenceTime: call.startedAt, timezone: process.env.APP_TIMEZONE || "Asia/Kolkata",
-    });
-    const activity = activities.find((candidate) => candidate.id === analysis.activityId);
-    const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
-    const requestedStart = localDateTimeToUtc(analysis.requestedLocalDate, analysis.requestedLocalTime, timeZone);
-    const callStartedAt = new Date(call.startedAt || Date.now()).getTime();
-    const hasValidStart = Boolean(requestedStart && Number.isFinite(requestedStart.getTime())
-      && requestedStart.getTime() >= callStartedAt - 60_000);
-    const patientAddressParts = String(call.patient?.address || "").split(" | ");
-    const hasPatientDistrict = patientAddressParts.length === 4 && Boolean(patientAddressParts[1].trim());
-    const needsDetails = Boolean(analysis.uncertain) || !activity || !hasValidStart || !hasPatientDistrict;
-    let staffSuggestions = [];
-    let requestedEndAt = null;
-    if (activity && hasValidStart) {
-      requestedEndAt = new Date(requestedStart.getTime() + activity.durationMinutes * 60_000);
-    }
-    if (!needsDetails) {
-      staffSuggestions = await repository.findAvailableStaffForEnquiry({
-        organizationId: call.organizationId,
-        startAt: requestedStart.toISOString(), endAt: requestedEndAt.toISOString(),
-        patientAddress: call.patient?.address || "", limit: 10,
-      });
-    }
-    const enquiryStatus = needsDetails ? "need_review" : (staffSuggestions.length ? "suggestion" : "shortage");
-    await repository.saveInboundEnquiryAnalysis(inboundCallId, {
-      organizationId: call.organizationId,
-      status: enquiryStatus,
-      analysis: {
-        activityId: activity?.id || null, activityName: activity?.name || analysis.requestedActivity || null,
-        durationMinutes: activity?.durationMinutes || null,
-        requestedLocalDate: analysis.requestedLocalDate || null,
-        requestedLocalTime: analysis.requestedLocalTime || null,
-        timeZone,
-        requestedStartAt: hasValidStart ? requestedStart.toISOString() : null,
-        requestedEndAt: requestedEndAt?.toISOString() || null,
-        needsSummary: String(analysis.needsSummary || "").slice(0, 2000), requiresHumanFollowUp: true,
-        uncertain: Boolean(analysis.uncertain),
-        missingDetails: [!activity ? "activity" : null, !hasValidStart ? "start_time" : null, !hasPatientDistrict ? "patient_district" : null].filter(Boolean),
-      },
-      staffSuggestions,
-    });
-    if (!needsDetails && staffSuggestions.length) {
-      const callingSettings = await repository.getOrganizationCallSettings(call.organizationId);
-      if (callingSettings.requireHumanVerificationForStaffBooking === true) {
-        await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review");
-      } else {
-        await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "calling");
-        await queue.enqueue("call_next_appointment_staff", { inboundCallId, organizationId: call.organizationId, candidateIndex: 0 }, {
-          idempotencyKey: `appointment:${inboundCallId}:candidate:0`,
-        });
-      }
-    } else if (!needsDetails) {
-      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "no_staff_available");
-    }
-    console.info(`[attendance-worker] inbound transcript saved call=${inboundCallId} characters=${transcript.text.length} language=${transcript.language || call.language}`);
-  }
-
-  async function callNextAppointmentStaff({ inboundCallId, organizationId, candidateIndex = 0 }) {
-    const call = await repository.getInboundCall(inboundCallId, organizationId || process.env.DEFAULT_ORGANIZATION_ID);
-    if (!call || call.bookingScheduleSessionId || call.bookingStatus === "scheduled") return;
-    const bookingSettings = await repository.getOrganizationCallSettings(call.organizationId);
-    if (bookingSettings.requireHumanVerificationForStaffBooking === true) {
-      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review");
-      return;
-    }
-    const candidates = call.staffSuggestions || [];
-    const maxAttempts = bookingSettings.callRetry?.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
-    if (candidateIndex >= candidates.length || candidateIndex >= maxAttempts) {
-      const attempts = await repository.listAppointmentCallAttempts(inboundCallId, call.organizationId);
-      const unanswered = attempts.filter((item) => ["noanswer", "no_answer", "busy", "failed", "timeout"].includes(String(item.status || "").toLowerCase().replace(/[\s-]+/g, "_"))).length;
-      const exhaustedNoAnswer = unanswered >= maxAttempts;
-      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, exhaustedNoAnswer ? "not_answered" : "no_staff_available");
-      if (exhaustedNoAnswer) {
-        const patientId = call.patient?.id || call.patientId;
-        const escalation = bookingSettings.unansweredCallEscalation || "platform_notification";
-        const recipients = await repository.notifyCareManagerForPatient({
-          organizationId: call.organizationId, patientId, patientUhid: call.patient?.patientUhid || call.patient?.uhid,
-          title: "Staff availability calls unanswered",
-          message: `No suggested staff member answered ${unanswered} calls for ${call.patient?.name || "this patient"}. Please contact the patient to arrange care.`,
-          referenceType: "incoming_enquiry", referenceId: inboundCallId,
-          type: escalation === "call_care_manager" ? "care_manager_call_log" : "unanswered_call",
-        });
-        if (recipients.length && escalation === "call_care_manager") {
-          const from = bookingSettings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER;
-          if (from) {
-            const answer = new URL("/api/call-service/care-manager-alert/answer", process.env.PUBLIC_BASE_URL || "https://localhost");
-            answer.searchParams.set("message", `Athulya care alert. No suggested staff member answered repeated availability calls for ${call.patient?.name || "a patient"}. Please contact operations.`);
-            for (const manager of recipients) {
-              if (!manager.careManagerPhone) continue;
-              try { await vobiz.createCall({ to: manager.careManagerPhone, from, answerUrl: answer.toString() }); }
-              catch (error) { console.error(`[appointment-booking] care-manager call failed enquiry=${inboundCallId}: ${error.message}`); }
-            }
-          } else console.error(`[appointment-booking] care-manager call skipped: no caller ID enquiry=${inboundCallId}`);
-        }
-        if (recipients.length) console.info(`[appointment-booking] care-manager escalation created enquiry=${inboundCallId} mode=${escalation}`);
-      }
-      return;
-    }
-    const staff = candidates[candidateIndex];
-    const agents = await repository.listAgents(call.organizationId);
-    const language = staff.language || call.language || "en";
-    const agent = agents.find((item) => item.active && String(item.language).toLowerCase().startsWith(String(language).slice(0, 2).toLowerCase()))
-      || agents.find((item) => item.active);
-    if (!staff?.phoneNumber || !agent) {
-      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review");
-      return;
-    }
-    const settings = await repository.getOrganizationCallSettings(call.organizationId);
-    const from = settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER;
-    if (!from) {
-      await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "needs_review", { staff });
-      return;
-    }
-    const attempt = await repository.createAppointmentCallAttempt({
-      inboundCallId, organizationId: call.organizationId, candidateIndex, staff, agentId: agent.id,
-    });
-    if (!attempt || attempt.providerCallId) return;
-    await repository.setEnquiryBookingStatus(inboundCallId, call.organizationId, "calling", { staff });
-    try {
-      const result = await vobiz.createCall({ to: staff.phoneNumber, from, agentId: agent.id, appointmentCallId: attempt.id });
-      const providerCallId = result.call_uuid || result.request_uuid;
-      if (!providerCallId) throw new Error("Vobiz did not return a call ID for the appointment call");
-      await repository.attachAppointmentProviderCallId(attempt.id, providerCallId);
-      console.info(`[appointment-booking] placed call enquiry=${inboundCallId} candidate=${candidateIndex} attempt=${attempt.id}`);
-    } catch (error) {
-      await repository.markAppointmentCallFailed(attempt.id, error.message);
-      await queue.enqueue("process_appointment_call", { appointmentCallId: attempt.id }, { idempotencyKey: `appointment-result:${attempt.id}` });
-      throw error;
-    }
-  }
-
-  async function processAppointmentCall({ appointmentCallId }) {
-    const appointment = await repository.getAppointmentCallContext(appointmentCallId);
-    if (!appointment || appointment.status === "scheduled") return;
-    const call = await repository.getInboundCall(appointment.inboundCallId, appointment.organizationId);
-    if (!call || call.bookingScheduleSessionId) return;
-    const normalized = String(appointment.status || "").toLowerCase().replace(/[\s_-]+/g, "");
-    if (["noanswer", "failed", "busy", "timeout", "canceled", "cancelled"].includes(normalized)) {
-      await queue.enqueue("call_next_appointment_staff", { inboundCallId: appointment.inboundCallId, organizationId: appointment.organizationId, candidateIndex: appointment.candidateIndex + 1 }, {
-        idempotencyKey: `appointment:${appointment.inboundCallId}:candidate:${appointment.candidateIndex + 1}`,
-      });
-      return;
-    }
-    if (!appointment.recordingObjectKey) throw new Error("Staff call recording is not available yet");
-    const transcript = await transcriber.transcribe(
-      { key: appointment.recordingObjectKey, contentType: appointment.recordingContentType || "audio/wav" },
-      { organizationId: appointment.organizationId, language: appointment.language, speakerLabels: "calling agent and staff member" },
-    );
-    const analysis = call.enquiryAnalysis || {};
-    const activity = (await repository.listCareActivities(appointment.organizationId)).find((item) => item.id === analysis.activityId);
-    const outcome = await postCallAgent.extractStaffAvailability({
-      staff: appointment.staff, activity: { id: analysis.activityId, name: analysis.activityName || activity?.name, description: activity?.description },
-      requestedStartAt: analysis.requestedStartAt, transcript: transcript.text,
-    });
-    await repository.saveAppointmentCallTranscript(appointmentCallId, transcript.text, outcome);
-    const bookingSettings = await repository.getOrganizationCallSettings(appointment.organizationId);
-    if (bookingSettings.requireHumanVerificationForStaffBooking === true) {
-      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
-      return;
-    }
-    if (outcome.outcome === "unavailable") {
-      await queue.enqueue("call_next_appointment_staff", { inboundCallId: appointment.inboundCallId, organizationId: appointment.organizationId, candidateIndex: appointment.candidateIndex + 1 }, {
-        idempotencyKey: `appointment:${appointment.inboundCallId}:candidate:${appointment.candidateIndex + 1}`,
-      });
-      return;
-    }
-    // Activity and start time come from the authoritative enquiry context and
-    // are spoken back by the live agent before asking for confirmation. Require
-    // the staff member's clear acceptance, but do not require them to repeat
-    // those details verbatim in the recording/transcript.
-    if (outcome.outcome !== "available_confirmed" || !outcome.confirmedByStaff) {
-      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
-      return;
-    }
-    const agents = await repository.listAgents(appointment.organizationId);
-    const attendanceAgent = agents.find((item) => item.active && String(item.language).toLowerCase().startsWith(String(appointment.language).slice(0, 2).toLowerCase()))
-      || agents.find((item) => item.active);
-    if (!attendanceAgent) {
-      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
-      return;
-    }
-    const settings = await repository.getOrganizationCallSettings(appointment.organizationId);
-    let session;
-    try {
-      session = await appointmentTools.createAttendanceSchedule.invoke({
-        inboundCallId: appointment.inboundCallId, organizationId: appointment.organizationId,
-        staff: { ...appointment.staff, phoneNumber: appointment.staff.phoneNumber, language: appointment.staff.language || appointment.language },
-        attendanceAgentId: attendanceAgent.id, fromNumber: settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER,
-      }).then((value) => JSON.parse(value));
-    } catch (error) {
-      await repository.setEnquiryBookingStatus(appointment.inboundCallId, appointment.organizationId, "needs_review", { staff: appointment.staff });
-      console.warn(`[appointment-booking] confirmed staff needs schedule review enquiry=${appointment.inboundCallId} message=${String(error.message || error).slice(0, 200)}`);
-      return;
-    }
-    if (!session) throw new Error("Could not create attendance schedule from confirmed staff acceptance");
-    await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkInTask?.id, stage: "check_in", attemptNumber: 1 }, {
-      idempotencyKey: `call:${session.id}:check_in:1`, runAt: new Date(session.scheduledStartAt),
-    });
-    await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkOutTask?.id, stage: "check_out", attemptNumber: 1 }, {
-      idempotencyKey: `call:${session.id}:check_out:1`, runAt: new Date(session.scheduledEndAt),
-    });
-  }
-
-  const appointmentTools = createAppointmentBookingTools({ repository });
 
   async function extractIntent({ callAttemptId }) {
     const attempt = await repository.getCallAttempt(callAttemptId);
     if (!attempt) return;
-    const [session, sessionContext, transcript] = await Promise.all([
-      repository.getAttendanceSession(attempt.sessionId),
-      repository.getAgentSessionContext(attempt.sessionId, attempt.stage),
-      repository.getTranscriptForCall(callAttemptId),
-    ]);
+    const session = await repository.getAttendanceSession(attempt.sessionId);
+    if (!session || !attempt.outcome) {
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", { reason: "chiefvoice_post_call_result_missing", callAttemptId });
+      return;
+    }
+    const outcome = { ...attempt.outcome };
     const endedAt = new Date(attempt.endedAt || attempt.updatedAt || Date.now());
     const callEndedAt = Number.isFinite(endedAt.getTime()) ? endedAt.toISOString() : new Date().toISOString();
-    sessionContext.systemTimeAtCallEnd = callEndedAt;
-    sessionContext.callTargetRole = attempt.callTargetRole || "employee";
-    sessionContext.assignment = {
-      ...(sessionContext.assignment || {}),
-      timeZone: sessionContext.assignment?.timeZone || process.env.APP_TIMEZONE || "Asia/Kolkata",
-    };
-    const outcome = await postCallAgent.extractCallOutcome({
-      orgId: session.organizationId,
-      sessionContext,
-      transcript: transcript.text,
-    });
     const now = new Date(callEndedAt);
     const stageTimeField = attempt.stage === "check_in" ? "reportedArrivalTime" : "reportedDepartureTime";
     const stageTimeMentionedField = attempt.stage === "check_in" ? "reportedArrivalTimeMentioned" : "reportedDepartureTimeMentioned";
     const scheduledStageTime = attempt.stage === "check_in" ? session.scheduledStartAt : session.scheduledEndAt;
-
-    // A clearly future arrival/departure cannot be recorded as attendance.
-    // The live prompt asks the employee to correct it; if it remains wrong in
-    // the transcript, route it to human review rather than silently adjusting it.
     const reportedTimeError = validateReportedTime(outcome[stageTimeField], now);
     if (reportedTimeError) {
       outcome.exceptionCode = reportedTimeError;
       outcome.employeeIntent = "unclear";
       outcome.summary = `${outcome.summary || ""} ${reportedTimeError === "future_reported_time" ? "Reported attendance time is later than call completion." : "Reported attendance time could not be parsed."}`.trim();
-    } else if (
-      outcome.employeeIntent === (attempt.stage === "check_in" ? "arrival_confirmed" : "departure_confirmed") &&
-      outcome[stageTimeMentionedField] === false
-    ) {
-      // When the employee confirms attendance but does not state a clock time,
-      // use the imported schedule time for this stage as requested.
+    } else if (outcome.employeeIntent === (attempt.stage === "check_in" ? "arrival_confirmed" : "departure_confirmed") && outcome[stageTimeMentionedField] === false) {
       const scheduledDate = scheduledStageTime ? new Date(scheduledStageTime) : null;
       outcome[stageTimeField] = scheduledDate && Number.isFinite(scheduledDate.getTime()) ? scheduledDate.toISOString() : null;
       outcome[`${stageTimeField}Source`] = "scheduled_time_fallback";
@@ -496,15 +209,8 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
         outcome.employeeIntent = "unclear";
       }
     }
-    if (["will_arrive_later", "still_on_duty"].includes(outcome.employeeIntent)) {
-      const inferredCallbackAt = inferRequestedCallbackAt(transcript.text, attempt.updatedAt ? new Date(attempt.updatedAt) : new Date());
-      if (inferredCallbackAt) outcome.requestedCallbackAt = inferredCallbackAt;
-    }
     await repository.saveCallOutcome(callAttemptId, outcome);
-    console.info(`[attendance-worker] intent extracted callAttempt=${callAttemptId} stage=${attempt.stage} intent=${outcome.employeeIntent || "unknown"}`);
-    await queue.enqueue("evaluate_attendance", { sessionId: session.id, callAttemptId }, {
-      idempotencyKey: `decision:${callAttemptId}`,
-    });
+    await queue.enqueue("evaluate_attendance", { sessionId: session.id, callAttemptId }, { idempotencyKey: `decision:${callAttemptId}` });
   }
 
   async function evaluateAttendance({ sessionId, callAttemptId }) {
@@ -618,24 +324,24 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
         type: escalation === "call_care_manager" ? "care_manager_call_log" : "unanswered_call",
       });
       if (notifications.length && escalation === "call_care_manager") {
-        const from = settings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER;
-        if (!from) {
-          console.error(`[attendance-worker] care-manager escalation call skipped: no caller ID session=${session.id} stage=${stage}`);
-        } else {
-          const answer = new URL("/api/call-service/care-manager-alert/answer", process.env.PUBLIC_BASE_URL || "https://localhost");
-          const spokenMessage = `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`;
-          answer.searchParams.set("message", spokenMessage);
-          for (const manager of notifications) {
-            if (!manager.careManagerPhone) continue;
-            try {
-              await vobiz.createCall({ to: manager.careManagerPhone, from, answerUrl: answer.toString() });
-              console.info(`[attendance-worker] care-manager escalation call placed session=${session.id} stage=${stage}`);
-            } catch (error) {
-              console.error(`[attendance-worker] care-manager escalation call failed session=${session.id} stage=${stage}: ${error.message}`);
-            }
+        for (const manager of notifications) {
+          if (!manager.careManagerPhone) continue;
+          const escalationAttemptId = `escalation-${session.id}-${stage}-${manager.id}`;
+          try {
+            await chiefvoice.createOutboundCall({
+              to: manager.careManagerPhone, from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
+              sessionId: session.id, stage, callAttemptId: escalationAttemptId,
+              context: {
+                call_purpose: "care_manager_escalation",
+                message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`,
+                care_manager_name: manager.displayName || manager.name || "", organization_id: session.organizationId,
+              },
+            });
+          } catch (error) {
+            console.error(`[attendance-worker] ChiefVoice care-manager escalation failed session=${session.id} stage=${stage}: ${error.message}`);
           }
         }
-      } else if (notifications.length) {
+      }      } else if (notifications.length) {
         console.info(`[attendance-worker] care-manager platform notification created session=${session.id} stage=${stage} recipients=${notifications.length}`);
       }
       await repository.setStageStatus(sessionId, stage, "not_answered", {
@@ -654,24 +360,17 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings, t
     }
   }
 
-  const { handlers: postCallToolHandlers } = createPostCallTools({
+  // ChiefVoice owns live conversation and structured post-call extraction.
+  // This worker retains deterministic attendance policy, retries and delivery.
+  return {
     place_call: placeCall,
     process_call_result: processCallResult,
-    wait_for_recording: waitForRecording,
-    transcribe_call: transcribeCall,
-    transcribe_inbound_call: transcribeInboundCall,
-    call_next_appointment_staff: callNextAppointmentStaff,
-    process_appointment_call: processAppointmentCall,
     extract_intent: extractIntent,
     evaluate_attendance: evaluateAttendance,
     evaluate_session: evaluateSession,
     deliver_attendance: deliverAttendance,
-  });
-
-  // The async job queue dispatches these LangChain tools in its fixed,
-  // deterministic order. The model only extracts transcript facts; it does
-  // not receive authority to schedule, complete, or deliver sessions.
-  return { ...postCallToolHandlers, ...additionalHandlers };
+    ...additionalHandlers,
+  };
 }
 
 module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime, inferRequestedCallbackAt };
