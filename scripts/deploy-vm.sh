@@ -43,8 +43,7 @@ domain = sys.argv[2]
 updates = {
     "PUBLIC_DOMAIN": domain,
     "PUBLIC_BASE_URL": f"https://{domain}",
-    "VOBIZ_ANSWER_URL": f"https://{domain}/api/call-service/answer",
-    "VOBIZ_HANGUP_URL": f"https://{domain}/api/call-service/webhooks/call-status",
+    "CHIEFVOICE_WEBHOOK_CALLBACK_URL": f"https://{domain}/api/call-service/webhooks/chiefvoice",
 }
 lines = path.read_text().splitlines()
 found = set()
@@ -78,7 +77,7 @@ for line in Path(sys.argv[1]).read_text().splitlines():
     if line and not line.lstrip().startswith("#") and "=" in line:
         key, value = line.split("=", 1)
         values[key] = value
-required = ["POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY", "VOBIZ_STREAM_SECRET", "GOOGLE_CLOUD_PROJECT", "DEFAULT_ORGANIZATION_ID", "API_KEY_ADMIN_TOKEN"]
+required = ["POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY", "CHIEFVOICE_API_KEY", "CHIEFVOICE_LIVE_TEMPLATE_ID", "CHIEFVOICE_POST_CALL_TEMPLATE_ID", "CHIEFVOICE_WEBHOOK_SECRET", "DEFAULT_ORGANIZATION_ID", "API_KEY_ADMIN_TOKEN"]
 missing = [key for key in required if not values.get(key) or "replace-with" in values[key].lower() or "example-project" in values[key].lower()]
 if missing:
     print("Fill these .env values before deployment: " + ", ".join(missing), file=sys.stderr)
@@ -98,9 +97,7 @@ echo "Waiting for HTTPS health check at https://$DOMAIN/healthz ..."
 for attempt in $(seq 1 60); do
   if curl --silent --show-error --fail --connect-timeout 5 "https://$DOMAIN/healthz" >/dev/null 2>&1; then
     echo "Deployment is healthy: https://$DOMAIN"
-    echo "Vobiz answer URL: https://$DOMAIN/api/call-service/answer"
-    echo "Vobiz inbound answer URL: https://$DOMAIN/api/call-service/incoming/answer"
-    echo "Vobiz status URL: https://$DOMAIN/api/call-service/webhooks/call-status"
+    echo "ChiefVoice webhook URL: https://$DOMAIN/api/call-service/webhooks/chiefvoice"
     compose ps
     exit 0
   fi
