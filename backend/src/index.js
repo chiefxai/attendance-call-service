@@ -19,6 +19,7 @@ module.exports = {
   ...require("./infrastructure/integrations/attendance-backend-client"),
   ...require("./infrastructure/integrations/athulya-platform"),
   ...require("./infrastructure/integrations/athulya-attendance-client"),
+  ...require("./infrastructure/integrations/chiefvoice-client"),
   ...require("./infrastructure/telephony/vobiz-client"),
   ...require("./infrastructure/telephony/vobiz-signature"),
   ...require("./agents/vertex-agent"),
