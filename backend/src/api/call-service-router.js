@@ -1059,9 +1059,18 @@ router.get("/activities", async (req, res) => {
       const payload = req.body || {};
       const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
       const providerCallId = data.session_id || data.call_id || data.callId || data.id;
+      const eventId = data.event_id || data.eventId || payload.event_id || payload.eventId;
       const postCallResult = data.post_call_result || data.postCallResult || data.post_call?.result || data.result || data.analysis?.result;
       const rawStatus = data.call_status || data.status || data.state || (postCallResult ? "completed" : "");
-      if (!providerCallId || !rawStatus) return res.status(400).json({ error: "ChiefVoice session/call ID and status are required" });
+      if (!eventId || !providerCallId || !rawStatus) {
+        return res.status(400).json({ error: "ChiefVoice event ID, session/call ID, and status are required" });
+      }
+      const firstDelivery = await repository.claimChiefVoiceWebhookEvent({
+        eventId: String(eventId),
+        providerCallId: String(providerCallId),
+        eventType: data.event_type || data.type || payload.event_type || payload.type,
+      });
+      if (!firstDelivery) return res.status(200).json({ received: true, duplicate: true });
       const providerStatus = String(rawStatus).replace(/^call[._-]/i, "").replace(/^post[._-]call[._-]/i, "");
       const result = await repository.updateCallByProviderId({
         provider: "chiefvoice", providerCallId: String(providerCallId), status: providerStatus,
