@@ -33,7 +33,7 @@ export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accen
 
 export function StatusChip({ status }: { status: string }) {
   const normalized = status.toLowerCase().replaceAll("_", " ");
-  const label = ["not placed", "call not placed"].includes(normalized) ? "N/P" : normalized === "not answered" ? "N/A" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
+  const label = ["not placed", "call not placed"].includes(normalized) ? "Call Not Placed" : normalized === "not answered" ? "Not Answered" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
   const color = ["verified", "confirmed", "completed", "checked in", "active", "synced", "delivered", "check in", "check out"].includes(normalized) ? "success"
     : ["delayed", "not placed", "not answered", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
       : ["late", "retrying", "retry scheduled", "pending", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";
