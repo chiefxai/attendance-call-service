@@ -4,11 +4,8 @@ require("dotenv/config");
 
 const {
   createAttendanceHandlers,
-  createAttendancePostCallAgent,
   createMinioRecordingStore,
   createPostgresPool,
-  createVertexClientProvider,
-  createVertexTranscriber,
   createChiefVoiceClient,
   loadConfig,
   PostgresJobQueue,
@@ -30,26 +27,13 @@ async function main() {
     retry: config.worker.retry,
   });
   const chiefvoice = createChiefVoiceClient();
-  const getClientForOrg = createVertexClientProvider();
   const recordings = createMinioRecordingStore();
-  const transcriber = createVertexTranscriber({
-    project: process.env.GOOGLE_CLOUD_PROJECT,
-    location: process.env.VERTEX_TRANSCRIPTION_LOCATION || "global",
-    recordings,
-  });
-  const postCallAgent = createAttendancePostCallAgent({
-    project: process.env.GOOGLE_CLOUD_PROJECT,
-    location: process.env.VERTEX_SUMMARY_LOCATION || "global",
-  });
   const backend = createAttendanceBackendClient();
   const athulyaAttendanceClient = createAthulyaAttendanceClient({ repository });
   const handlers = createAttendanceHandlers({
     repository,
     queue,
     chiefvoice,
-    recordings,
-    transcriber,
-    postCallAgent,
     backend,
     athulyaAttendanceClient,
     retry: config.callRetry,
