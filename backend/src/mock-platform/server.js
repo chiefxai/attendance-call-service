@@ -61,7 +61,7 @@ schedules.set(scheduleFor(today).schedule_id, scheduleFor(today));
 
 function normalizeSchedule(input, existing = {}) {
   const date = String(input.schedule_date || existing.schedule_date || today).slice(0, 10);
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) throw Object.assign(new Error("schedule_date must use YYYY-MM-DD"), { status: 400 });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Object.assign(new Error("schedule_date must use YYYY-MM-DD"), { status: 400 });
   const value = { ...scheduleFor(date), ...existing, ...input, schedule_date: date };
   value.schedule_id = String(input.schedule_id || existing.schedule_id || `MOCK-${date.replaceAll("-", "")}-${crypto.randomUUID().slice(0, 8)}`);
   value.schedule_pk = String(input.schedule_pk || existing.schedule_pk || `MOCK-PK-${value.schedule_id}`);
