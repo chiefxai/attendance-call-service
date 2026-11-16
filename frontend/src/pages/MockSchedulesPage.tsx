@@ -48,6 +48,7 @@ export function MockSchedulesPage() {
   const queryClient = useQueryClient();
   const [date, setDate] = useState(todayIndia());
   const [editing, setEditing] = useState<Partial<MockAthulyaSchedule> | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<Partial<MockAthulyaSchedule>>(emptySchedule());
   const [error, setError] = useState("");
   const schedules = useQuery({ queryKey: ["mock-athulya-schedules"], queryFn: fetchMockAthulyaSchedules, refetchInterval: 5000 });
@@ -62,7 +63,7 @@ export function MockSchedulesPage() {
     mutationFn: async () => editing?.schedule_id
       ? updateMockAthulyaSchedule(editing.schedule_id, form)
       : createMockAthulyaSchedule(form),
-    onSuccess: async () => { setEditing(null); await refresh(); },
+    onSuccess: async () => { setEditing(null); setDialogOpen(false); await refresh(); },
     onError: (e: any) => setError(e?.response?.data?.message || e?.response?.data?.error || e.message || "Unable to save schedule"),
   });
   const deleteMutation = useMutation({
@@ -84,21 +85,21 @@ export function MockSchedulesPage() {
     completed: rows.filter((row) => row.schedule_status.toLowerCase() === "completed").length,
   }), [rows]);
 
-  const openCreate = () => { setEditing(null); setForm(emptySchedule()); setError(""); };
-  const openEdit = (row: MockAthulyaSchedule) => { setEditing(row); setForm({ ...row }); setError(""); };
+  const openCreate = () => { setEditing(null); setForm(emptySchedule()); setDialogOpen(true); setError(""); };
+  const openEdit = (row: MockAthulyaSchedule) => { setEditing(row); setForm({ ...row }); setDialogOpen(true); setError(""); };
   const setField = (key: keyof MockAthulyaSchedule, value: string) => setForm((current) => ({ ...current, [key]: value }));
 
   return (
     <Stack spacing={3}>
-      <PageHeader title="Mock Athulya schedules" subtitle="Manage test schedules, sync them into attendance, and inspect what the integration imported." />
+      <PageHeader title="Mock Athulya schedules" />
       <Alert severity="info">
         Mock schedules are isolated test data. The default status is <b>Completed</b>, so syncing imports the schedule and caregiver without placing outbound calls. Change the status only when you intentionally want to test call scheduling.
       </Alert>
       {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
       <Grid container spacing={2}>
-        <Grid item xs={12} sm={4}><MetricCard label="Mock schedules" value={metrics.total} icon={<AddRoundedIcon />} /></Grid>
-        <Grid item xs={12} sm={4}><MetricCard label="With caregiver" value={metrics.assigned} icon={<EditRoundedIcon />} /></Grid>
-        <Grid item xs={12} sm={4}><MetricCard label="Completed / safe" value={metrics.completed} icon={<SyncRoundedIcon />} /></Grid>
+        <Grid item xs={12} sm={4}><MetricCard label="Mock schedules" value={String(metrics.total)} icon={<AddRoundedIcon />} /></Grid>
+        <Grid item xs={12} sm={4}><MetricCard label="With caregiver" value={String(metrics.assigned)} icon={<EditRoundedIcon />} /></Grid>
+        <Grid item xs={12} sm={4}><MetricCard label="Completed / safe" value={String(metrics.completed)} icon={<SyncRoundedIcon />} /></Grid>
       </Grid>
       <Card variant="outlined">
         <CardContent>
@@ -174,7 +175,7 @@ export function MockSchedulesPage() {
           </Table>
         </CardContent>
       </Card>
-      <Dialog open={Boolean(form)} onClose={() => setForm({})} fullWidth maxWidth="md">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle>{editing ? "Edit mock schedule" : "Add mock schedule"}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ pt: 1 }}>
@@ -190,7 +191,7 @@ export function MockSchedulesPage() {
           </Grid>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setForm({})}>Cancel</Button>
+          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
           <Button variant="contained" disabled={saveMutation.isPending || !form.client_name || !form.patient_id || !form.schedule_date} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? "Saving…" : "Save schedule"}</Button>
         </DialogActions>
       </Dialog>
