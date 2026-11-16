@@ -38,7 +38,6 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Care Givers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
-  { label: "Scheduled calls", path: "/scheduled-calls", icon: <EventNoteRoundedIcon />, adminOnly: true },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
