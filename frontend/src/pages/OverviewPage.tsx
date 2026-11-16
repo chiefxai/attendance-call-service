@@ -76,7 +76,7 @@ function buildOverviewCharts(records: AttendanceRecord[]) {
   };
 }
 
-export function OverviewPage({ showAgents = false, userRole = "admin", embedded = false }: { showAgents?: boolean; userRole?: "admin" | "care_manager"; embedded?: boolean }) {
+export function OverviewPage({ userRole = "admin", embedded = false }: { userRole?: "admin" | "care_manager"; embedded?: boolean }) {
   const navigate = useNavigate();
   const [sessionId, setSessionId] = useState("");
   const [drilldown, setDrilldown] = useState<{ title: string; records: AttendanceRecord[] } | null>(null);
