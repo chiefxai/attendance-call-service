@@ -1,9 +1,8 @@
 "use strict";
 
 module.exports = {
-  // HTTP API and realtime call transport
+  // HTTP API and recording management
   ...require("./api/call-service-router"),
-  ...require("./realtime/vobiz-live-runtime"),
   ...require("./recording/manager"),
 
   // Attendance domain and async processing
@@ -20,9 +19,5 @@ module.exports = {
   ...require("./infrastructure/integrations/athulya-platform"),
   ...require("./infrastructure/integrations/athulya-attendance-client"),
   ...require("./infrastructure/integrations/chiefvoice-client"),
-  ...require("./infrastructure/telephony/vobiz-client"),
-  ...require("./infrastructure/telephony/vobiz-signature"),
-  ...require("./agents/vertex-agent"),
-  ...require("./agents/appointment-booking-tools"),
   ...require("./config"),
 };
