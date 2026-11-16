@@ -4,6 +4,7 @@ import CallRoundedIcon from "@mui/icons-material/CallRounded";
 import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import PhoneMissedRoundedIcon from "@mui/icons-material/PhoneMissedRounded";
+import TranslateRoundedIcon from "@mui/icons-material/TranslateRounded";
 import { fetchCallCenterData, fetchOperationsSummary } from "../api/client";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 
@@ -17,7 +18,7 @@ export function CallCenterPage() {
   const retryQueue = calls.data?.retryQueue || [];
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="VOBIZ OUTBOUND / VERTEX LIVE AUDIO" title="AI call center" description="Monitor currently connected employee calls and configure the live voice agent." />
+    <PageHeader eyebrow="CHIEFVOICE OUTBOUND" title="AI call center" description="Monitor employee attendance calls placed through ChiefVoice." />
     {(calls.isError || summary.isError) && <Alert severity="error">Could not load the call center feed. Check backend connectivity and workspace access.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Calls today" value={summary.data?.callsToday.toLocaleString() ?? "—"} detail="Outbound call attempts" icon={<CallRoundedIcon />} /></Grid>
