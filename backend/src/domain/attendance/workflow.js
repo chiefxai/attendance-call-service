@@ -218,7 +218,17 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
     if (!session || session.sessionStatus === "completed") return;
     if (callAttemptId) {
       const attempt = await repository.getCallAttempt(callAttemptId);
-      const decision = chooseAttendanceAction(attempt.stage, attempt.outcome || {});
+      if (!attempt) return;
+      const outcome = { ...(attempt.outcome || {}) };
+      if (!outcome.requestedCallbackAt && ["will_arrive_later", "still_on_duty"].includes(outcome.employeeIntent)) {
+        const transcript = await repository.getTranscriptForCall(callAttemptId);
+        const referenceDate = new Date(attempt.endedAt || Date.now());
+        outcome.requestedCallbackAt = inferRequestedCallbackAt(transcript?.text, referenceDate);
+        if (outcome.requestedCallbackAt) {
+          await repository.saveCallOutcome(callAttemptId, outcome);
+        }
+      }
+      const decision = chooseAttendanceAction(attempt.stage, outcome);
       if (decision.action === "confirm_stage") {
         await repository.setStageStatus(sessionId, attempt.stage, "confirmed", { reportedAt: decision.reportedAt, nextCallAt: null, callAttemptId });
         await queue.enqueue("deliver_attendance", { sessionId, stage: attempt.stage, callAttemptId }, {
