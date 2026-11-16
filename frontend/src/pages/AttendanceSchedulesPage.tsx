@@ -38,17 +38,11 @@ function scheduledInstant(dateValue: string | null | undefined, timeValue: strin
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-type AttendanceStatus = "upcoming" | "in_progress" | "calling" | "processing" | "not_placed" | "attention_required" | "completed" | "cancelled";
+type AttendanceStatus = "upcoming" | "in_progress" | "delayed" | "retry_scheduled" | "attention_required" | "completed" | "cancelled";
 
-function stageIsDelayed(schedule: AthulyaSchedule, records: AttendanceRecord[], stage: "checkIn" | "checkOut") {
-  const scheduledTime = stage === "checkIn" ? schedule.startTime : schedule.endTime;
-  const due = scheduledInstant(schedule.date, scheduledTime);
-  const overdue = Boolean(due && due.getTime() <= Date.now());
-  if (!records.length) return overdue;
-  return records.some((record) => {
-    const status = record[stage].status;
-    return status === "follow_up" || status === "missed" || (overdue && status === "scheduled");
-  });
+function stageIsDelayed(records: AttendanceRecord[], stage: "checkIn" | "checkOut") {
+  return records.some((record) => record[stage].status === "follow_up"
+    && (stage === "checkIn" ? record.stageReasons.checkIn : record.stageReasons.checkOut) === "employee_requested_callback");
 }
 
 function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]): AttendanceStatus {
@@ -59,7 +53,7 @@ function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]):
   const checkOutDue = scheduledInstant(schedule.date, schedule.endTime);
   const now = Date.now();
   if (!records.length) {
-    return checkInDue && checkOutDue && now > checkOutDue.getTime() ? "not_placed" : "upcoming";
+    return checkInDue && checkOutDue && now > checkOutDue.getTime() ? "attention_required" : "upcoming";
   }
 
   const stages = records.flatMap((record) => [
@@ -71,17 +65,20 @@ function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]):
     || stages.some(({ status }) => ["not_answered", "missed", "review"].includes(status))) {
     return "attention_required";
   }
-  if (stages.some(({ status }) => status === "calling")) return "calling";
-  if (stages.some(({ status }) => status === "processing")) return "processing";
+  if (records.some((record) =>
+    (record.checkIn.status === "follow_up" && record.stageReasons.checkIn === "not_answered")
+    || (record.checkOut.status === "follow_up" && record.stageReasons.checkOut === "not_answered")
+  )) return "retry_scheduled";
 
-  // A requested callback or a successful stage with the other stage pending
-  // keeps the schedule in progress. The individual stage column shows Delayed.
-  if (stages.some(({ status }) => ["confirmed", "follow_up"].includes(status))
-    || records.some((record) => record.checkInAttemptCount > 0 || record.checkOutAttemptCount > 0)) {
-    return "in_progress";
-  }
+  if (records.some((record) =>
+    (record.checkIn.status === "follow_up" && record.stageReasons.checkIn === "employee_requested_callback")
+    || (record.checkOut.status === "follow_up" && record.stageReasons.checkOut === "employee_requested_callback")
+  )) return "delayed";
 
-  if (checkInDue && checkOutDue && now > checkOutDue.getTime()) return "not_placed";
+  if (stages.some(({ status }) => ["calling", "processing", "confirmed", "follow_up"].includes(status))
+    || records.some((record) => record.checkInAttemptCount > 0 || record.checkOutAttemptCount > 0)) return "in_progress";
+
+  if (checkInDue && checkOutDue && now > checkOutDue.getTime()) return "attention_required";
   return "upcoming";
 }
 
@@ -207,7 +204,7 @@ export function AttendanceSchedulesPage() {
   const statusesBySchedule = new Map(schedulesData.map((schedule) => [schedule.id, scheduleStatus(schedule, matchingAttendance(schedule, attendance.data || []))]));
   const delayedBySchedule = new Map(schedulesData.map((schedule) => {
     const records = matchingAttendance(schedule, attendance.data || []);
-    return [schedule.id, stageIsDelayed(schedule, records, "checkIn") || stageIsDelayed(schedule, records, "checkOut")];
+    return [schedule.id, stageIsDelayed(records, "checkIn") || stageIsDelayed(records, "checkOut")];
   }));
   const nextCallBySchedule = new Map(schedulesData.map((schedule) => {
     const nextCalls = matchingAttendance(schedule, attendance.data || []).flatMap((record) => [record.checkIn.nextCallAt, record.checkOut.nextCallAt])
@@ -218,11 +215,10 @@ export function AttendanceSchedulesPage() {
   const counts = schedulesData.reduce((result, schedule) => {
     const status = statusesBySchedule.get(schedule.id) || "upcoming";
     result[status] += 1;
-    if (delayedBySchedule.get(schedule.id)) result.delayed += 1;
     return result;
-  }, { upcoming: 0, in_progress: 0, calling: 0, processing: 0, attention_required: 0, delayed: 0, not_placed: 0, completed: 0, cancelled: 0 });
+  }, { upcoming: 0, in_progress: 0, delayed: 0, retry_scheduled: 0, attention_required: 0, completed: 0, cancelled: 0 });
   const filteredSchedules = schedulesData.filter((schedule) => statusFilter === "all"
-    || (statusFilter === "delayed" ? delayedBySchedule.get(schedule.id) : statusesBySchedule.get(schedule.id) === statusFilter));
+    || statusesBySchedule.get(schedule.id) === statusFilter);
   useEffect(() => setPage(0), [selectedDate, statusFilter, schedulesData.length]);
   const pageRows = filteredSchedules.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const dateLabel = selectedDate
@@ -250,11 +246,9 @@ export function AttendanceSchedulesPage() {
             <MenuItem value="all">All statuses</MenuItem>
             <MenuItem value="upcoming">Upcoming</MenuItem>
             <MenuItem value="in_progress">In Progress</MenuItem>
-            <MenuItem value="calling">Calling</MenuItem>
-            <MenuItem value="processing">Processing</MenuItem>
+            <MenuItem value="delayed">Delayed</MenuItem>
+            <MenuItem value="retry_scheduled">Retry Scheduled</MenuItem>
             <MenuItem value="attention_required">Attention Required</MenuItem>
-            <MenuItem value="delayed">Delayed stages</MenuItem>
-            <MenuItem value="not_placed">Call Not Placed</MenuItem>
             <MenuItem value="completed">Completed</MenuItem>
             <MenuItem value="cancelled">Cancelled</MenuItem>
           </Select>
@@ -277,13 +271,9 @@ export function AttendanceSchedulesPage() {
                   <Stack spacing={0.5} alignItems="flex-start">
                     {(() => {
                       const status = statusesBySchedule.get(schedule.id) || "upcoming";
-                      return <>
-                        <StatusChip status={status} />
-                        {delayedBySchedule.get(schedule.id) && <StatusChip status="delayed" />}
-                      </>;
+                      return <StatusChip status={status} />;
                     })()}
-                    {delayedBySchedule.get(schedule.id) && nextCallBySchedule.get(schedule.id) && <Typography variant="caption" color="error.main">Next call {dateTimeLabel(nextCallBySchedule.get(schedule.id))}</Typography>}
-                    {delayedBySchedule.get(schedule.id) && !nextCallBySchedule.get(schedule.id) && <Typography variant="caption" color="error.main">No next call scheduled</Typography>}
+
                   </Stack>
                 </TableCell>
                 <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
@@ -306,7 +296,7 @@ export function AttendanceSchedulesPage() {
               <Typography variant="h5" fontWeight={750} sx={{ overflowWrap: "anywhere" }}>{selectedSchedule.patient.name || "Patient schedule"}</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: .35 }}>{selectedSchedule.service || "Care service"}</Typography>
             </Box>
-            <StatusChip status={selectedSchedule.status || "pending"} />
+            <StatusChip status={scheduleStatus(selectedSchedule, scheduleSessions)} />
           </Stack>
         </DialogTitle>
         <DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 2.5, bgcolor: "#fbfcfb" }}>
