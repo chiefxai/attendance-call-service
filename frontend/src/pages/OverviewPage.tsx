@@ -104,7 +104,7 @@ export function OverviewPage({ userRole = "admin" }: { userRole?: "admin" | "car
         <AttendanceStatusChart slices={charts.statusSlices} onSelectStatus={filterStatus} />
       </SectionCard></Grid>
     </Grid>
-    <ReportsPage embedded />
+    <ReportsPage />
     <Dialog open={Boolean(drilldown)} onClose={() => setDrilldown(null)} fullWidth maxWidth="md">
       <DialogTitle>{drilldown?.title}</DialogTitle>
       <DialogContent dividers>
