@@ -1897,10 +1897,10 @@ class PostgresRepository {
     const r = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE id=$1", [id]);
     return this.mapAttempt(r.rows[0]);
   }
-  async attachProviderCallId(id, providerCallId, response) {
+  async attachProviderCallId(id, providerCallId, response, provider = "vobiz") {
     await this.pool.query(
-      `UPDATE attendance_call_attempts SET provider_call_id=$2,status='ringing',raw_provider_event=$3::jsonb,updated_at=NOW() WHERE id=$1`,
-      [id, providerCallId, JSON.stringify(response || {})],
+      `UPDATE attendance_call_attempts SET provider=$4,provider_call_id=$2,status='ringing',raw_provider_event=$3::jsonb,updated_at=NOW() WHERE id=$1`,
+      [id, providerCallId, JSON.stringify(response || {}), provider],
     );
   }
   async markCallPlacing(id) {
