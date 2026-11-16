@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
@@ -30,16 +30,16 @@ import { CareManagersPage } from "./pages/CareManagersPage";
 import { OperationsPage } from "./pages/OperationsPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import MockSchedulesPage from "./pages/MockSchedulesPage";
-import { fetchCurrentUser, signOut, type WebUser } from "./api/client";
+import { fetchCurrentUser, fetchMockPlatformServerSettings, signOut, type WebUser } from "./api/client";
 
 const drawerWidth = 252;
-const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnly?: boolean }> = [
+const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnly?: boolean; mockOnly?: boolean }> = [
   { label: "Overview", path: "/", icon: <GridViewRoundedIcon /> },
   { label: "Care Managers", path: "/care-managers", icon: <SupervisorAccountRoundedIcon />, adminOnly: true },
   { label: "Care Givers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
-  { label: "Mock schedules", path: "/mock-schedules", icon: <ScienceRoundedIcon />, adminOnly: true },
+  { label: "Mock schedules", path: "/mock-schedules", icon: <ScienceRoundedIcon />, adminOnly: true, mockOnly: true },
   { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
@@ -50,6 +50,8 @@ function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState<WebUser | null>(null);
+  const mockPlatform = useQuery({ queryKey: ["mock-platform-server"], queryFn: fetchMockPlatformServerSettings, enabled: user?.role === "admin", retry: false, refetchOnWindowFocus: true });
+  const mockSchedulesEnabled = mockPlatform.data?.enabled === true;
   useEffect(() => {
     const onUnauthorized = () => {
       setUser(null);
@@ -75,7 +77,7 @@ function App() {
       </Stack>
       <Typography variant="overline" color="text.secondary" sx={{ px: 1.5, letterSpacing: ".12em", fontWeight: 700 }}>WORKSPACE</Typography>
       <List sx={{ mt: 1, p: 0 }}>
-        {navigation.filter((item) => !item.adminOnly || user?.role === "admin").map((item) => (
+        {navigation.filter((item) => (!item.adminOnly || user?.role === "admin") && (!item.mockOnly || mockSchedulesEnabled)).map((item) => (
           <ListItemButton key={item.path} component={NavLink} to={item.path} onClick={() => setMobileOpen(false)}
             sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: "text.secondary", "&.active": { color: "primary.dark", bgcolor: "#eaf3ef", "& .MuiListItemIcon-root": { color: "primary.main" } } }}>
             <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}>{item.icon}</ListItemIcon>
@@ -115,7 +117,7 @@ function App() {
         <Routes>
           <Route path="/" element={<OperationsPage userRole={user.role} />} />
           <Route path="/attendance" element={<AttendanceSchedulesPage />} />
-          <Route path="/mock-schedules" element={user.role === "admin" ? <MockSchedulesPage /> : <Navigate to="/" replace />} />
+          <Route path="/mock-schedules" element={user.role === "admin" && mockSchedulesEnabled ? <MockSchedulesPage /> : <Navigate to="/settings" replace />} />
           <Route path="/scheduled-calls" element={user.role === "admin" ? <ScheduledCallsPage /> : <Navigate to="/" replace />} />
           <Route path="/schedules" element={<AttendanceSchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
