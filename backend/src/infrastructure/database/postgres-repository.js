@@ -1897,7 +1897,7 @@ class PostgresRepository {
     const r = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE id=$1", [id]);
     return this.mapAttempt(r.rows[0]);
   }
-  async attachProviderCallId(id, providerCallId, response, provider = "vobiz") {
+  async attachProviderCallId(id, providerCallId, response, provider = "chiefvoice") {
     await this.pool.query(
       `UPDATE attendance_call_attempts SET provider=$4,provider_call_id=$2,status='ringing',raw_provider_event=$3::jsonb,updated_at=NOW() WHERE id=$1`,
       [id, providerCallId, JSON.stringify(response || {}), provider],
@@ -1974,7 +1974,7 @@ class PostgresRepository {
         if (terminal || raw.EndTime) await client.query("DELETE FROM outbound_call_slots WHERE call_attempt_id=$1", [row.id]);
         await client.query(
           `INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
-           VALUES ($1,$2,'vobiz.call_status',$3::jsonb)`,
+           VALUES ($1,$2,'call_provider.status',$3::jsonb)`,
           [row.organization_id, row.session_id, JSON.stringify({
             provider: event.provider, providerCallId: event.providerCallId, status,
             durationSeconds: event.durationSeconds || null, startTime: raw.StartTime || null,
