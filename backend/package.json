@@ -2,7 +2,7 @@
   "name": "attendance-call-service-module",
   "version": "0.1.0",
   "private": true,
-  "description": "Reusable Vobiz outbound attendance calling module with Vertex AI agent support",
+  "description": "Attendance calling module powered by ChiefVoice live and post-call templates",
   "main": "index.js",
   "engines": {
     "node": ">=20"
