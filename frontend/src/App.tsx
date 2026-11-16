@@ -121,7 +121,7 @@ function App() {
           <Route path="/scheduled-calls" element={user.role === "admin" ? <ScheduledCallsPage /> : <Navigate to="/" replace />} />
           <Route path="/schedules" element={<AttendanceSchedulesPage />} />
           <Route path="/call-center" element={<CallCenterPage />} />
-          <Route path="/reports" element={<Navigate to="/?view=reports" replace />} />
+          <Route path="/reports" element={<Navigate to="/" replace />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
           <Route path="/care-managers" element={user.role === "admin" ? <CareManagersPage /> : <Navigate to="/" replace />} />
