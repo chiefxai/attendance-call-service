@@ -40,11 +40,6 @@ function scheduledInstant(dateValue: string | null | undefined, timeValue: strin
 
 type AttendanceStatus = "upcoming" | "in_progress" | "delayed" | "retry_scheduled" | "attention_required" | "completed" | "cancelled";
 
-function stageIsDelayed(records: AttendanceRecord[], stage: "checkIn" | "checkOut") {
-  return records.some((record) => record[stage].status === "follow_up"
-    && (stage === "checkIn" ? record.stageReasons.checkIn : record.stageReasons.checkOut) === "employee_requested_callback");
-}
-
 function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]): AttendanceStatus {
   const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\s_-]/g, "");
   if (["cancelled", "canceled"].includes(externalStatus)) return "cancelled";
