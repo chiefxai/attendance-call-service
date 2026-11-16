@@ -13,7 +13,7 @@ function downloadCsv(rows: AttendanceRecord[]) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function ReportsPage({ embedded = false }: { embedded?: boolean }) {
+export function ReportsPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const query = useQuery({ queryKey: ["attendance", "report"], queryFn: () => fetchAttendance({ limit: 500 }), refetchInterval: 30_000 });
