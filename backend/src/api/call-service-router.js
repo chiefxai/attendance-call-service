@@ -6,14 +6,6 @@ const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
 
-const AGENT_DEFAULTS = {
-  active: true,
-  voice: null,
-  language: "en",
-  systemPrompt: "",
-  runtimeConfig: {},
-};
-
 function createCallServiceRouter({ express, repository, queue, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
   assertRepository(repository);
@@ -670,50 +662,8 @@ router.get("/activities", async (req, res) => {
     } catch (error) { fail(res, error); }
   });
 
-  router.post("/incoming-calls/:id/resolve", async (req, res) => {
-    try {
-      const body = req.body || {};
-      if (Object.keys(body).some((key) => key !== "staffId")) {
-        return res.status(400).json({ error: "Only staffId is accepted; enquiry status is controlled by the system." });
-      }
-      const staffId = String(body.staffId || "").trim();
-      if (!staffId) return res.status(400).json({ error: "Choose a staff member to resolve this enquiry." });
-      const organizationId = org(req);
-      const pendingCall = await repository.getInboundCall(req.params.id, organizationId);
-      if (!pendingCall || !await assertInboundVisible(req, req.params.id, res)) return;
-      const analysis = pendingCall.enquiryAnalysis || {};
-      const requestedStart = new Date(analysis.requestedStartAt || "");
-      const requestedEnd = new Date(analysis.requestedEndAt || "");
-      const canSchedule = Boolean(analysis.activityId && Number.isFinite(requestedStart.getTime())
-        && (Number.isFinite(requestedEnd.getTime()) || Number(analysis.durationMinutes) > 0));
-      if (canSchedule) {
-        const staff = await repository.getActiveStaffDirectoryRecord(organizationId, staffId);
-        if (!staff) return res.status(400).json({ error: "Selected staff member is not active in this organization." });
-        if (!staff.phoneNumber) return res.status(400).json({ error: "Selected staff member has no registered phone number." });
-        const agents = await repository.listAgents(organizationId);
-        const attendanceAgent = agents.find((item) => item.active && String(item.language).toLowerCase().startsWith(String(staff.language || pendingCall.language).slice(0, 2).toLowerCase()))
-          || agents.find((item) => item.active);
-        if (!attendanceAgent) return res.status(409).json({ error: "Configure an active attendance voice agent before assigning this enquiry." });
-        const settings = await repository.getOrganizationCallSettings(organizationId);
-        const fromNumber = settings.defaultFromNumber || process.env.CHIEFVOICE_CALLER_ID;
-        if (!fromNumber) return res.status(409).json({ error: "Configure the default ChiefVoice caller ID in Settings before assigning this enquiry." });
-        const session = await repository.saveAppointmentAttendanceSchedule({
-          inboundCallId: req.params.id, organizationId, staff, attendanceAgent, fromNumber,
-        });
-        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkInTask?.id, stage: "check_in", attemptNumber: 1 }, {
-          idempotencyKey: `call:${session.id}:check_in:1`, runAt: new Date(session.scheduledStartAt),
-        });
-        await queue.enqueue("place_call", { sessionId: session.id, taskId: session.checkOutTask?.id, stage: "check_out", attemptNumber: 1 }, {
-          idempotencyKey: `call:${session.id}:check_out:1`, runAt: new Date(session.scheduledEndAt),
-        });
-        const updated = await repository.getInboundCall(req.params.id, organizationId);
-        return res.json({ id: updated.id, enquiryStatus: updated.enquiryStatus, resolvedStaff: updated.resolvedStaff,
-          resolvedAt: updated.resolvedAt, bookingStatus: updated.bookingStatus, bookingScheduleSessionId: session.id });
-      }
-      const call = await repository.resolveInboundEnquiry(req.params.id, org(req), staffId);
-      if (!call) return res.status(404).json({ error: "Incoming call not found" });
-      res.json({ id: call.id, enquiryStatus: call.enquiryStatus, resolvedStaff: call.resolvedStaff, resolvedAt: call.resolvedAt });
-    } catch (error) { fail(res, error); }
+  router.post("/incoming-calls/:id/resolve", (_req, res) => {
+    res.status(410).json({ error: "Legacy inbound appointment booking is disabled. Create attendance assignments through the ChiefVoice outbound workflow." });
   });
 
   router.get("/incoming-calls/:id/recording", async (req, res) => {
@@ -964,82 +914,6 @@ router.get("/activities", async (req, res) => {
         "Content-Length": String(buffer.length),
       });
       return res.status(200).send(buffer);
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/agents", async (req, res) => {
-    try { res.json(await repository.listAgents(org(req))); } catch (error) { fail(res, error); }
-  });
-
-  router.post("/agents", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const organizationId = org(req);
-      const body = req.body || {};
-      if (!body.name?.trim()) return res.status(400).json({ error: "name is required" });
-      const agent = await repository.createAgent(organizationId, {
-        ...AGENT_DEFAULTS,
-        ...body,
-        name: body.name.trim(),
-      });
-      res.status(201).json(agent);
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/agents/:id", async (req, res) => {
-    try {
-      const agent = await repository.getAgent(org(req), req.params.id);
-      if (!agent) return res.status(404).json({ error: "Agent not found" });
-      res.json(agent);
-    } catch (error) { fail(res, error); }
-  });
-
-  router.patch("/agents/:id", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const agent = await repository.updateAgent(org(req), req.params.id, req.body || {});
-      if (!agent) return res.status(404).json({ error: "Agent not found" });
-      res.json(agent);
-    } catch (error) { fail(res, error); }
-  });
-
-  router.delete("/agents/:id", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const removed = await repository.deleteAgent(org(req), req.params.id);
-      if (!removed) return res.status(404).json({ error: "Agent not found" });
-      res.json({ success: true });
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/campaigns", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try { res.json(await repository.listCampaigns(org(req))); } catch (error) { fail(res, error); }
-  });
-
-  router.post("/campaigns", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const organizationId = org(req);
-      const { name, agentId, fromNumber } = req.body || {};
-      if (!name?.trim() || !agentId || !fromNumber) {
-        return res.status(400).json({ error: "name, agentId and fromNumber are required" });
-      }
-      const agent = await repository.getAgent(organizationId, agentId);
-      if (!agent || !agent.active) return res.status(400).json({ error: "An active agent in this organization is required" });
-      const campaign = await repository.createCampaign(organizationId, {
-        name: name.trim(), agentId, fromNumber, status: "draft",
-      });
-      res.status(201).json(campaign);
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/campaigns/:id", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const campaign = await repository.getCampaign(org(req), req.params.id);
-      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
-      res.json(campaign);
     } catch (error) { fail(res, error); }
   });
 
