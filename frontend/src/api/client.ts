@@ -149,6 +149,49 @@ export async function setMockPlatformServerEnabled(enabled: boolean) {
   return response.data;
 }
 
+export interface MockAthulyaSchedule {
+  schedule_id: string;
+  schedule_pk: string;
+  schedule_date: string;
+  start_time: string;
+  end_time: string;
+  client_name: string;
+  patient_id: string;
+  patient_uhid: string;
+  patient_address: string;
+  care_manager_id: string;
+  care_manager_name: string;
+  care_manager_phone: string;
+  service_name: string;
+  branch: string;
+  schedule_status: string;
+  caregiver_schedule_status: string;
+  caregiver_ids: string;
+  caregiver_names: string;
+  caregiver_phones: string;
+  vendor_company: string;
+}
+
+export async function fetchMockAthulyaSchedules() {
+  const response = await api.get<{ total: number; data: MockAthulyaSchedule[] }>("/mock-schedules");
+  return response.data;
+}
+
+export async function createMockAthulyaSchedule(payload: Partial<MockAthulyaSchedule>) {
+  const response = await api.post<{ status: string; data: MockAthulyaSchedule }>("/mock-schedules", payload);
+  return response.data;
+}
+
+export async function updateMockAthulyaSchedule(id: string, payload: Partial<MockAthulyaSchedule>) {
+  const response = await api.put<{ status: string; data: MockAthulyaSchedule }>(`/mock-schedules/${encodeURIComponent(id)}`, payload);
+  return response.data;
+}
+
+export async function deleteMockAthulyaSchedule(id: string) {
+  const response = await api.delete<{ status: string }>(`/mock-schedules/${encodeURIComponent(id)}`);
+  return response.data;
+}
+
 export async function fetchAthulyaIntegration() {
   const response = await api.get<AthulyaIntegrationSettings>("/integrations/athulya");
   return response.data;
