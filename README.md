@@ -34,7 +34,7 @@ Copy `.env.docker.example` to `.env` and configure:
 - `CHIEFVOICE_RECORDING_ALLOWED` — defaults to `false`; enable only when recording is explicitly intended
 - `CHIEFVOICE_POLL_INITIAL_MS`, `CHIEFVOICE_POLL_INTERVAL_MS`, `CHIEFVOICE_POLL_MAX_ATTEMPTS` — durable status/result polling fallback settings
 
-Register the callback in the **same ChiefVoice tenant/API-key scope** used for outbound calls. The API key must have both `calls:write` and `webhooks:write` scopes, and a Vobiz sender number assigned to it that matches `CHIEFVOICE_CALLER_ID`. After deploying the attendance service and setting its public URL, load the server-side environment and run:
+Register the callback in the **same ChiefVoice tenant/API-key scope** used for outbound calls. The API key must have both `calls:write` and `webhooks:write` scopes, and a caller ID assigned to it that matches `CHIEFVOICE_CALLER_ID`. After deploying the attendance service and setting its public URL, load the server-side environment and run:
 
 ```bash
 set -a; source .env; set +a

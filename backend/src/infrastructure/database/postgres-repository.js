@@ -646,64 +646,6 @@ class PostgresRepository {
     };
   }
 
-  async listAgents(orgId) {
-    const r = await this.pool.query("SELECT * FROM call_agents WHERE organization_id=$1 ORDER BY name", [orgId]);
-    return r.rows.map((row) => ({ ...row, ...json(row.config), systemPrompt: row.system_prompt, language: row.language }));
-  }
-  async getAgent(orgId, id) {
-    const r = await this.pool.query("SELECT * FROM call_agents WHERE organization_id=$1 AND id=$2", [orgId, id]);
-    const row = r.rows[0];
-    return row ? { ...row, ...json(row.config), systemPrompt: row.system_prompt, language: row.language } : null;
-  }
-  async createAgent(orgId, agent) {
-    const { rows } = await this.pool.query(
-      `INSERT INTO call_agents (organization_id,name,active,language,system_prompt,config)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,
-      [orgId, agent.name, agent.active !== false, agent.language || "en", agent.systemPrompt || "", JSON.stringify(agent)],
-    );
-    return this.getAgent(orgId, rows[0].id);
-  }
-  async updateAgent(orgId, id, patch) {
-    const current = await this.getAgent(orgId, id);
-    if (!current) return null;
-    const next = { ...current, ...patch };
-    await this.pool.query(
-      `UPDATE call_agents SET name=$3, active=$4, language=$5, system_prompt=$6, config=$7::jsonb, updated_at=NOW()
-       WHERE organization_id=$1 AND id=$2`,
-      [orgId, id, next.name, next.active !== false, next.language || "en", next.systemPrompt || "", JSON.stringify(next)],
-    );
-    return this.getAgent(orgId, id);
-  }
-  async deleteAgent(orgId, id) {
-    const r = await this.pool.query("DELETE FROM call_agents WHERE organization_id=$1 AND id=$2 RETURNING id", [orgId, id]);
-    return r.rowCount > 0;
-  }
-
-  async listCampaigns(orgId) {
-    const r = await this.pool.query("SELECT * FROM call_campaigns WHERE organization_id=$1 ORDER BY created_at DESC", [orgId]);
-    return r.rows.map((row) => ({ ...row, ...json(row.config) }));
-  }
-  async getCampaign(orgId, id) {
-    const r = await this.pool.query("SELECT * FROM call_campaigns WHERE organization_id=$1 AND id=$2", [orgId, id]);
-    return r.rows[0] ? { ...r.rows[0], ...json(r.rows[0].config) } : null;
-  }
-  async createCampaign(orgId, campaign) {
-    const r = await this.pool.query(
-      `INSERT INTO call_campaigns (organization_id,name,agent_id,from_number,status,config)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,
-      [orgId, campaign.name, campaign.agentId, campaign.fromNumber, campaign.status || "draft", JSON.stringify(campaign)],
-    );
-    return { ...r.rows[0], ...json(r.rows[0].config) };
-  }
-  async createCall(orgId, call) {
-    const r = await this.pool.query(
-      `INSERT INTO call_records (organization_id,provider,provider_call_id,agent_id,campaign_id,from_number,to_number,status,provider_response)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING *`,
-      [orgId, call.provider, call.providerCallId, call.agentId, call.campaignId, call.from, call.to, call.status, JSON.stringify(call.providerResponse || {})],
-    );
-    return r.rows[0];
-  }
-
   async findEmployeeScheduleOverlap({ organizationId, employeeId, startAt, endAt, assignmentId }, client = this.pool) {
     const { rows } = await client.query(
       `SELECT external_assignment_id, patient->>'name' AS patient_name,
@@ -779,9 +721,9 @@ class PostgresRepository {
   }
 
   async createAthulyaAttendanceSession({ organizationId, scheduleId, schedulePk = "", caregiverId, staff, patient,
-    agent, fromNumber, scheduledStartAt, scheduledEndAt, language, sourceStatus = "", metadata = {} }) {
+    fromNumber, scheduledStartAt, scheduledEndAt, language, sourceStatus = "", metadata = {} }) {
     const operationalIdentity = {
-      scheduleId, schedulePk, caregiverId, staff, patient, agentId: agent.id, fromNumber,
+      scheduleId, schedulePk, caregiverId, staff, patient, callProvider: "chiefvoice", fromNumber,
       scheduledStartAt: new Date(scheduledStartAt).toISOString(),
       scheduledEndAt: new Date(scheduledEndAt).toISOString(),
       language, sourceStatus,
@@ -796,7 +738,7 @@ class PostgresRepository {
       ...metadata,
     };
     const assignment = {
-      organizationId, assignmentId: scheduleId, scheduleVersion, agentId: agent.id,
+      organizationId, assignmentId: scheduleId, scheduleVersion, callProvider: "chiefvoice",
       language, fromNumber, employee: staff, patient,
       scheduledStartAt: operationalIdentity.scheduledStartAt,
       scheduledEndAt: operationalIdentity.scheduledEndAt,
@@ -847,11 +789,11 @@ class PostgresRepository {
   async createAttendanceSession(assignment, client = this.pool) {
     const r = await client.query(
       `INSERT INTO attendance_sessions
-       (organization_id,external_assignment_id,schedule_version,agent_id,language,employee,patient,assignment_metadata,from_number,scheduled_start_at,scheduled_end_at,active_context)
+       (organization_id,external_assignment_id,schedule_version,call_provider,language,employee,patient,assignment_metadata,from_number,scheduled_start_at,scheduled_end_at,active_context)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12::jsonb)
        ON CONFLICT (organization_id,external_assignment_id,schedule_version) DO NOTHING
        RETURNING *`,
-      [assignment.organizationId, assignment.assignmentId, String(assignment.scheduleVersion || "1"), assignment.agentId,
+      [assignment.organizationId, assignment.assignmentId, String(assignment.scheduleVersion || "1"), assignment.callProvider,
         assignment.language, JSON.stringify(assignment.employee), JSON.stringify(assignment.patient), JSON.stringify(assignment.metadata || {}),
         assignment.fromNumber, assignment.scheduledStartAt, assignment.scheduledEndAt,
         JSON.stringify({ assignmentId: assignment.assignmentId, language: assignment.language, stage: "check_in", factsConfirmed: {}, priorCallStatus: [] })],
@@ -866,7 +808,7 @@ class PostgresRepository {
       );
       row = existing.rows[0];
       if (!row) throw new Error("Assignment session conflicted but could not be loaded");
-      const same = row.agent_id === assignment.agentId
+      const same = row.call_provider === assignment.callProvider
         && row.language === assignment.language
         && row.from_number === assignment.fromNumber
         && new Date(row.scheduled_start_at).getTime() === new Date(assignment.scheduledStartAt).getTime()
@@ -918,7 +860,7 @@ class PostgresRepository {
     if (!row) return null;
     return {
       id: row.id, organizationId: row.organization_id, assignmentId: row.external_assignment_id,
-      scheduleVersion: row.schedule_version, agentId: row.agent_id, language: row.language,
+      scheduleVersion: row.schedule_version, callProvider: row.call_provider, language: row.language,
       employee: json(row.employee), patient: json(row.patient), metadata: json(row.assignment_metadata),
       fromNumber: row.from_number, scheduledStartAt: row.scheduled_start_at, scheduledEndAt: row.scheduled_end_at,
       checkInStatus: row.check_in_status, checkOutStatus: row.check_out_status, sessionStatus: row.session_status,
@@ -1410,44 +1352,6 @@ class PostgresRepository {
     }));
   }
 
-  async getAgentSessionContext(id, stage) {
-    const session = await this.getAttendanceSession(id);
-    if (!session) return null;
-    const attempts = await this.pool.query(
-      `SELECT stage,status,attempt_number,scheduled_at,answered_at,ended_at,outcome
-       FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 ORDER BY created_at`, [id, stage],
-    );
-    const history = attempts.rows.map((row) => ({
-      stage: row.stage, status: row.status, attemptNumber: row.attempt_number,
-      scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
-      outcome: json(row.outcome),
-    }));
-    const task = stage === "check_in" ? session.checkInTask : session.checkOutTask;
-    const taskResult = await this.pool.query(
-      `SELECT active_context FROM attendance_stage_tasks WHERE assignment_session_id=$1 AND stage=$2`, [id, stage],
-    );
-    const context = json(taskResult.rows[0]?.active_context) || {};
-    return {
-      assignment: {
-        id: session.assignmentId,
-        scheduleVersion: session.scheduleVersion,
-        ...(session.metadata || {}),
-        timeZone: session.metadata?.timeZone || process.env.APP_TIMEZONE || "Asia/Kolkata",
-      },
-      employee: session.employee,
-      patient: session.patient,
-      stage,
-      scheduledStartAt: session.scheduledStartAt,
-      scheduledEndAt: session.scheduledEndAt,
-      priorCallStatus: history,
-      stageTask: task,
-      factsConfirmed: stage === "check_in"
-        ? { checkIn: task?.status === "confirmed" ? context : {} }
-        : { checkOut: task?.status === "confirmed" ? context : {} },
-      requestedCallbackAt: context.nextCallAt || null,
-      unresolvedQuestions: context.unresolvedQuestions || [],
-    };
-  }
   async createCallAttempt({ organizationId, sessionId, stage, attemptNumber, callTargetRole = "employee", scheduledAt, consecutiveNoAnswer = 0 }) {
     const r = await this.pool.query(
       `INSERT INTO attendance_call_attempts (organization_id,session_id,stage,attempt_number,call_target_role,scheduled_at,status,consecutive_no_answer_before)

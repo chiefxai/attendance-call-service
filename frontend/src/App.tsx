@@ -40,7 +40,7 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "Mock schedules", path: "/mock-schedules", icon: <ScienceRoundedIcon />, adminOnly: true, mockOnly: true },
-  { label: "AI call center", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
+  { label: "Attendance calls", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
   { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
 ];

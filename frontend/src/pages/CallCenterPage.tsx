@@ -18,7 +18,7 @@ export function CallCenterPage() {
   const retryQueue = calls.data?.retryQueue || [];
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="CHIEFVOICE OUTBOUND" title="AI call center" description="Monitor employee attendance calls placed through ChiefVoice." />
+    <PageHeader eyebrow="CHIEFVOICE OUTBOUND" title="Attendance calls" description="Monitor employee attendance calls placed through ChiefVoice." />
     {(calls.isError || summary.isError) && <Alert severity="error">Could not load the call center feed. Check backend connectivity and workspace access.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Calls today" value={summary.data?.callsToday.toLocaleString() ?? "—"} detail="Outbound call attempts" icon={<CallRoundedIcon />} /></Grid>
@@ -38,7 +38,7 @@ export function CallCenterPage() {
         </Stack></Card>)}</Stack>
       </SectionCard></Grid>
       <Grid size={{ xs: 12, lg: 5 }}><SectionCard title="ChiefVoice integration" subtitle="Live and post-call behavior is configured in reusable ChiefVoice templates.">
-        <Alert severity="info">This service sends attendance calls through ChiefVoice. Configure the live-agent and post-call templates in ChiefVoice; per-call caregiver, patient, and schedule context is supplied automatically by the backend.</Alert>
+        <Alert severity="info">This service sends attendance calls through ChiefVoice. Configure the conversation and result templates in ChiefVoice; per-call caregiver, patient, and schedule context is supplied automatically by the backend.</Alert>
       </SectionCard></Grid>
     </Grid>
     <SectionCard title="Scheduled retry queue" subtitle="Durable PostgreSQL jobs awaiting their next attempt.">

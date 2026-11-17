@@ -238,8 +238,7 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
       });
       const upserted = await repository.upsertAthulyaSchedules(organizationId, records);
       const callSettings = await repository.getOrganizationCallSettings(organizationId);
-      const fromNumber = callSettings.defaultFromNumber || process.env.VOBIZ_FROM_NUMBER || "";
-      const activeAgents = (await repository.listAgents(organizationId)).filter((agent) => agent.active);
+      const fromNumber = callSettings.defaultFromNumber || process.env.CHIEFVOICE_CALLER_ID || "";
       let scheduledCalls = 0;
       let skippedSchedules = 0;
       for (const item of records) {
@@ -264,9 +263,9 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
           console.warn(`[athulya-sync] invalid schedule date or time; calls skipped schedule=${scheduleId}`);
           continue;
         }
-        if (!fromNumber || activeAgents.length === 0) {
+        if (!fromNumber) {
           skippedSchedules += 1;
-          console.warn(`[athulya-sync] caller ID or active attendance agent missing; calls skipped schedule=${scheduleId}`);
+          console.warn(`[athulya-sync] caller ID missing; calls skipped schedule=${scheduleId}`);
           continue;
         }
         const patientId = String(source.patient_id || "").trim();
@@ -281,11 +280,8 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
           const staff = await repository.getActiveStaffDirectoryRecord(organizationId, caregiverId);
           if (!staff?.phoneNumber) continue;
           const language = String(staff.language || "ta").trim().toLowerCase();
-          const languagePrefix = language.slice(0, 2);
-          const agent = activeAgents.find((candidate) => String(candidate.language || "").trim().toLowerCase().startsWith(languagePrefix))
-            || activeAgents[0];
           const result = await repository.createAthulyaAttendanceSession({
-            organizationId, scheduleId, schedulePk, caregiverId, staff, patient, agent, fromNumber,
+            organizationId, scheduleId, schedulePk, caregiverId, staff, patient, fromNumber,
             scheduledStartAt, scheduledEndAt, language, sourceStatus: status,
             metadata: {
               careManagerId: String(source.care_manager_id || "").trim(),

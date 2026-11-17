@@ -89,7 +89,7 @@ export function SettingsPage() {
         <Stack component="form" onSubmit={submit} spacing={2.5}>
           <Box><Typography variant="h6">Outbound caller ID</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Used when an assignment does not provide its own fromNumber.</Typography></Box>
           <TextField
-            fullWidth label="Default Vobiz phone number" placeholder="+918071580130" value={form.defaultFromNumber}
+            fullWidth label="Default ChiefVoice caller ID" placeholder="+918071580130" value={form.defaultFromNumber}
             onChange={(event) => setForm((current) => ({ ...current, defaultFromNumber: event.target.value }))}
             helperText={settings.data.source.defaultFromNumber === "settings" ? "Workspace setting override · E.164 format" : "Using .env fallback · saving here overrides it"}
             inputProps={{ inputMode: "tel" }}

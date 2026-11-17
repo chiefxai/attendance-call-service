@@ -294,7 +294,7 @@ export function NewAssignmentPage() {
 
   return (
     <Stack spacing={3}>
-      <PageHeader eyebrow="SCHEDULE OUTBOUND CALLS" title="New assignment" description="Add the shift and contact details. The AI calls the employee at check-in and check-out times." />
+      <PageHeader eyebrow="SCHEDULE OUTBOUND CALLS" title="New assignment" description="Add the shift and contact details. ChiefVoice calls the employee at check-in and check-out times." />
       {mutation.isError && <Alert severity="error">Assignment could not be scheduled: {errorMessage}</Alert>}
       {(staff.isError || patients.isError) && <Alert severity="warning">Saved staff or patient records could not be loaded. You can still enter the details manually.</Alert>}
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>

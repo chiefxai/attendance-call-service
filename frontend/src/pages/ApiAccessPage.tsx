@@ -14,7 +14,6 @@ const example = [
   "  -H \"Content-Type: application/json\" \\",
   "  -d '{",
   '    "assignmentId": "SHIFT-2026-001",',
-  '    "agentId": "<ACTIVE_AGENT_UUID>",',
   '    "language": "ta",',
   '    "scheduledStartAt": "2026-11-10T08:00:00+05:30",',
   '    "scheduledEndAt": "2026-11-10T20:00:00+05:30",',
@@ -130,8 +129,7 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
       <Stack spacing={1.25}>
         <Typography variant="body2">Base URL: <Box component="code">https://calls.elvoryx.in/api/call-service</Box></Typography>
         <Typography variant="body2">Send <Box component="code">Authorization: Bearer &lt;YOUR_API_KEY&gt;</Box> and <Box component="code">Content-Type: application/json</Box> on API requests. Create and revoke keys from the signed-in app under Settings → API configuration; the full key is shown once.</Typography>
-        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}><Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.6 }}>{`curl https://calls.elvoryx.in/api/call-service/agents \\\n  -H "Authorization: Bearer <YOUR_API_KEY>"`}</Box></Paper>
-        <Typography variant="caption" color="text.secondary">All records and recordings are scoped to the organization that owns the API key. Vobiz webhooks use provider signature validation instead of this bearer key.</Typography>
+        <Typography variant="caption" color="text.secondary">All records and recordings are scoped to the organization that owns the API key. ChiefVoice webhooks use provider signature validation instead of this bearer key.</Typography>
       </Stack>
     </SectionCard>
     </Box>
@@ -162,13 +160,12 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
       <Stack spacing={1.5}>
         <Typography variant="body2">Endpoint: <Box component="code">POST /api/call-service/assignments</Box></Typography>
         <Typography variant="body2">Headers: <Box component="code">Authorization: Bearer &lt;API_KEY&gt;</Box> and <Box component="code">Content-Type: application/json</Box>.</Typography>
-        <Typography variant="body2">Agent setup: <Box component="code">GET /api/call-service/agents</Box> lists agents and IDs; create one in Call Center or use <Box component="code">POST /api/call-service/agents</Box>.</Typography>
         <Paper variant="outlined" sx={{ position: "relative", p: 1.5, bgcolor: "#f7f9fc", overflow: "auto" }}>
           <IconButton size="small" aria-label="Copy API example" onClick={() => copy(example)} sx={{ position: "absolute", right: 8, top: 8, zIndex: 1 }}><ContentCopyRoundedIcon fontSize="small" /></IconButton>
           <Box component="pre" sx={{ m: 0, pr: 5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, lineHeight: 1.6 }}>{example}</Box>
         </Paper>
         <Typography variant="body2">Accepted response: <Box component="code">202</Box> with an assignment reference, separate <Box component="code">tasks.checkIn.taskId</Box> and <Box component="code">tasks.checkOut.taskId</Box>, and their scheduled times. Read each independently at <Box component="code">GET /api/call-service/attendance-tasks/&#123;TASK_ID&#125;</Box>. Staff and patient records are created from the assignment details.</Typography>
-        <Typography variant="caption" color="text.secondary">Use the active agent UUID from the Agents endpoint. Times must include a timezone. Replace example IDs and phone numbers with your platform data. Store API keys in your backend secret manager and never put them in mobile or browser code.</Typography>
+        <Typography variant="caption" color="text.secondary">Times must include a timezone. Replace example IDs and phone numbers with your platform data. Store API keys in your backend secret manager and never put them in mobile or browser code.</Typography>
       </Stack>
     </SectionCard>
     <SectionCard title="Check staff schedule overlap" subtitle="Check a staff member's existing duties before sending an assignment. Assignment creation performs this validation again atomically.">
@@ -192,7 +189,7 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
   "checkOut": { "taskId": "<CHECK_OUT_TASK_ID>", "status": "scheduled", "reportedAt": null, "deliveryStatus": "pending" },
   "backendDeliveryStatus": "pending"
 }`}</Box></Paper>
-            <Typography variant="caption" color="text.secondary">Check-in and check-out are separate task records with independent retries, call history, agent context, and delivery status. Each confirmed event is sent immediately; the assignment summary is complete when both stages are confirmed.</Typography>
+            <Typography variant="caption" color="text.secondary">Check-in and check-out are separate task records with independent retries, call history, assignment context, and delivery status. Each confirmed event is sent immediately; the assignment summary is complete when both stages are confirmed.</Typography>
           </Stack>
         </SectionCard>
       </Grid>

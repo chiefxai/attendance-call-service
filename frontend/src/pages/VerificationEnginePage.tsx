@@ -11,7 +11,7 @@ import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/O
 
 const protocol = [
   { name: "Assignment and staff match", detail: "Session is tied to the assigned employee and registered phone number.", state: "available", threshold: "Assignment data" },
-  { name: "Employee verification", detail: "Agent confirms employee identity using the assignment context.", state: "available", threshold: "Agent confirmation" },
+  { name: "Employee verification", detail: "The ChiefVoice conversation checks employee identity against the assignment context.", state: "available", threshold: "Identity confirmation" },
   { name: "Client name confirmation", detail: "Employee confirms the assigned patient before attendance is accepted.", state: "available", threshold: "Exact confirmation" },
   { name: "Shift schedule alignment", detail: "Check-in and check-out calls are scheduled from the assignment shift.", state: "available", threshold: "Scheduled window" },
   { name: "Arrival / departure time", detail: "Transcript extraction captures the reported time; unclear values route to review.", state: "available", threshold: "Reported time required" },

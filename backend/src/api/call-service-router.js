@@ -686,7 +686,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         }, client);
         const created = await repository.createAttendanceSession({
           organizationId, assignmentId: body.assignmentId, scheduleVersion: body.scheduleVersion || "1",
-          agentId: "chiefvoice", fromNumber, language: body.language,
+          callProvider: "chiefvoice", fromNumber, language: body.language,
           employee: { ...body.employee, companyName: employeeCompanyName, phoneNumber: employeePhone },
           patient: { ...body.patient, phoneNumber: patientPhone || undefined }, scheduledStartAt: startAt,
           scheduledEndAt: endAt, metadata: body.metadata || {},
