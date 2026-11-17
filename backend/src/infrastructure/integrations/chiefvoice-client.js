@@ -16,6 +16,50 @@ function createChiefVoiceClient({
 
   const root = baseUrl.replace(/\/+$/, "");
 
+  function redactProviderText(value, requestBody) {
+    let text = String(value || "").slice(0, 240);
+    const privateValues = new Set();
+    const collectPrivateValues = (value) => {
+      if (typeof value === "string" && value.trim().length >= 3) privateValues.add(value.trim());
+      else if (Array.isArray(value)) value.forEach(collectPrivateValues);
+      else if (value && typeof value === "object") Object.values(value).forEach(collectPrivateValues);
+    };
+    collectPrivateValues(requestBody);
+    for (const privateValue of [...privateValues].sort((a, b) => b.length - a.length)) {
+      text = text.split(privateValue).join("[redacted]");
+    }
+    return text
+      .replace(/\\bBearer\\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+      .replace(/\\bcv_(?:live|test)_[A-Za-z0-9._-]+/gi, "[redacted-key]")
+      .replace(/\\b(api[_ -]?key|token|secret)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=[redacted]")
+      .replace(/\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b/gi, "[redacted-email]")
+      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, "[redacted-phone]")
+      .replace(/\\s+/g, " ")
+      .trim();
+  }
+
+  function safeValidationSummary(data, requestBody) {
+    const entries = Array.isArray(data?.detail) ? data.detail
+      : Array.isArray(data?.errors) ? data.errors
+        : Array.isArray(data?.issues) ? data.issues : [];
+    const summary = entries.slice(0, 5).map((entry) => {
+      const pathParts = Array.isArray(entry?.loc) ? entry.loc : Array.isArray(entry?.path) ? entry.path : [];
+      const path = pathParts.slice(0, 8)
+        .map((part) => String(part).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 48))
+        .filter(Boolean)
+        .join(".");
+      const code = String(entry?.type || entry?.code || "validation_error")
+        .replace(/[^A-Za-z0-9_.-]/g, "")
+        .slice(0, 64);
+      const message = redactProviderText(entry?.msg || entry?.message || "", requestBody);
+      return [path || "request", code, message].filter(Boolean).join(": ");
+    }).filter(Boolean).join("; ");
+    if (summary) return summary;
+    const detail = typeof data?.detail === "string" ? data.detail
+      : typeof data?.message === "string" ? data.message : "";
+    return redactProviderText(detail, requestBody);
+  }
+
   async function request(path, { method = "GET", body, idempotencyKey } = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -36,9 +80,10 @@ function createChiefVoiceClient({
       try { data = raw ? JSON.parse(raw) : {}; }
       catch { data = { message: raw.slice(0, 1000) }; }
       if (!response.ok) {
-        // Provider response bodies can contain customer or call data. Keep only
-        // the HTTP status on the error because worker logs persist its message.
-        const error = new Error(`ChiefVoice API returned HTTP ${response.status}`);
+        // Keep only allowlisted validation metadata. Never persist the response
+        // body or provider-supplied input values, which may contain call data.
+        const details = response.status === 422 ? safeValidationSummary(data, body) : "";
+        const error = new Error(`ChiefVoice API returned HTTP ${response.status}${details ? `: ${details}` : ""}`);
         error.status = response.status;
         throw error;
       }
