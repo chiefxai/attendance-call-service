@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
-const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook } = require("../infrastructure/integrations/chiefvoice-webhook");
+const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook, mapChiefVoiceAttendanceResult } = require("../infrastructure/integrations/chiefvoice-webhook");
 
 function createCallServiceRouter({ express, repository, queue, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
@@ -851,8 +851,9 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
 
       if (result.sessionId) {
         const postCallResult = event.postCallResult;
+        const session = await repository.getAttendanceSession(result.sessionId);
         const outcome = {
-          ...postCallResult,
+          ...mapChiefVoiceAttendanceResult(postCallResult, { stage: result.stage, session }),
           employeeIntent: postCallResult.employeeIntent ?? postCallResult.employee_intent,
           employeeNameConfirmed: postCallResult.employeeNameConfirmed ?? postCallResult.employee_name_confirmed,
           patientNameConfirmed: postCallResult.patientNameConfirmed ?? postCallResult.patient_name_confirmed,
@@ -872,7 +873,6 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
 
         // ChiefVoice's documented post-call webhook deliberately omits transcripts.
         // The structured result is sufficient for the attendance decision workflow.
-        const session = await repository.getAttendanceSession(result.sessionId);
         const currentStageStatus = result.stage === "check_in" ? session?.checkInStatus : session?.checkOutStatus;
         if (currentStageStatus === "calling") {
           await repository.setStageStatus(result.sessionId, result.stage, "processing", {
