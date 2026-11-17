@@ -22,7 +22,7 @@ The client sends `POST /v1/calls/outbound` with bearer API-key authentication (`
 - `live_agent.template_id` and per-call `context`
 - `post_call.template_id`, per-call `context`, strict `output_schema`, the built-in time tool, `time_zone`, `time_format`, and `include_live_agent_context`
 
-The live and post-call prompts live in ChiefVoice reusable templates. The service adds assignment, caregiver, patient, schedule, language, organization, attendance session, attempt, and stage context to each call.
+The live and post-call prompts live in ChiefVoice reusable templates. The service selects a pair for each scenario: check-in, check-out, care-manager escalation, check-in/check-out retry, or check-in/check-out follow-up. It adds assignment, caregiver, patient, schedule, language, organization, attendance session, attempt, and stage context to each call, including the flat expected-name/address variables used by these templates.
 
 ## Webhook
 
@@ -43,8 +43,20 @@ Required ChiefVoice variables:
 ```dotenv
 CHIEFVOICE_URL=https://chiefvoice.elvoryx.in
 CHIEFVOICE_API_KEY=
-CHIEFVOICE_LIVE_TEMPLATE_ID=
-CHIEFVOICE_POST_CALL_TEMPLATE_ID=
+CHIEFVOICE_TEMPLATE_CHECK_IN_LIVE_ID=
+CHIEFVOICE_TEMPLATE_CHECK_IN_POST_CALL_ID=
+CHIEFVOICE_TEMPLATE_CHECK_OUT_LIVE_ID=
+CHIEFVOICE_TEMPLATE_CHECK_OUT_POST_CALL_ID=
+CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_LIVE_ID=
+CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_POST_CALL_ID=
+CHIEFVOICE_TEMPLATE_CHECK_IN_RETRY_LIVE_ID=
+CHIEFVOICE_TEMPLATE_CHECK_IN_RETRY_POST_CALL_ID=
+CHIEFVOICE_TEMPLATE_CHECK_OUT_RETRY_LIVE_ID=
+CHIEFVOICE_TEMPLATE_CHECK_OUT_RETRY_POST_CALL_ID=
+CHIEFVOICE_TEMPLATE_CHECK_IN_FOLLOW_UP_LIVE_ID=
+CHIEFVOICE_TEMPLATE_CHECK_IN_FOLLOW_UP_POST_CALL_ID=
+CHIEFVOICE_TEMPLATE_CHECK_OUT_FOLLOW_UP_LIVE_ID=
+CHIEFVOICE_TEMPLATE_CHECK_OUT_FOLLOW_UP_POST_CALL_ID=
 CHIEFVOICE_CALLER_ID=
 CHIEFVOICE_TIMEOUT_MS=20000
 CHIEFVOICE_RECORDING_ALLOWED=false

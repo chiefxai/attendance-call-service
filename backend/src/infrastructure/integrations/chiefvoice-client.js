@@ -48,11 +48,21 @@ function createChiefVoiceClient({
     }
   }
 
-  async function createOutboundCall({ to, from, sessionId, stage, callAttemptId, context }) {
-    const liveTemplateId = process.env.CHIEFVOICE_LIVE_TEMPLATE_ID;
-    const postCallTemplateId = process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID;
+  async function createOutboundCall({ to, from, sessionId, stage, callAttemptId, context, templateScenario = null }) {
+    const scenario = String(templateScenario || "").trim().toUpperCase();
+    const scenarioPrefix = scenario ? `CHIEFVOICE_TEMPLATE_${scenario}` : null;
+    const liveTemplateId = scenarioPrefix
+      ? process.env[`${scenarioPrefix}_LIVE_ID`]
+      : process.env.CHIEFVOICE_LIVE_TEMPLATE_ID;
+    const postCallTemplateId = scenarioPrefix
+      ? process.env[`${scenarioPrefix}_POST_CALL_ID`]
+      : process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID;
     if (!liveTemplateId || !postCallTemplateId) {
-      throw new Error("CHIEFVOICE_LIVE_TEMPLATE_ID and CHIEFVOICE_POST_CALL_TEMPLATE_ID must be configured");
+      const missing = [
+        !liveTemplateId ? `${scenarioPrefix || "CHIEFVOICE_TEMPLATE_<SCENARIO>"}_LIVE_ID` : null,
+        !postCallTemplateId ? `${scenarioPrefix || "CHIEFVOICE_TEMPLATE_<SCENARIO>"}_POST_CALL_ID` : null,
+      ].filter(Boolean);
+      throw new Error(`${missing.join(" and ")} must be configured`);
     }
     const payload = {
       channel: "phone",

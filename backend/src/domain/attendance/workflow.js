@@ -51,6 +51,15 @@ function validateReportedTime(value, now = new Date()) {
   return timestamp > now.getTime() ? "future_reported_time" : null;
 }
 
+function chiefVoiceTemplateScenario({ stage, attemptNumber = 1, consecutiveNoAnswer = 0, context = {} }) {
+  if (context.call_purpose === "care_manager_escalation") return "CARE_MANAGER_ESCALATION";
+  const stageKey = stage === "check_out" ? "CHECK_OUT" : "CHECK_IN";
+  if (Number(attemptNumber) > 1) {
+    return Number(consecutiveNoAnswer) > 0 ? `${stageKey}_RETRY` : `${stageKey}_FOLLOW_UP`;
+  }
+  return stageKey;
+}
+
 function chooseAttendanceAction(stage, outcome = {}) {
   if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment" || outcome.employeeIntent === "unclear") {
     return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
@@ -133,7 +142,16 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
         schedule: { start_at: session.scheduledStartAt, end_at: session.scheduledEndAt },
         language: session.language,
         organization_id: session.organizationId,
+        expected_staff_name: person.name || person.fullName || "",
+        expected_patient_name: session.patient?.name || "",
+        expected_patient_address: session.patient?.address || "",
+        scheduled_check_in_at: session.scheduledStartAt || "",
+        scheduled_check_out_at: session.scheduledEndAt || "",
+        attempt_number: String(attemptNumber || 1),
+        consecutive_no_answer: String(consecutiveNoAnswer || 0),
+        callback_requested_at: session.activeContext?.[stage === "check_in" ? "checkIn" : "checkOut"]?.nextCallAt || "",
       };
+      const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer });
       const call = await chiefvoice.createOutboundCall({
         to: person.phoneNumber,
         from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
@@ -141,6 +159,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
         stage,
         callAttemptId: attempt.id,
         context: callContext,
+        templateScenario,
       });
       const providerCallId = call.session_id || call.call_id || call.id;
       if (!providerCallId) throw new Error("ChiefVoice response did not include session_id; reconcile before retrying");
@@ -415,10 +434,16 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
             await chiefvoice.createOutboundCall({
               to: manager.careManagerPhone, from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
               sessionId: session.id, stage, callAttemptId: escalationAttemptId,
+              templateScenario: "CARE_MANAGER_ESCALATION",
               context: {
                 call_purpose: "care_manager_escalation",
                 message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`,
                 care_manager_name: manager.displayName || manager.name || "", organization_id: session.organizationId,
+                expected_staff_name: session.employee?.name || session.employee?.fullName || "",
+                expected_patient_name: patient.name || "",
+                expected_patient_address: session.patient?.address || "",
+                escalation_message: `Repeated ${stageLabel} calls were unanswered. Please contact operations.`,
+                language: session.language || "ta-IN",
               },
             });
           } catch (error) {

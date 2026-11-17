@@ -26,8 +26,7 @@ Copy `.env.docker.example` to `.env` and configure:
 
 - `CHIEFVOICE_URL` — defaults to `https://chiefvoice.elvoryx.in`
 - `CHIEFVOICE_API_KEY` — bearer API key
-- `CHIEFVOICE_LIVE_TEMPLATE_ID` — reusable live-agent template
-- `CHIEFVOICE_POST_CALL_TEMPLATE_ID` — reusable post-call template
+- `CHIEFVOICE_TEMPLATE_<SCENARIO>_LIVE_ID` and `CHIEFVOICE_TEMPLATE_<SCENARIO>_POST_CALL_ID` — scenario-specific reusable templates. Supported scenarios are `CHECK_IN`, `CHECK_OUT`, `CARE_MANAGER_ESCALATION`, `CHECK_IN_RETRY`, `CHECK_OUT_RETRY`, `CHECK_IN_FOLLOW_UP`, and `CHECK_OUT_FOLLOW_UP`. The Docker Compose defaults point to the templates created in the ChiefVoice API console; override them in `.env` when using another API tenant.
 - `CHIEFVOICE_CALLER_ID` — default E.164 caller ID; organization calling settings can override it
 - `CHIEFVOICE_WEBHOOK_SECRET` — signing secret shared with the webhook registration
 - `CHIEFVOICE_WEBHOOK_CALLBACK_URL` — public callback URL, `https://calls.elvoryx.in/api/call-service/webhooks/chiefvoice`
@@ -87,5 +86,5 @@ In a second terminal, run `npm run worker`.
 ## Important
 
 - Do not commit `.env`, API keys, webhook signing secrets, or provider credentials.
-- Configure the live and post-call prompts in ChiefVoice templates; this service only supplies per-call context and the structured output schema.
+- Configure the live and post-call prompts in ChiefVoice templates; the worker selects the matching template pair for each stage, retry, follow-up, or care-manager escalation and supplies per-call context and the structured output schema.
 - The former Vobiz media/webhook runtime and local Gemini/Vertex agent pipeline have been removed. ChiefVoice is used for outbound attendance calls only.
