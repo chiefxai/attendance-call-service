@@ -5,6 +5,7 @@ const crypto = require("node:crypto");
 const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
+const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook } = require("../infrastructure/integrations/chiefvoice-webhook");
 
 function createCallServiceRouter({ express, repository, queue, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
@@ -802,86 +803,85 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     } catch (error) { fail(res, error); }
   });
 
-  // ChiefVoice sends a signed callback after the post-call template finishes.
-  // Verify HMAC-SHA256 over the exact raw request body.
+  // ChiefVoice sends call.analysis.completed after its structured post-call analysis.
+  // Its signature covers timestamp.event_id.raw_request_body (not the body alone).
   router.post("/webhooks/chiefvoice", async (req, res) => {
     try {
       const secret = String(process.env.CHIEFVOICE_WEBHOOK_SECRET || "");
-      const supplied = String(req.get("x-chiefvoice-signature") || req.get("x-webhook-signature") || "").replace(/^sha256=/i, "");
-      if (!secret || !req.rawBody || !/^[a-f0-9]{64}$/i.test(supplied)) return res.status(401).json({ error: "Invalid ChiefVoice webhook signature" });
-      const expected = crypto.createHmac("sha256", secret).update(req.rawBody).digest();
-      const received = Buffer.from(supplied, "hex");
-      if (received.length !== expected.length || !crypto.timingSafeEqual(expected, received)) return res.status(401).json({ error: "Invalid ChiefVoice webhook signature" });
-
-      const payload = req.body || {};
-      const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
-      const providerCallId = data.session_id || data.call_id || data.callId || data.id;
-      const eventId = data.event_id || data.eventId || payload.event_id || payload.eventId;
-      const postCallResult = data.post_call_result || data.postCallResult || data.post_call?.result || data.result || data.analysis?.result;
-      const rawStatus = data.call_status || data.status || data.state || (postCallResult ? "completed" : "");
-      if (!eventId || !providerCallId || !rawStatus) {
-        return res.status(400).json({ error: "ChiefVoice event ID, session/call ID, and status are required" });
+      const eventIdHeader = String(req.get("x-chiefvoice-event-id") || "");
+      const eventTypeHeader = String(req.get("x-chiefvoice-event") || "");
+      const timestamp = String(req.get("x-chiefvoice-timestamp") || "");
+      const signature = String(req.get("x-chiefvoice-signature") || "");
+      if (!verifyChiefVoiceSignature({
+        secret, timestamp, eventId: eventIdHeader, signature, rawBody: req.rawBody,
+      })) {
+        return res.status(401).json({ error: "Invalid or expired ChiefVoice webhook signature" });
       }
-      const providerStatus = String(rawStatus).replace(/^call[._-]/i, "").replace(/^post[._-]call[._-]/i, "");
+
+      let event;
+      try {
+        event = normalizeChiefVoiceWebhook(req.body, {
+          headerEventId: eventIdHeader,
+          headerEventType: eventTypeHeader,
+        });
+      } catch (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
       const result = await repository.updateCallByProviderId({
-        provider: "chiefvoice", providerCallId: String(providerCallId), status: providerStatus,
-        durationSeconds: data.duration_seconds || data.duration || null,
-        endedAt: data.ended_at || data.end_time || null,
+        provider: "chiefvoice",
+        providerCallId: event.providerCallId,
+        status: event.status,
+        durationSeconds: event.durationSeconds,
+        endedAt: event.endedAt,
         rawEvent: {
-          status: providerStatus,
-          AnswerTime: data.answered_at || data.answer_time || null,
-          EndTime: data.ended_at || data.end_time || null,
-          RecordingUrl: data.recording_url || null,
+          event: event.eventType,
+          status: event.status,
+          EndTime: event.endedAt,
         },
       });
       if (!result) return res.status(404).json({ received: false });
+
       const firstDelivery = await repository.claimChiefVoiceWebhookEvent({
-        eventId: String(eventId),
-        providerCallId: String(providerCallId),
-        eventType: data.event_type || data.type || payload.event_type || payload.type,
+        eventId: event.eventId,
+        providerCallId: event.providerCallId,
+        eventType: event.eventType,
       });
       if (!firstDelivery) return res.status(200).json({ received: true, duplicate: true });
-      if (result?.sessionId) {
-        if (postCallResult && typeof postCallResult === "object") {
-          const outcome = {
-            ...postCallResult,
-            employeeIntent: postCallResult.employeeIntent ?? postCallResult.employee_intent,
-            employeeNameConfirmed: postCallResult.employeeNameConfirmed ?? postCallResult.employee_name_confirmed,
-            patientNameConfirmed: postCallResult.patientNameConfirmed ?? postCallResult.patient_name_confirmed,
-            addressConfirmed: postCallResult.addressConfirmed ?? postCallResult.address_confirmed,
-            employeeVerified: postCallResult.employeeVerified ?? postCallResult.employee_verified,
-            clientVerified: postCallResult.clientVerified ?? postCallResult.client_verified,
-            reachedPatient: postCallResult.reachedPatient ?? postCallResult.reached_patient,
-            dutyComplete: postCallResult.dutyComplete ?? postCallResult.duty_complete,
-            reportedArrivalTime: postCallResult.reportedArrivalTime ?? postCallResult.reported_arrival_time,
-            reportedDepartureTime: postCallResult.reportedDepartureTime ?? postCallResult.reported_departure_time,
-            reportedArrivalTimeMentioned: postCallResult.reportedArrivalTimeMentioned ?? postCallResult.reported_arrival_time_mentioned,
-            reportedDepartureTimeMentioned: postCallResult.reportedDepartureTimeMentioned ?? postCallResult.reported_departure_time_mentioned,
-            requestedCallbackAt: postCallResult.requestedCallbackAt ?? postCallResult.requested_callback_at,
-            exceptionCode: postCallResult.exceptionCode ?? postCallResult.exception_code,
-          };
-          await repository.saveCallOutcome(result.id, outcome);
-          if (typeof data.transcript === "string" && data.transcript.trim()) {
-            const session = await repository.getAttendanceSession(result.sessionId);
-            await repository.saveTranscript({
-              organizationId: result.organizationId || session.organizationId,
-              sessionId: result.sessionId, callAttemptId: result.id,
-              language: data.language || session.language, text: data.transcript,
-            });
-          }
-          const session = await repository.getAttendanceSession(result.sessionId);
-          const currentStageStatus = result.stage === "check_in" ? session?.checkInStatus : session?.checkOutStatus;
-          if (currentStageStatus === "calling") {
-            await repository.setStageStatus(result.sessionId, result.stage, "processing", {
-              reason: "chiefvoice_post_call_completed", callAttemptId: result.id,
-            });
-          }
-          await queue.enqueue("extract_intent", { callAttemptId: result.id }, { idempotencyKey: `extract:${result.id}` });
-        } else {
-          await queue.enqueue("process_call_result", { callAttemptId: result.id }, { idempotencyKey: `call-result:${result.id}` });
+
+      if (result.sessionId) {
+        const postCallResult = event.postCallResult;
+        const outcome = {
+          ...postCallResult,
+          employeeIntent: postCallResult.employeeIntent ?? postCallResult.employee_intent,
+          employeeNameConfirmed: postCallResult.employeeNameConfirmed ?? postCallResult.employee_name_confirmed,
+          patientNameConfirmed: postCallResult.patientNameConfirmed ?? postCallResult.patient_name_confirmed,
+          addressConfirmed: postCallResult.addressConfirmed ?? postCallResult.address_confirmed,
+          employeeVerified: postCallResult.employeeVerified ?? postCallResult.employee_verified,
+          clientVerified: postCallResult.clientVerified ?? postCallResult.client_verified,
+          reachedPatient: postCallResult.reachedPatient ?? postCallResult.reached_patient,
+          dutyComplete: postCallResult.dutyComplete ?? postCallResult.duty_complete,
+          reportedArrivalTime: postCallResult.reportedArrivalTime ?? postCallResult.reported_arrival_time,
+          reportedDepartureTime: postCallResult.reportedDepartureTime ?? postCallResult.reported_departure_time,
+          reportedArrivalTimeMentioned: postCallResult.reportedArrivalTimeMentioned ?? postCallResult.reported_arrival_time_mentioned,
+          reportedDepartureTimeMentioned: postCallResult.reportedDepartureTimeMentioned ?? postCallResult.reported_departure_time_mentioned,
+          requestedCallbackAt: postCallResult.requestedCallbackAt ?? postCallResult.requested_callback_at,
+          exceptionCode: postCallResult.exceptionCode ?? postCallResult.exception_code,
+        };
+        await repository.saveCallOutcome(result.id, outcome);
+
+        // ChiefVoice's documented post-call webhook deliberately omits transcripts.
+        // The structured result is sufficient for the attendance decision workflow.
+        const session = await repository.getAttendanceSession(result.sessionId);
+        const currentStageStatus = result.stage === "check_in" ? session?.checkInStatus : session?.checkOutStatus;
+        if (currentStageStatus === "calling") {
+          await repository.setStageStatus(result.sessionId, result.stage, "processing", {
+            reason: "chiefvoice_post_call_completed", callAttemptId: result.id,
+          });
         }
+        await queue.enqueue("extract_intent", { callAttemptId: result.id }, { idempotencyKey: `extract:${result.id}` });
       }
-      res.status(result ? 200 : 404).json({ received: Boolean(result) });
+      return res.status(200).json({ received: true });
     } catch (error) { fail(res, error); }
   });
 
