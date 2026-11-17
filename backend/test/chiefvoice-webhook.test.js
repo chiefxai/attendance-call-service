@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const {
   verifyChiefVoiceSignature,
   normalizeChiefVoiceWebhook,
+  mapChiefVoiceAttendanceResult,
 } = require("../src/infrastructure/integrations/chiefvoice-webhook");
 
 function signedHeaders(secret, eventId, eventType, rawBody, timestamp) {
@@ -101,4 +102,59 @@ test("rejects mismatched event ID and unsupported event type", () => {
     () => normalizeChiefVoiceWebhook(payload, { headerEventId: payload.event_id, headerEventType: "call.completed" }),
     /Unsupported or inconsistent/,
   );
+});
+
+test("maps Athulya arrival extraction only when staff, patient, address and identity match", () => {
+  const session = {
+    employee: { name: "Jane Doe" },
+    patient: { name: "Mary Patient", address: "12 Lake Road, Chennai" },
+  };
+  const mapped = mapChiefVoiceAttendanceResult({
+    arrival_status: "arrived",
+    staff_name: "Jane Doe",
+    patient_name: "Mary Patient",
+    patient_address: "12 Lake Road, Chennai",
+    expected_arrival_time: "",
+    identity_verified: true,
+    follow_up_required: false,
+    conversation_summary: "Staff confirmed arrival.",
+  }, { stage: "check_in", session });
+
+  assert.equal(mapped.employeeIntent, "arrival_confirmed");
+  assert.equal(mapped.employeeNameConfirmed, true);
+  assert.equal(mapped.patientNameConfirmed, true);
+  assert.equal(mapped.addressConfirmed, true);
+  assert.equal(mapped.employeeVerified, true);
+  assert.equal(mapped.clientVerified, true);
+  assert.equal(mapped.reachedPatient, true);
+  assert.equal(mapped.reportedArrivalTimeMentioned, false);
+  assert.equal(mapped.summary, "Staff confirmed arrival.");
+});
+
+test("does not treat a name alone as verified identity and maps expected arrival for follow-up", () => {
+  const mapped = mapChiefVoiceAttendanceResult({
+    arrival_status: "not_arrived",
+    staff_name: "Jane Doe",
+    patient_name: "Mary Patient",
+    patient_address: "12 Lake Road, Chennai",
+    expected_arrival_time: "in 20 minutes",
+    identity_verified: false,
+    follow_up_required: true,
+    conversation_summary: "Staff expects to arrive shortly.",
+  }, {
+    stage: "check_in",
+    session: {
+      employee: { name: "Jane Doe" },
+      patient: { name: "Mary Patient", address: "12 Lake Road, Chennai" },
+    },
+  });
+
+  assert.equal(mapped.employeeIntent, "will_arrive_later");
+  assert.equal(mapped.employeeVerified, false);
+  assert.equal(mapped.requestedCallbackAt, "in 20 minutes");
+});
+
+test("leaves check-out extraction in the existing stage-specific format", () => {
+  const result = { employeeIntent: "departure_confirmed", dutyComplete: true };
+  assert.deepEqual(mapChiefVoiceAttendanceResult(result, { stage: "check_out", session: {} }), result);
 });
