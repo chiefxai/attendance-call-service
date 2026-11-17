@@ -32,7 +32,18 @@ Copy `.env.docker.example` to `.env` and configure:
 - `CHIEFVOICE_WEBHOOK_SECRET` — signing secret shared with the webhook registration
 - `CHIEFVOICE_WEBHOOK_CALLBACK_URL` — public callback URL, `https://<domain>/api/call-service/webhooks/chiefvoice`
 
-Register the callback URL with ChiefVoice and configure its webhook signing secret. The endpoint verifies an HMAC-SHA256 signature over the raw request body using the `x-chiefvoice-signature` header (hex or `sha256=<hex>`). Do not expose the signing secret in the frontend.
+Register the callback in the **same ChiefVoice tenant/API-key scope** used for outbound calls. The API key must have both `calls:write` and `webhooks:write` scopes. After deploying the attendance service and setting its public URL, run:
+
+```bash
+curl --fail-with-body -X PUT "$CHIEFVOICE_URL/v1/webhooks/post-call" \
+  -H "Authorization: Bearer $CHIEFVOICE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\\"target_url\\":\\"$CHIEFVOICE_WEBHOOK_CALLBACK_URL\\"}"
+```
+
+ChiefVoice returns `signing_secret` **once**. Copy that value into `CHIEFVOICE_WEBHOOK_SECRET` in the attendance service's server-side `.env`, then restart the API container. Do not put the secret in the frontend or commit it. If the secret is lost, configure/rotate the callback again in ChiefVoice and update the attendance service with the newly returned secret.
+
+ChiefVoice sends `call.analysis.completed` with `event_id`, `call.session_id`, and the structured post-call object in top-level `result`. It does not include the transcript in this callback. The receiver verifies `X-Chiefvoice-Signature` as HMAC-SHA256 over `timestamp + "." + event_id + "." + exact_raw_request_body`, checks the `X-Chiefvoice-Timestamp` is within five minutes, matches the event ID and type headers to the body, and deduplicates using the event ID. ChiefVoice retries delivery, so the handler is idempotent.
 
 The outbound API request uses `POST /v1/calls/outbound`, `channel: phone`, `destination`, `caller_id`, `recording_allowed`, `live_agent.template_id/context`, and `post_call.template_id/context/output_schema`. The post-call schema returns the structured attendance verification fields consumed by the deterministic attendance policy.
 
