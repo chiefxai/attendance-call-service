@@ -437,12 +437,12 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
               templateScenario: "CARE_MANAGER_ESCALATION",
               context: {
                 call_purpose: "care_manager_escalation",
-                message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`,
+                message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} (Staff ID ${session.employee?.id || session.employee?.employeeId || session.employee?.staffId || "unavailable"}) did not answer ${maxNoAnswer} ${stageLabel} calls.`,
                 care_manager_name: manager.displayName || manager.name || "", organization_id: session.organizationId,
                 expected_staff_name: session.employee?.name || session.employee?.fullName || "",
-                expected_patient_name: patient.name || "",
-                expected_patient_address: session.patient?.address || "",
-                escalation_message: `Repeated ${stageLabel} calls were unanswered. Please contact operations.`,
+                expected_staff_id: String(session.employee?.id || session.employee?.employeeId || session.employee?.staffId || ""),
+                attendance_stage: stageLabel,
+                no_answer_attempts: String(maxNoAnswer),
                 language: session.language || "ta-IN",
               },
             });
