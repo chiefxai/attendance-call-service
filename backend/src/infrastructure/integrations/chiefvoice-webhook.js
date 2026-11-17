@@ -167,10 +167,12 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
   const arrived = result.arrival_status === "arrived";
   const notArrived = result.arrival_status === "not_arrived";
   const expectedArrivalTime = String(result.expected_arrival_time || "").trim();
+  const callbackAt = String(result.requestedCallbackAt || result.requested_callback_at || "").trim()
+    || (/^\\d{4}-\\d{2}-\\d{2}T/.test(expectedArrivalTime) ? expectedArrivalTime : "");
 
   return {
     ...outcome,
-    employeeIntent: arrived ? "arrival_confirmed" : notArrived && result.follow_up_required === true && expectedArrivalTime ? "will_arrive_later" : "unclear",
+    employeeIntent: arrived ? "arrival_confirmed" : notArrived && result.follow_up_required === true ? "will_arrive_later" : "unclear",
     employeeNameConfirmed,
     patientNameConfirmed,
     addressConfirmed,
@@ -181,7 +183,7 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
     // When the staff member did not state an actual arrival timestamp, the
     // workflow uses the scheduled check-in time rather than inventing one.
     reportedArrivalTimeMentioned: false,
-    requestedCallbackAt: notArrived && result.follow_up_required === true && expectedArrivalTime ? expectedArrivalTime : null,
+    requestedCallbackAt: notArrived && result.follow_up_required === true ? callbackAt || null : null,
     exceptionCode: null,
     summary: result.conversation_summary || result.summary || "",
   };

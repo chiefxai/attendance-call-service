@@ -74,7 +74,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
     return { action: "review", reason: "check_in_not_confirmed" };
   }
   if (stage === "check_out") {
-    if (outcome.employeeIntent === "departure_confirmed" && outcome.employeeVerified === true && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
+    if (outcome.employeeIntent === "departure_confirmed" && outcome.dutyComplete === true) {
       return { action: "confirm_stage", reportedAt: outcome.reportedDepartureTime || null };
     }
     if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {
