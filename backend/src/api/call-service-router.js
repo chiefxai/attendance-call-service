@@ -853,7 +853,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         const postCallResult = event.postCallResult;
         const session = await repository.getAttendanceSession(result.sessionId);
         const outcome = {
-          ...mapChiefVoiceAttendanceResult(postCallResult, { stage: result.stage, session }),
+          ...postCallResult,
           employeeIntent: postCallResult.employeeIntent ?? postCallResult.employee_intent,
           employeeNameConfirmed: postCallResult.employeeNameConfirmed ?? postCallResult.employee_name_confirmed,
           patientNameConfirmed: postCallResult.patientNameConfirmed ?? postCallResult.patient_name_confirmed,
@@ -868,6 +868,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
           reportedDepartureTimeMentioned: postCallResult.reportedDepartureTimeMentioned ?? postCallResult.reported_departure_time_mentioned,
           requestedCallbackAt: postCallResult.requestedCallbackAt ?? postCallResult.requested_callback_at,
           exceptionCode: postCallResult.exceptionCode ?? postCallResult.exception_code,
+          ...mapChiefVoiceAttendanceResult(postCallResult, { stage: result.stage, session }),
         };
         await repository.saveCallOutcome(result.id, outcome);
 
