@@ -37,7 +37,7 @@ test("schedule fetch uses x-api-key and combines documented filters in query par
     fetchImpl: async (url, options) => {
       requestedUrl = new URL(url);
       requestedHeaders = options.headers;
-      return { ok: true, text: async () => JSON.stringify({ clients: [{ schedule_id: "s1" }] }) };
+      return { ok: true, text: async () => JSON.stringify({ clients: [{ schedule_id: "s1", schedule_date: "2026-11-15" }] }) };
     },
   });
   assert.equal(requestedUrl.searchParams.get("from_date"), "2026-11-01");
