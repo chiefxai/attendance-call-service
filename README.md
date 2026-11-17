@@ -18,7 +18,7 @@ flowchart TD
   Worker -->|Confirmed check-in / check-out| Platform[Athulya platform API]
 ```
 
-The service does not run a local speech model, transcription pipeline, Gemini/Vertex agent, or telephony media bridge. The reusable ChiefVoice templates contain the conversation instructions. Each outbound request supplies the employee, patient, assignment, schedule, language, and attendance stage as context.
+The service does not run a local speech model, transcription pipeline, Gemini/Vertex agent, or telephony media bridge. The reusable ChiefVoice templates contain the conversation instructions. Each outbound request supplies the employee, patient, assignment, schedule, language, and attendance stage as context. Configure the live template to greet as Athulya Senior Care, ask whether the staff member has reached the patient's house, and collect staff name, patient name, and address when they have. Do not disclose patient details before staff identity is verified. If the staff member has not arrived, ask for the expected arrival time and tell them a follow-up call will be made. Configure the post-call template to follow the output schema below and never infer identity from a name alone.
 
 ## ChiefVoice configuration
 
