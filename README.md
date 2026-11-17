@@ -32,9 +32,10 @@ Copy `.env.docker.example` to `.env` and configure:
 - `CHIEFVOICE_WEBHOOK_SECRET` — signing secret shared with the webhook registration
 - `CHIEFVOICE_WEBHOOK_CALLBACK_URL` — public callback URL, `https://<domain>/api/call-service/webhooks/chiefvoice`
 
-Register the callback in the **same ChiefVoice tenant/API-key scope** used for outbound calls. The API key must have both `calls:write` and `webhooks:write` scopes. After deploying the attendance service and setting its public URL, run:
+Register the callback in the **same ChiefVoice tenant/API-key scope** used for outbound calls. The API key must have both `calls:write` and `webhooks:write` scopes, and a Vobiz sender number assigned to it that matches `CHIEFVOICE_CALLER_ID`. After deploying the attendance service and setting its public URL, load the server-side environment and run:
 
 ```bash
+set -a; source .env; set +a
 curl --fail-with-body -X PUT "$CHIEFVOICE_URL/v1/webhooks/post-call" \
   -H "Authorization: Bearer $CHIEFVOICE_API_KEY" \
   -H "Content-Type: application/json" \
