@@ -1524,8 +1524,8 @@ class PostgresRepository {
   async endCallStream(id) {
     await this.pool.query("UPDATE attendance_call_attempts SET stream_ended_at=NOW(),updated_at=NOW() WHERE id=$1 AND stream_ended_at IS NULL", [id]);
   }
-  async claimChiefVoiceWebhookEvent({ eventId, providerCallId, eventType }) {
-    const result = await this.pool.query(
+  async claimChiefVoiceWebhookEvent({ eventId, providerCallId, eventType, client = this.pool }) {
+    const result = await client.query(
       `INSERT INTO chiefvoice_webhook_events(event_id,provider_call_id,event_type)
        VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING RETURNING event_id`,
       [eventId, providerCallId || null, eventType || null],

@@ -3,6 +3,45 @@
 const crypto = require("node:crypto");
 
 const DEFAULT_TIMESTAMP_TOLERANCE_SECONDS = 300;
+const RESULT_ENUMS = {
+  employeeIntent: new Set(["arrival_confirmed", "departure_confirmed", "will_arrive_later", "still_on_duty", "missed", "wrong_assignment", "unclear"]),
+  employee_intent: new Set(["arrival_confirmed", "departure_confirmed", "will_arrive_later", "still_on_duty", "missed", "wrong_assignment", "unclear"]),
+  arrival_status: new Set(["arrived", "not_arrived", "unclear"]),
+};
+const RESULT_TYPES = {
+  employeeNameConfirmed: "boolean", employee_name_confirmed: "boolean",
+  patientNameConfirmed: "boolean", patient_name_confirmed: "boolean",
+  addressConfirmed: "boolean", address_confirmed: "boolean",
+  employeeVerified: "boolean", employee_verified: "boolean",
+  clientVerified: "boolean", client_verified: "boolean",
+  reachedPatient: "boolean", reached_patient: "boolean",
+  dutyComplete: "boolean", duty_complete: "boolean",
+  reportedArrivalTime: "nullable-string", reported_arrival_time: "nullable-string",
+  reportedDepartureTime: "nullable-string", reported_departure_time: "nullable-string",
+  reportedArrivalTimeMentioned: "boolean", reported_arrival_time_mentioned: "boolean",
+  reportedDepartureTimeMentioned: "boolean", reported_departure_time_mentioned: "boolean",
+  requestedCallbackAt: "nullable-string", requested_callback_at: "nullable-string",
+  exceptionCode: "nullable-string", exception_code: "nullable-string",
+  summary: "string", arrival_status: "enum",
+  staff_name: "string", patient_name: "string", patient_address: "string",
+  expected_arrival_time: "string", identity_verified: "boolean",
+  follow_up_required: "boolean", conversation_summary: "string",
+};
+
+function validatePostCallResult(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("ChiefVoice webhook is missing the structured result object");
+  }
+  for (const [field, value] of Object.entries(result)) {
+    const allowed = RESULT_ENUMS[field];
+    if (allowed && !allowed.has(value)) throw new Error(`ChiefVoice result field ${field} has an unsupported value`);
+    const type = RESULT_TYPES[field];
+    if (!type || type === "enum") continue;
+    if (type === "boolean" && typeof value !== "boolean") throw new Error(`ChiefVoice result field ${field} must be a boolean`);
+    if (type === "string" && typeof value !== "string") throw new Error(`ChiefVoice result field ${field} must be a string`);
+    if (type === "nullable-string" && value !== null && typeof value !== "string") throw new Error(`ChiefVoice result field ${field} must be a string or null`);
+  }
+}
 
 /**
  * ChiefVoice signs: timestamp + "." + event_id + "." + exact raw request body.
@@ -68,9 +107,7 @@ function normalizeChiefVoiceWebhook(payload, { headerEventId, headerEventType } 
   if (!providerCallId) throw new Error("ChiefVoice webhook is missing call.session_id");
 
   const postCallResult = payload.result;
-  if (!postCallResult || typeof postCallResult !== "object" || Array.isArray(postCallResult)) {
-    throw new Error("ChiefVoice webhook is missing the structured result object");
-  }
+  validatePostCallResult(postCallResult);
 
   let durationSeconds = null;
   if (call.started_at && call.ended_at) {
@@ -147,6 +184,7 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
 module.exports = {
   DEFAULT_TIMESTAMP_TOLERANCE_SECONDS,
   verifyChiefVoiceSignature,
+  validatePostCallResult,
   normalizeChiefVoiceWebhook,
   mapChiefVoiceAttendanceResult,
 };

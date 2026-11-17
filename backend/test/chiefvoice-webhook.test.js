@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const {
   verifyChiefVoiceSignature,
   normalizeChiefVoiceWebhook,
+  validatePostCallResult,
   mapChiefVoiceAttendanceResult,
 } = require("../src/infrastructure/integrations/chiefvoice-webhook");
 
@@ -102,6 +103,19 @@ test("rejects mismatched event ID and unsupported event type", () => {
     () => normalizeChiefVoiceWebhook(payload, { headerEventId: payload.event_id, headerEventType: "call.completed" }),
     /Unsupported or inconsistent/,
   );
+});
+
+test("validates structured ChiefVoice attendance result fields", () => {
+  assert.doesNotThrow(() => validatePostCallResult({
+    employeeIntent: "arrival_confirmed",
+    employeeVerified: true,
+    reportedArrivalTime: null,
+    arrival_status: "arrived",
+    identity_verified: true,
+  }));
+  assert.throws(() => validatePostCallResult({ arrival_status: "maybe" }), /unsupported value/);
+  assert.throws(() => validatePostCallResult({ identity_verified: "yes" }), /must be a boolean/);
+  assert.throws(() => validatePostCallResult([]), /structured result object/);
 });
 
 test("maps Athulya arrival extraction only when staff, patient, address and identity match", () => {
