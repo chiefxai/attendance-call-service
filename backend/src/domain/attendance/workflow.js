@@ -1,6 +1,8 @@
 "use strict";
 
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
+const { normalizeChiefVoiceWebhook } = require("../../infrastructure/integrations/chiefvoice-webhook");
+const { processChiefVoiceResult } = require("./chiefvoice-result");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -94,7 +96,14 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
       organizationId: session.organizationId, sessionId, stage, attemptNumber,
       callTargetRole: "employee", scheduledAt: new Date(), consecutiveNoAnswer,
     });
-    if (!attempt.shouldPlace || attempt.providerCallId || attempt.status !== "scheduled") {
+    if (attempt.providerCallId && attempt.provider === "chiefvoice" && !attempt.outcome) {
+      await queue.enqueue("poll_chiefvoice_call", { callAttemptId: attempt.id, pollCount: 0 }, {
+        idempotencyKey: `chiefvoice-poll:${attempt.id}:0`,
+        runAt: new Date(Date.now() + (Number(process.env.CHIEFVOICE_POLL_INITIAL_MS) || 15_000)),
+      });
+      return;
+    }
+    if (!attempt.shouldPlace || attempt.status !== "scheduled") {
       if (attempt.status === "placing" && !attempt.providerCallId) {
         await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_reconciliation_required", callAttemptId: attempt.id });
       }
@@ -143,6 +152,71 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
       await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_unknown", callAttemptId: attempt.id });
       throw error;
     }
+    await queue.enqueue("poll_chiefvoice_call", { callAttemptId: attempt.id, pollCount: 0 }, {
+      idempotencyKey: `chiefvoice-poll:${attempt.id}:0`,
+      runAt: new Date(Date.now() + (Number(process.env.CHIEFVOICE_POLL_INITIAL_MS) || 15_000)),
+    });
+  }
+
+  async function pollChiefVoiceCall({ callAttemptId, pollCount = 0 }) {
+    const attempt = await repository.getCallAttempt(callAttemptId);
+    if (!attempt?.providerCallId || attempt.provider !== "chiefvoice" || attempt.outcome) return;
+    const maxPolls = Number(process.env.CHIEFVOICE_POLL_MAX_ATTEMPTS) || 60;
+    if (pollCount >= maxPolls) {
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
+        reason: "chiefvoice_poll_limit_reached", callAttemptId,
+      });
+      return;
+    }
+    const scheduleNext = async () => {
+      const delay = Math.min(60_000, (Number(process.env.CHIEFVOICE_POLL_INTERVAL_MS) || 15_000) * Math.max(1, Math.ceil((pollCount + 1) / 4)));
+      await queue.enqueue("poll_chiefvoice_call", { callAttemptId, pollCount: pollCount + 1 }, {
+        idempotencyKey: `chiefvoice-poll:${callAttemptId}:${pollCount + 1}`,
+        runAt: new Date(Date.now() + delay),
+      });
+    };
+
+    let callStatus;
+    try {
+      callStatus = await chiefvoice.getCallStatus(attempt.providerCallId);
+    } catch (error) {
+      if (error.status === 404 || error.status >= 500 || !error.status) return scheduleNext();
+      throw error;
+    }
+    const status = String(callStatus.status || "").toLowerCase().replace(/[ _-]/g, "");
+    const terminalNoResult = new Set(["noanswer", "busy", "failed", "canceled", "cancelled", "timeout"]);
+    if (terminalNoResult.has(status)) {
+      await repository.updateCallByProviderId({
+        provider: "chiefvoice", providerCallId: attempt.providerCallId, status: callStatus.status,
+        endedAt: callStatus.ended_at || new Date().toISOString(),
+        rawEvent: { EndTime: callStatus.ended_at || null },
+      });
+      await queue.enqueue("process_call_result", { callAttemptId }, { idempotencyKey: `call-result:${callAttemptId}` });
+      return;
+    }
+    try {
+      const postCall = await chiefvoice.getPostCallResult(attempt.providerCallId);
+      if (postCall.status === "completed" && postCall.result) {
+        const eventId = `poll:${attempt.providerCallId}:analysis-completed`;
+        const event = normalizeChiefVoiceWebhook({
+          event_id: eventId,
+          event: "call.analysis.completed",
+          call: { session_id: attempt.providerCallId, started_at: callStatus.started_at, ended_at: postCall.ended_at || callStatus.ended_at || new Date().toISOString() },
+          result: postCall.result,
+        }, { headerEventId: eventId, headerEventType: "call.analysis.completed" });
+        await processChiefVoiceResult({ event, repository, queue });
+        return;
+      }
+      if (postCall.status === "failed") {
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
+          reason: "chiefvoice_post_call_failed", callAttemptId,
+        });
+        return;
+      }
+    } catch (error) {
+      if (error.status !== 404 && error.status < 500) throw error;
+    }
+    await scheduleNext();
   }
 
   async function processCallResult({ callAttemptId }) {
@@ -374,6 +448,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
   // This worker retains deterministic attendance policy, retries and delivery.
   return {
     place_call: placeCall,
+    poll_chiefvoice_call: pollChiefVoiceCall,
     process_call_result: processCallResult,
     extract_intent: extractIntent,
     evaluate_attendance: evaluateAttendance,

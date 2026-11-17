@@ -17,7 +17,7 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
       apiKey: "test-key",
       fetchImpl: async (url, options) => {
         captured = { url, options, payload: JSON.parse(options.body) };
-        return { ok: true, status: 201, text: async () => JSON.stringify({ session_id: "session-123" }) };
+        return { ok: true, status: 202, text: async () => JSON.stringify({ session_id: "session-123", status: "starting" }) };
       },
     });
     const response = await client.createOutboundCall({
@@ -36,6 +36,7 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
     assert.equal(captured.options.headers["Idempotency-Key"], "attendance-attempt-1");
     assert.equal(captured.payload.channel, "phone");
     assert.equal(captured.payload.destination, "+919876543210");
+    assert.equal(captured.payload.recording_allowed, false);
     assert.equal(captured.payload.caller_id, "+911234567890");
     assert.equal(captured.payload.live_agent.template_id, "live-template");
     assert.equal(captured.payload.live_agent.context.attendance_stage, "check_in");
@@ -54,4 +55,19 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
       else process.env[name] = previous[name];
     }
   }
+});
+
+test("ChiefVoice API error details are not exposed to logs or persisted error messages", async () => {
+  const client = createChiefVoiceClient({
+    baseUrl: "https://chiefvoice.example.test",
+    apiKey: "secret-test-key",
+    fetchImpl: async () => ({ ok: false, status: 403, text: async () => JSON.stringify({ message: "destination +910000000001 rejected for key secret-test-key" }) }),
+  });
+  await assert.rejects(client.getCallStatus("sandbox-session"), (error) => {
+    assert.equal(error.message, "ChiefVoice API returned HTTP 403");
+    assert.equal(error.response, undefined);
+    assert.equal(error.message.includes("secret-test-key"), false);
+    assert.equal(error.message.includes("+910000000001"), false);
+    return true;
+  });
 });

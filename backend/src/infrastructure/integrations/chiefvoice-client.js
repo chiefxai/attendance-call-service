@@ -36,9 +36,10 @@ function createChiefVoiceClient({
       try { data = raw ? JSON.parse(raw) : {}; }
       catch { data = { message: raw.slice(0, 1000) }; }
       if (!response.ok) {
-        const error = new Error(data.error?.message || data.message || `ChiefVoice API returned HTTP ${response.status}`);
+        // Provider response bodies can contain customer or call data. Keep only
+        // the HTTP status on the error because worker logs persist its message.
+        const error = new Error(`ChiefVoice API returned HTTP ${response.status}`);
         error.status = response.status;
-        error.response = data;
         throw error;
       }
       return data;
@@ -57,7 +58,7 @@ function createChiefVoiceClient({
       channel: "phone",
       destination: to,
       caller_id: from,
-      recording_allowed: true,
+      recording_allowed: process.env.CHIEFVOICE_RECORDING_ALLOWED === "true",
       live_agent: {
         template_id: liveTemplateId,
         context: { ...context, attendance_session_id: sessionId, call_attempt_id: callAttemptId, attendance_stage: stage },
@@ -108,7 +109,15 @@ function createChiefVoiceClient({
     });
   }
 
-  return { request, createOutboundCall };
+  function getCallStatus(sessionId) {
+    return request(`/v1/calls/${encodeURIComponent(sessionId)}`);
+  }
+
+  function getPostCallResult(sessionId) {
+    return request(`/v1/calls/${encodeURIComponent(sessionId)}/post-call`);
+  }
+
+  return { request, createOutboundCall, getCallStatus, getPostCallResult };
 }
 
 module.exports = { createChiefVoiceClient };

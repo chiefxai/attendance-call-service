@@ -5,7 +5,8 @@ const crypto = require("node:crypto");
 const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
-const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook, mapChiefVoiceAttendanceResult } = require("../infrastructure/integrations/chiefvoice-webhook");
+const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook } = require("../infrastructure/integrations/chiefvoice-webhook");
+const { processChiefVoiceResult } = require("../domain/attendance/chiefvoice-result");
 
 function createCallServiceRouter({ express, repository, queue, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
@@ -828,67 +829,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         return res.status(400).json({ error: error.message });
       }
 
-      const acceptance = await queue.transaction(async (client) => {
-        const firstDelivery = await repository.claimChiefVoiceWebhookEvent({
-          eventId: event.eventId,
-          providerCallId: event.providerCallId,
-          eventType: event.eventType,
-          client,
-        });
-        if (!firstDelivery) return { duplicate: true };
-
-        const attempt = await repository.updateCallByProviderId({
-          provider: "chiefvoice",
-          providerCallId: event.providerCallId,
-          status: event.status,
-          durationSeconds: event.durationSeconds,
-          endedAt: event.endedAt,
-          rawEvent: {
-            event: event.eventType,
-            status: event.status,
-            EndTime: event.endedAt,
-          },
-        });
-        if (!attempt) throw Object.assign(new Error("Call attempt not found"), { status: 404, safeCode: "call_not_found" });
-
-        if (attempt.sessionId) {
-          const postCallResult = event.postCallResult;
-          const session = await repository.getAttendanceSession(attempt.sessionId);
-          const outcome = {
-            ...postCallResult,
-            employeeIntent: postCallResult.employeeIntent ?? postCallResult.employee_intent,
-            employeeNameConfirmed: postCallResult.employeeNameConfirmed ?? postCallResult.employee_name_confirmed,
-            patientNameConfirmed: postCallResult.patientNameConfirmed ?? postCallResult.patient_name_confirmed,
-            addressConfirmed: postCallResult.addressConfirmed ?? postCallResult.address_confirmed,
-            employeeVerified: postCallResult.employeeVerified ?? postCallResult.employee_verified,
-            clientVerified: postCallResult.clientVerified ?? postCallResult.client_verified,
-            reachedPatient: postCallResult.reachedPatient ?? postCallResult.reached_patient,
-            dutyComplete: postCallResult.dutyComplete ?? postCallResult.duty_complete,
-            reportedArrivalTime: postCallResult.reportedArrivalTime ?? postCallResult.reported_arrival_time,
-            reportedDepartureTime: postCallResult.reportedDepartureTime ?? postCallResult.reported_departure_time,
-            reportedArrivalTimeMentioned: postCallResult.reportedArrivalTimeMentioned ?? postCallResult.reported_arrival_time_mentioned,
-            reportedDepartureTimeMentioned: postCallResult.reportedDepartureTimeMentioned ?? postCallResult.reported_departure_time_mentioned,
-            requestedCallbackAt: postCallResult.requestedCallbackAt ?? postCallResult.requested_callback_at,
-            exceptionCode: postCallResult.exceptionCode ?? postCallResult.exception_code,
-            ...mapChiefVoiceAttendanceResult(postCallResult, { stage: attempt.stage, session }),
-          };
-          await repository.saveCallOutcome(attempt.id, outcome);
-
-          // ChiefVoice's documented post-call webhook deliberately omits transcripts.
-          // The structured result is sufficient for the attendance decision workflow.
-          const currentStageStatus = attempt.stage === "check_in" ? session?.checkInStatus : session?.checkOutStatus;
-          if (currentStageStatus === "calling") {
-            await repository.setStageStatus(attempt.sessionId, attempt.stage, "processing", {
-              reason: "chiefvoice_post_call_completed", callAttemptId: attempt.id,
-            });
-          }
-          await queue.enqueue("extract_intent", { callAttemptId: attempt.id }, {
-            idempotencyKey: `extract:${attempt.id}`,
-            client,
-          });
-        }
-        return { duplicate: false };
-      });
+      const acceptance = await processChiefVoiceResult({ event, repository, queue });
       return res.status(200).json({ received: true, ...(acceptance.duplicate ? { duplicate: true } : {}) });
     } catch (error) {
       if (error.status === 404) return res.status(404).json({ received: false });

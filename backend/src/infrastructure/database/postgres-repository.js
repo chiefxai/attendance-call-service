@@ -1466,7 +1466,7 @@ class PostgresRepository {
     if (!row) return null;
     return { id: row.id, organizationId: row.organization_id, sessionId: row.session_id, stage: row.stage,
       attemptNumber: row.attempt_number, callTargetRole: row.call_target_role, providerCallId: row.provider_call_id,
-      status: row.status, scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
+      provider: row.provider, status: row.status, scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
       consecutiveNoAnswerBefore: row.consecutive_no_answer_before || 0, recordingUrl: row.recording_url,
       recordingObjectKey: row.recording_object_key, recordingContentType: row.recording_content_type,
       outcome: json(row.outcome), durationSeconds: row.duration_seconds };
@@ -1476,9 +1476,11 @@ class PostgresRepository {
     return this.mapAttempt(r.rows[0]);
   }
   async attachProviderCallId(id, providerCallId, response, provider = "chiefvoice") {
+    const status = String(response?.status || "starting").toLowerCase();
+    const safeInitial = { status, channel: response?.channel || null, direction: response?.direction || null };
     await this.pool.query(
-      `UPDATE attendance_call_attempts SET provider=$4,provider_call_id=$2,status='ringing',raw_provider_event=$3::jsonb,updated_at=NOW() WHERE id=$1`,
-      [id, providerCallId, JSON.stringify(response || {}), provider],
+      `UPDATE attendance_call_attempts SET provider=$4,provider_call_id=$2,status=$5,raw_provider_event=$3::jsonb,updated_at=NOW() WHERE id=$1`,
+      [id, providerCallId, JSON.stringify(safeInitial), provider, status],
     );
   }
   async markCallPlacing(id) {
