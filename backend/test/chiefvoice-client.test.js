@@ -44,6 +44,10 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
     assert.equal(captured.payload.post_call.time_format, "%Y-%m-%dT%H:%M:%S%z");
     assert.equal(captured.payload.post_call.output_schema.additionalProperties, false);
     assert.ok(captured.payload.post_call.output_schema.required.includes("employeeVerified"));
+    assert.deepEqual(captured.payload.post_call.output_schema.properties.arrival_status.enum, ["arrived", "not_arrived", "unclear"]);
+    for (const field of ["staff_name", "patient_name", "patient_address", "expected_arrival_time", "identity_verified", "follow_up_required", "conversation_summary"]) {
+      assert.ok(captured.payload.post_call.output_schema.required.includes(field), `missing required field: ${field}`);
+    }
   } finally {
     for (const name of names) {
       if (previous[name] === undefined) delete process.env[name];
