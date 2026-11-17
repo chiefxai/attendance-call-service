@@ -127,7 +127,7 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
 
   return {
     ...outcome,
-    employeeIntent: arrived ? "arrival_confirmed" : notArrived && expectedArrivalTime ? "will_arrive_later" : "unclear",
+    employeeIntent: arrived ? "arrival_confirmed" : notArrived && result.follow_up_required === true && expectedArrivalTime ? "will_arrive_later" : "unclear",
     employeeNameConfirmed,
     patientNameConfirmed,
     addressConfirmed,
@@ -138,7 +138,7 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
     // When the staff member did not state an actual arrival timestamp, the
     // workflow uses the scheduled check-in time rather than inventing one.
     reportedArrivalTimeMentioned: false,
-    requestedCallbackAt: notArrived && expectedArrivalTime ? expectedArrivalTime : null,
+    requestedCallbackAt: notArrived && result.follow_up_required === true && expectedArrivalTime ? expectedArrivalTime : null,
     exceptionCode: null,
     summary: result.conversation_summary || result.summary || "",
   };
