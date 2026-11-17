@@ -94,7 +94,7 @@ function normalizeChiefVoiceWebhook(payload, { headerEventId, headerEventType } 
 
 
 function comparableText(value) {
-  return String(value || "").normalize("NFKC").toLowerCase().replace(/[^\\p{L}\\p{N}]+/gu, "");
+  return String(value || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 /**
