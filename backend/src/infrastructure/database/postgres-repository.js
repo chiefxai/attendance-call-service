@@ -1036,6 +1036,26 @@ class PostgresRepository {
     } : null;
   }
 
+  async getActiveStaffDirectoryRecord(organizationId, externalId) {
+    const { rows } = await this.pool.query(
+      `SELECT external_id,name,company_name,phone_number,address,language,branch
+       FROM staff_directory
+       WHERE organization_id=$1 AND external_id=$2 AND active=TRUE
+       LIMIT 1`,
+      [organizationId, externalId],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.external_id,
+      name: row.name,
+      companyName: row.company_name?.trim() || "ATHULYA",
+      phoneNumber: row.phone_number,
+      address: row.address || "",
+      language: row.language || "ta",
+      branch: row.branch || "",
+    } : null;
+  }
+
   async updateStaffDirectoryRecord(organizationId, person) {
     const { rows } = await this.pool.query(
       `INSERT INTO staff_directory (organization_id,external_id,name,company_name,phone_number,address,language,active)
@@ -1070,6 +1090,26 @@ class PostgresRepository {
       language: row.language, assignedStaff: "Unassigned", employeeId: null,
       careCategory: row.care_category || "Not specified", hub: row.hub || "Not specified",
       locationVerification: "not_integrated", status: "unassigned",
+    } : null;
+  }
+
+  async getActivePatientDirectoryRecord(organizationId, externalId) {
+    const { rows } = await this.pool.query(
+      `SELECT external_id,name,phone_number,address,language,athulya_patient_uhid,branch
+       FROM patient_directory
+       WHERE organization_id=$1 AND external_id=$2 AND active=TRUE
+       LIMIT 1`,
+      [organizationId, externalId],
+    );
+    const row = rows[0];
+    return row ? {
+      id: row.external_id,
+      name: row.name,
+      phoneNumber: row.phone_number,
+      address: row.address || "",
+      language: row.language || "ta",
+      patientUhid: row.athulya_patient_uhid || "",
+      branch: row.branch || "",
     } : null;
   }
 
