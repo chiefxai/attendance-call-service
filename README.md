@@ -38,7 +38,7 @@ Register the callback in the **same ChiefVoice tenant/API-key scope** used for o
 curl --fail-with-body -X PUT "$CHIEFVOICE_URL/v1/webhooks/post-call" \
   -H "Authorization: Bearer $CHIEFVOICE_API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\\"target_url\\":\\"$CHIEFVOICE_WEBHOOK_CALLBACK_URL\\"}"
+  -d "{\"target_url\":\"$CHIEFVOICE_WEBHOOK_CALLBACK_URL\"}"
 ```
 
 ChiefVoice returns `signing_secret` **once**. Copy that value into `CHIEFVOICE_WEBHOOK_SECRET` in the attendance service's server-side `.env`, then restart the API container. Do not put the secret in the frontend or commit it. If the secret is lost, configure/rotate the callback again in ChiefVoice and update the attendance service with the newly returned secret.
