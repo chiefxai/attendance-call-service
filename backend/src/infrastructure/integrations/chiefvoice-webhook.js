@@ -79,8 +79,9 @@ function verifyChiefVoiceSignature({
 
 /**
  * Normalize ChiefVoice's call.analysis.completed envelope.
- * ChiefVoice sends call.session_id and the structured extraction at top-level result;
- * it does not include the transcript in this webhook.
+ * ChiefVoice sends call.session_id and may wrap the structured extraction in
+ * result.structured_output alongside summary/disposition metadata. Older or
+ * simpler integrations can send the extraction directly in result.
  */
 function normalizeChiefVoiceWebhook(payload, { headerEventId, headerEventType } = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -106,7 +107,12 @@ function normalizeChiefVoiceWebhook(payload, { headerEventId, headerEventType } 
   const providerCallId = String(call.session_id || "").trim();
   if (!providerCallId) throw new Error("ChiefVoice webhook is missing call.session_id");
 
-  const postCallResult = payload.result;
+  const postCallResult = payload.result && typeof payload.result === "object" &&
+    !Array.isArray(payload.result) && payload.result.structured_output &&
+    typeof payload.result.structured_output === "object" &&
+    !Array.isArray(payload.result.structured_output)
+    ? payload.result.structured_output
+    : payload.result;
   validatePostCallResult(postCallResult);
 
   let durationSeconds = null;
