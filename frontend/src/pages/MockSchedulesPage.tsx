@@ -19,15 +19,15 @@ const emptySchedule = (): Partial<MockAthulyaSchedule> => ({
   patient_address: "1 Test Street, Chennai, Tamil Nadu, India",
   care_manager_id: "MOCK-CM-001", care_manager_name: "Mock Care Manager", care_manager_phone: "+919999900001",
   service_name: "Mock Home Care Visit", branch: "Mock Chennai Branch",
-  schedule_status: "Completed", caregiver_schedule_status: "Assigned",
+  schedule_status: "Scheduled", caregiver_schedule_status: "Assigned",
   caregiver_ids: "MOCK-CAREGIVER-001", caregiver_names: "Mock Caregiver",
   caregiver_phones: "+916384670687", vendor_company: "ATHULYA",
 });
 
 const fields: Array<{ key: keyof MockAthulyaSchedule; label: string; type?: string }> = [
   { key: "schedule_date", label: "Schedule date", type: "date" },
-  { key: "start_time", label: "Start time" },
-  { key: "end_time", label: "End time" },
+  { key: "start_time", label: "Start time", type: "time" },
+  { key: "end_time", label: "End time", type: "time" },
   { key: "client_name", label: "Patient / client name" },
   { key: "patient_id", label: "Patient ID" },
   { key: "patient_uhid", label: "Patient UHID" },
@@ -44,6 +44,21 @@ const fields: Array<{ key: keyof MockAthulyaSchedule; label: string; type?: stri
   { key: "vendor_company", label: "Vendor company" },
 ];
 
+function normalizeIndianMobile(value: string): string | null {
+  const compact = value.trim().replace(/[\s().-]/g, "");
+  if (!/^\+?\d+$/.test(compact)) return null;
+  const digits = compact.startsWith("+") ? compact.slice(1) : compact;
+  const mobile = digits.length === 10 ? digits : digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : "";
+  return /^[6-9]\d{9}$/.test(mobile) ? `+91${mobile}` : null;
+}
+
+function normalizeMobileList(value: string): string | null {
+  const entries = value.split(/[,;\n]/).map((entry) => entry.trim()).filter(Boolean);
+  if (!entries.length) return "";
+  const normalized = entries.map(normalizeIndianMobile);
+  return normalized.some((entry) => !entry) ? null : normalized.join(", ");
+}
+
 export function MockSchedulesPage() {
   const queryClient = useQueryClient();
   const [date, setDate] = useState(todayIndia());
@@ -51,6 +66,13 @@ export function MockSchedulesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<Partial<MockAthulyaSchedule>>(emptySchedule());
   const [error, setError] = useState("");
+  const phoneErrors = {
+    care_manager_phone: form.care_manager_phone && !normalizeIndianMobile(form.care_manager_phone) ? "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." : "",
+    caregiver_phones: form.caregiver_phones && normalizeMobileList(form.caregiver_phones) === null ? "Enter valid Indian mobile numbers separated by commas." : "",
+  };
+  const normalizedCareManagerPhone = form.care_manager_phone ? normalizeIndianMobile(form.care_manager_phone) : "";
+  const normalizedCaregiverPhones = normalizeMobileList(form.caregiver_phones || "");
+  const phoneInvalid = Boolean(phoneErrors.care_manager_phone || phoneErrors.caregiver_phones);
   const schedules = useQuery({ queryKey: ["mock-athulya-schedules"], queryFn: fetchMockAthulyaSchedules, refetchInterval: 5000 });
   const runs = useQuery({ queryKey: ["athulya-sync-runs"], queryFn: fetchAthulyaSyncRuns, refetchInterval: 2500 });
   const refresh = async () => {
@@ -60,9 +82,12 @@ export function MockSchedulesPage() {
     ]);
   };
   const saveMutation = useMutation({
-    mutationFn: async () => editing?.schedule_id
-      ? updateMockAthulyaSchedule(editing.schedule_id, form)
-      : createMockAthulyaSchedule(form),
+    mutationFn: async () => {
+      const payload = { ...form, care_manager_phone: normalizedCareManagerPhone || "", caregiver_phones: normalizedCaregiverPhones || "" };
+      return editing?.schedule_id
+        ? updateMockAthulyaSchedule(editing.schedule_id, payload)
+        : createMockAthulyaSchedule(payload);
+    },
     onSuccess: async () => { setEditing(null); setDialogOpen(false); await refresh(); },
     onError: (e: any) => setError(e?.response?.data?.message || e?.response?.data?.error || e.message || "Unable to save schedule"),
   });
@@ -93,7 +118,7 @@ export function MockSchedulesPage() {
     <Stack spacing={3}>
       <PageHeader title="Mock Athulya schedules" />
       <Alert severity="info">
-        Mock schedules are isolated test data. The default status is <b>Completed</b>, so syncing imports the schedule and caregiver without placing outbound calls. Change the status only when you intentionally want to test call scheduling.
+        Mock schedules are isolated test data. New schedules default to <b>Scheduled</b> so you can test call scheduling. Use <b>Completed</b> when you want to import the schedule without placing outbound calls.
       </Alert>
       {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
       <Grid container spacing={2}>
@@ -181,10 +206,12 @@ export function MockSchedulesPage() {
           <Grid container spacing={2} sx={{ pt: 1 }}>
             {fields.map((field) => <Grid size={{ xs: 12, sm: 6 }} key={field.key}>
               <TextField fullWidth size="small" type={field.type || "text"} label={field.label} value={String(form[field.key] ?? "")}
-                onChange={(e) => setField(field.key, e.target.value)} InputLabelProps={field.type === "date" ? { shrink: true } : undefined} />
+                onChange={(e) => setField(field.key, e.target.value)} InputLabelProps={field.type === "date" || field.type === "time" ? { shrink: true } : undefined}
+                error={field.key === "care_manager_phone" ? Boolean(phoneErrors.care_manager_phone) : field.key === "caregiver_phones" ? Boolean(phoneErrors.caregiver_phones) : false}
+                helperText={field.key === "care_manager_phone" ? phoneErrors.care_manager_phone || "Saved in +91 format." : field.key === "caregiver_phones" ? phoneErrors.caregiver_phones || "For multiple caregivers, separate numbers with commas." : undefined} />
             </Grid>)}
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField select fullWidth size="small" label="Schedule status" value={String(form.schedule_status || "Completed")} onChange={(e) => setField("schedule_status", e.target.value)}>
+              <TextField select fullWidth size="small" label="Schedule status" value={String(form.schedule_status || "Scheduled")} onChange={(e) => setField("schedule_status", e.target.value)}>
                 {["Completed", "Scheduled", "Assigned", "Cancelled"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
               </TextField>
             </Grid>
@@ -192,7 +219,7 @@ export function MockSchedulesPage() {
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" disabled={saveMutation.isPending || !form.client_name || !form.patient_id || !form.schedule_date} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? "Saving…" : "Save schedule"}</Button>
+          <Button variant="contained" disabled={saveMutation.isPending || phoneInvalid || !form.client_name || !form.patient_id || !form.schedule_date} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? "Saving…" : "Save schedule"}</Button>
         </DialogActions>
       </Dialog>
     </Stack>
