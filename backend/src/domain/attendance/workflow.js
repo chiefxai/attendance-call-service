@@ -519,14 +519,10 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
             await repository.setStageStatus(sessionId, attempt.stage, "review", { reason: "callback_time_invalid", callAttemptId });
           } else {
             const nextNumber = await repository.nextAttemptNumber(sessionId, attempt.stage);
-            let callbackAt = runAt;
-            if (attempt.stage === "check_in" && session.scheduledEndAt) {
-              const checkoutAt = new Date(session.scheduledEndAt);
-              if (Number.isFinite(checkoutAt.getTime())) {
-                const latestCheckInAt = new Date(checkoutAt.getTime() - 60_000);
-                if (callbackAt >= latestCheckInAt) callbackAt = latestCheckInAt > new Date() ? latestCheckInAt : new Date(Date.now() + 1_000);
-              }
-            }
+            // Honor the explicit absolute callback time returned by ChiefVoice.
+            // Capping a check-in callback at the scheduled check-out time
+            // silently changed the caregiver's requested delay.
+            const callbackAt = runAt;
             await repository.setStageStatus(sessionId, attempt.stage, "follow_up", { reason: "employee_requested_callback", nextCallAt: callbackAt.toISOString(), callAttemptId });
             await queue.enqueue("place_call", { sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage, attemptNumber: nextNumber, consecutiveNoAnswer: 0 }, {
               idempotencyKey: `call:${sessionId}:${attempt.stage}:${nextNumber}`, runAt: callbackAt,
