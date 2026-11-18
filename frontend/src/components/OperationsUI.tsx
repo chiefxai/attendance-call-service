@@ -31,13 +31,29 @@ export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accen
   return <Card onClick={onClick} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} onKeyDown={onClick ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onClick(); } } : undefined} sx={{ height: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined, transition: "box-shadow .18s ease, transform .18s ease", "&:hover": onClick ? { transform: "translateY(-2px)", boxShadow: 4 } : undefined, "&:focus-visible": onClick ? { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 } : undefined }}><CardContent sx={{ p: { xs: 1.75, sm: 2.25 }, minWidth: 0 }}><Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}><Box sx={{ width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: 2.5, bgcolor: tint, color: accent }}>{icon}</Box>{tag && <Chip size="small" label={tag} sx={{ height: 22, bgcolor: tint, color: accent, fontSize: 10, fontWeight: 700 }} />}</Stack><Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>{label}</Typography><Typography sx={{ fontSize: 27, lineHeight: 1.2, fontWeight: 750, letterSpacing: "-.035em", mt: .45 }}>{value}</Typography>{detail && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .65 }}>{detail}</Typography>}</CardContent></Card>;
 }
 
-export function StatusChip({ status }: { status: string }) {
-  const normalized = status.toLowerCase().replaceAll("_", " ");
-  const label = ["not placed", "call not placed"].includes(normalized) ? "Call Not Placed" : normalized === "not answered" ? "Not Answered" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
+export function StatusChip({ status, compact = false }: { status: string; compact?: boolean }) {
+  const normalized = String(status || "unknown").toLowerCase().trim().replaceAll(/[_-]+/g, " ").replaceAll(/\\s+/g, " ");
+  const compactLabels: Record<string, string> = {
+    "attention required": "Review",
+    "needs review": "Review",
+    "call not placed": "Not placed",
+    "not placed": "Not placed",
+    "not answered": "No answer",
+    "no answer": "No answer",
+    "retry scheduled": "Retry",
+    delayed: "Callback",
+    completed: "Done",
+    confirmed: "Done",
+    "checked in": "Done",
+    "check in": "Check-in",
+    "check out": "Check-out",
+    "in progress": "In progress",
+  };
+  const label = compact ? compactLabels[normalized] || normalized : ["not placed", "call not placed"].includes(normalized) ? "Call Not Placed" : normalized === "not answered" ? "Not Answered" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
   const color = ["verified", "confirmed", "completed", "checked in", "active", "synced", "delivered", "check in", "check out"].includes(normalized) ? "success"
-    : ["delayed", "not placed", "not answered", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
-      : ["late", "retrying", "retry scheduled", "pending", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";
-  return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={label} sx={{ textTransform: "capitalize", fontWeight: 650 }} />;
+    : ["not placed", "not answered", "no answer", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
+      : ["delayed", "late", "retrying", "retry scheduled", "pending", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";
+  return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={label} sx={{ textTransform: "capitalize", fontWeight: 650, ...(compact ? { height: 22, fontSize: "0.72rem", "& .MuiChip-label": { px: 0.8 } } : {}) }} />;
 }
 
 export function SectionCard({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode }) {

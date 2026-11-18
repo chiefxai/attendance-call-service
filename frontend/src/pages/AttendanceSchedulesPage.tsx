@@ -120,9 +120,11 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
   const overdue = Boolean(dueAt && dueAt.getTime() <= Date.now());
   const stageName = stage === "checkIn" ? "Checked In" : "Completed";
 
-  if (!records.length) return <Stack spacing={0.5}>
-    <Typography variant="body2" color="text.secondary">{scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}</Typography>
-    {canAssessCall && <StatusChip status={overdue ? "call not placed" : "upcoming"} />}
+  if (!records.length) return <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+    <Typography variant="body2" color={scheduleClock(scheduledTime) === "—" ? "text.disabled" : "text.secondary"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
+      {scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}
+    </Typography>
+    {canAssessCall && <StatusChip compact status={overdue ? "call not placed" : "upcoming"} />}
   </Stack>;
 
   return <Stack spacing={0.75}>
@@ -142,11 +144,15 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       else if (retryScheduled) displayStatus = "retry scheduled";
       else if (stageStatus.status === "review") displayStatus = "needs review";
 
+      const displayTime = stageStatus.status === "confirmed" ? stageStatus.reportedAt || scheduledTime : scheduledTime;
+
       return <Stack key={record.sessionId} spacing={0.35} alignItems="flex-start">
-        <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
-          {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}:</Typography>}
-          {stageStatus.status === "confirmed" && <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{scheduleClock(stageStatus.reportedAt || scheduledTime)}</Typography>}
-          <StatusChip status={displayStatus} />
+        {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}</Typography>}
+        <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="nowrap">
+          <Typography variant="body2" color={displayTime ? "text.secondary" : "text.disabled"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
+            {displayTime ? scheduleClock(displayTime) : emptyLabel}
+          </Typography>
+          <StatusChip compact status={displayStatus} />
         </Stack>
         {stageStatus.status === "follow_up" && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary">
           {employeeRequestedDelay ? "Callback scheduled:" : "Retry scheduled:"} {dateTimeLabel(stageStatus.nextCallAt)}
@@ -256,7 +262,7 @@ export function AttendanceSchedulesPage() {
                   <Stack spacing={0.5} alignItems="flex-start">
                     {(() => {
                       const status = statusesBySchedule.get(schedule.id) || "upcoming";
-                      return <StatusChip status={status} />;
+                      return <StatusChip compact status={status} />;
                     })()}
 
                   </Stack>
