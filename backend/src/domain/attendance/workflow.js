@@ -3,6 +3,7 @@
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
 const { normalizeChiefVoiceWebhook, extractChiefVoiceTranscript } = require("../../infrastructure/integrations/chiefvoice-webhook");
 const { processChiefVoiceResult } = require("./chiefvoice-result");
+const { isNoAnswerFailureCode } = require("./call-failure");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -263,11 +264,12 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       });
     };
 
-    const [statusResult, postCallResult] = await Promise.allSettled([
+    const [statusResult, postCallResult, transcriptResult] = await Promise.allSettled([
       chiefvoice.getCallStatus(attempt.providerCallId),
       chiefvoice.getPostCallResult(attempt.providerCallId),
+      chiefvoice.getTranscript(attempt.providerCallId),
     ]);
-    for (const result of [statusResult, postCallResult]) {
+    for (const result of [statusResult, postCallResult, transcriptResult]) {
       if (result.status === "rejected" && result.reason?.status !== 404) throw result.reason;
     }
     const sources = [
@@ -275,6 +277,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       postCallResult.status === "fulfilled" ? postCallResult.value : null,
       postCallResult.status === "fulfilled" ? postCallResult.value?.result : null,
       postCallResult.status === "fulfilled" ? postCallResult.value?.call : null,
+      transcriptResult.status === "fulfilled" ? transcriptResult.value : null,
     ];
     const transcript = extractChiefVoiceTranscript(...sources);
     let transcriptSaved = Boolean(await repository.getTranscriptForCall(callAttemptId));
@@ -328,7 +331,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       return;
     }
     if (callDisposition === "not_answered") {
-      if (attempt.failure) {
+      if (attempt.failure && !isNoAnswerFailureCode(attempt.failure.code)) {
         const maxTechnicalAttempts = Math.max(1, Number(process.env.CHIEFVOICE_CALL_FAILURE_MAX_ATTEMPTS) || 2);
         if (!attempt.failure.retryable || attempt.attemptNumber >= maxTechnicalAttempts) {
           await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {

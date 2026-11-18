@@ -269,7 +269,11 @@ function createChiefVoiceClient({
     return request(`/v1/calls/${encodeURIComponent(sessionId)}/post-call`);
   }
 
-  return { request, createOutboundCall, getCallStatus, getPostCallResult, getRecording };
+  function getTranscript(sessionId) {
+    return request(`/v1/calls/${encodeURIComponent(sessionId)}/transcript`);
+  }
+
+  return { request, createOutboundCall, getCallStatus, getPostCallResult, getTranscript, getRecording };
 }
 
 module.exports = { createChiefVoiceClient };

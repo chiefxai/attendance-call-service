@@ -36,6 +36,17 @@ Store the one-time registration response's signing secret in server-side `CHIEFV
 
 The same signed route accepts `call.analysis.completed`, `call.failed`, and `call.post_call.failed`. Events are deduplicated by `event_id`. Retryable call failures can enter a bounded technical retry; non-retryable call failures and post-call failures move the stage to review with only the stable failure code and retryability metadata stored. Configure `failure_webhook_url` on `PUT /v1/webhooks/post-call` to the same callback URL.
 
+### Attendance result and retry contract
+
+An answered call with usable analysis is delivered as `call.analysis.completed`. The structured attendance object may be the entire `result` or be nested at `result.structured_output`; the platform accepts both. It must use schema version `1.0`:
+
+- Check-in: `stage: "check_in"`, `outcome: arrived | not_arrived | unclear | wrong_assignment`, the three boolean `identity` match fields, nullable ISO `reported_at` and `callback_at`, nullable `exception_code`, and string `summary`.
+- Check-out: `stage: "check_out"`, `outcome: checked_out | still_on_duty | unclear | wrong_assignment`, nullable ISO `reported_at` and `callback_at`, nullable `exception_code`, and string `summary`.
+
+No-answer is a call status, not a post-call `outcome`. The status poller routes `no_answer`, `not_answered`, `unanswered`, `busy`, `failed`, and `timeout` into the configured no-answer retry policy. If ChiefVoice sends a `call.failed` event with failure code `no_answer`, `not_answered`, `unanswered`, or `busy`, the platform uses that same policy. Other retryable call failures use the separate bounded technical retry. A `call.post_call.failed` event such as `transcript_missing` is not assumed to mean no answer; it goes to review because the provider reports post-call/transcript failure without confirming whether the caregiver answered.
+
+For `not_arrived` or `still_on_duty`, return `callback_at` as an absolute ISO 8601 timestamp with timezone offset only when the caregiver agrees to a specific follow-up time. The platform schedules the existing follow-up template at that time. If the result is `unclear`, required identity checks fail, or a requested callback has no valid time, the platform sends the stage to review rather than confirming attendance.
+
 The webhook updates the attempt using provider `chiefvoice`, stores the post-call result, and queues deterministic attendance validation and artifact retrieval. The worker polls `GET /v1/calls/{session_id}` and `GET /v1/calls/{session_id}/post-call`, then downloads recordings from `GET /v1/calls/{session_id}/recording` using the same Bearer API key. Recordings are stored in private MinIO under the owning organization/session/attempt; the UI streams them through its authenticated recording route. Transcript text is saved when returned in the call status, post-call result, or webhook envelope. Missing artifacts are retried for a bounded period without logging their contents. Set `CHIEFVOICE_RECORDING_ALLOWED=true` for new calls only when recording is enabled for the ChiefVoice API/account; the default remains off.
 
 ## Environment

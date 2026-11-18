@@ -1,6 +1,7 @@
 "use strict";
 
 const { mapChiefVoiceAttendanceResult } = require("../../infrastructure/integrations/chiefvoice-webhook");
+const { isNoAnswerFailureCode } = require("./call-failure");
 
 async function processChiefVoiceResult({ event, repository, queue }) {
   return queue.transaction(async (client) => {
@@ -89,7 +90,8 @@ async function processChiefVoiceFailure({ event, repository, queue }) {
     });
     if (!attempt) throw Object.assign(new Error("Call attempt not found"), { status: 404, safeCode: "call_not_found" });
 
-    if (attempt.sessionId && event.eventType === "call.failed" && event.failure.retryable) {
+    const noAnswer = event.eventType === "call.failed" && isNoAnswerFailureCode(event.failure.code);
+    if (attempt.sessionId && event.eventType === "call.failed" && (event.failure.retryable || noAnswer)) {
       await queue.enqueue("process_call_result", { callAttemptId: attempt.id }, {
         idempotencyKey: `call-result:${attempt.id}`,
         client,
