@@ -46,6 +46,18 @@ function inferRequestedCallbackAt(transcript, referenceDate = new Date()) {
   return new Date(referenceDate.getTime() + amount * 60_000).toISOString();
 }
 
+function hasCallerSpeechTranscript(transcript) {
+  const text = String(transcript || "").trim();
+  if (!text) return false;
+  const labelledLines = text.split(/\r?\n/).map((line) => {
+    const match = line.trim().match(/^([^:]{1,40}):\s*(.*)$/);
+    return match ? { speaker: match[1].trim().toLowerCase(), utterance: match[2].trim() } : null;
+  }).filter(Boolean);
+  if (!labelledLines.length) return true;
+  const callerLabels = /^(customer|caller|user|caregiver|employee|human|patient|contact|callee)$/i;
+  return labelledLines.some(({ speaker, utterance }) => callerLabels.test(speaker) && utterance.length > 0);
+}
+
 function validateReportedTime(value, now = new Date()) {
   if (!value) return null;
   const timestamp = new Date(value).getTime();
@@ -420,7 +432,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     await queue.enqueue("evaluate_attendance", { sessionId: attempt.sessionId, callAttemptId }, { idempotencyKey: `decision:${callAttemptId}` });
   }
 
-  async function extractIntent({ callAttemptId }) {
+  async function extractIntent({ callAttemptId, transcriptPollCount = 0 }) {
     const attempt = await repository.getCallAttempt(callAttemptId);
     if (!attempt) return;
     const session = await repository.getAttendanceSession(attempt.sessionId);
@@ -429,13 +441,51 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       return;
     }
     const outcome = { ...attempt.outcome };
+    let transcriptRecord = await repository.getTranscriptForCall(callAttemptId);
+    let transcriptText = String(transcriptRecord?.text || "").trim();
+    if (!transcriptText && attempt.provider === "chiefvoice" && attempt.providerCallId) {
+      try {
+        const transcriptResult = await chiefvoice.getTranscript(attempt.providerCallId);
+        transcriptText = extractChiefVoiceTranscript(transcriptResult) || "";
+        if (transcriptText) {
+          await repository.saveTranscript({
+            organizationId: attempt.organizationId,
+            sessionId: attempt.sessionId,
+            callAttemptId,
+            language: transcriptResult?.transcript_language || transcriptResult?.language || session.language || "",
+            text: transcriptText,
+          });
+        }
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+    }
+    if (!transcriptText) {
+      const maxTranscriptPolls = Math.max(0, Number(process.env.CHIEFVOICE_TRANSCRIPT_POLL_MAX_ATTEMPTS) || 3);
+      if (transcriptPollCount < maxTranscriptPolls) {
+        const pollIntervalMs = Math.max(1_000, Number(process.env.CHIEFVOICE_TRANSCRIPT_POLL_INTERVAL_MS) || 15_000);
+        await queue.enqueue("extract_intent", { callAttemptId, transcriptPollCount: transcriptPollCount + 1 }, {
+          idempotencyKey: `extract:${callAttemptId}:transcript:${transcriptPollCount + 1}`,
+          runAt: new Date(Date.now() + pollIntervalMs),
+        });
+        return;
+      }
+    }
+    const noCallerSpeech = attempt.provider === "chiefvoice" && !hasCallerSpeechTranscript(transcriptText);
+    if (noCallerSpeech) {
+      // A completed/answered call with only the agent's greeting (or with no
+      // saved transcript after bounded polling) is operationally a no-answer.
+      outcome.employeeIntent = "no_human_answer";
+      outcome.requestedCallbackAt = null;
+      outcome.exceptionCode = null;
+    }
     const endedAt = new Date(attempt.endedAt || attempt.updatedAt || Date.now());
     const callEndedAt = Number.isFinite(endedAt.getTime()) ? endedAt.toISOString() : new Date().toISOString();
     const now = new Date(callEndedAt);
     const stageTimeField = attempt.stage === "check_in" ? "reportedArrivalTime" : "reportedDepartureTime";
     const stageTimeMentionedField = attempt.stage === "check_in" ? "reportedArrivalTimeMentioned" : "reportedDepartureTimeMentioned";
     const scheduledStageTime = attempt.stage === "check_in" ? session.scheduledStartAt : session.scheduledEndAt;
-    const reportedTimeError = validateReportedTime(outcome[stageTimeField], now);
+    const reportedTimeError = noCallerSpeech ? null : validateReportedTime(outcome[stageTimeField], now);
     if (reportedTimeError === "reported_time_invalid") {
       // A malformed optional extraction should not invalidate an otherwise
       // confirmed call. Treat it as absent and use a safe backend timestamp.
@@ -459,6 +509,10 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
           outcome.employeeIntent = "unclear";
         }
       }
+    }
+    if (noCallerSpeech) {
+      outcome[stageTimeField] = null;
+      outcome[stageTimeMentionedField] = false;
     }
     await repository.saveCallOutcome(callAttemptId, outcome);
     await queue.enqueue("evaluate_attendance", { sessionId: session.id, callAttemptId }, { idempotencyKey: `decision:${callAttemptId}` });
