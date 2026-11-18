@@ -30,6 +30,7 @@ const repositoryMethods = Object.freeze([
   "getOrganizationCallSettings(organizationId)",
   "saveOrganizationCallSettings(organizationId, settings)",
   "notifyCareManagerForPatient(notification)",
+  "listPendingCareManagerEscalations(limit)",
   "listCareManagerNotifications(organizationId, userId, limit)",
   "markCareManagerNotificationRead(organizationId, userId, notificationId)",
   "createCareManagerUser(input)",

@@ -140,8 +140,14 @@ async function main() {
           console.warn(`[attendance-worker] recovered overdue call session=${due.sessionId} stage=${due.stage} attempt=${attemptNumber} dueAt=${due.dueAt}`);
         }
       }
+      const pendingEscalations = await repository.listPendingCareManagerEscalations(100);
+      for (const pending of pendingEscalations) {
+        await queue.enqueue("evaluate_session", { sessionId: pending.sessionId, stage: pending.stage }, {
+          idempotencyKey: `evaluate:${pending.sessionId}:care-manager-recovery:${pending.stage}`,
+        });
+      }
     } catch (error) {
-      console.error("[attendance-worker] overdue call reconciliation failed", error.message);
+      console.error("[attendance-worker] overdue call/escalation reconciliation failed", error.message);
     } finally {
       reconcilingOverdueCalls = false;
     }

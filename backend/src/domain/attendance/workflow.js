@@ -651,6 +651,13 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       const settings = await repository.getOrganizationCallSettings(session.organizationId);
       const escalation = settings.unansweredCallEscalation || "call_care_manager";
       const maxNoAnswer = settings.callRetry?.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
+      const stageKey = stage === "check_out" ? "checkOut" : "checkIn";
+      const careManagerEscalationAttempts = Number(session.activeContext?.[stageKey]?.careManagerEscalationAttempts || 0) + 1;
+      await repository.setStageStatus(sessionId, stage, "not_answered", {
+        reason: "consecutive_no_answer_limit_reached",
+        careManagerEscalationAttempts,
+        careManagerNotified: false,
+      });
       const patient = session.patient || {};
       const stageLabel = stage === "check_out" ? "check-out" : "check-in";
       const notifications = await repository.notifyCareManagerForPatient({
@@ -721,6 +728,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         reason: "consecutive_no_answer_limit_reached",
         consecutiveNoAnswer: maxNoAnswer,
         careManagerNotified,
+        careManagerEscalationAttempts,
       });
       if (escalation === "call_care_manager" && !careManagerNotified) {
         console.info(`[attendance-worker] no reachable care manager found; keeping stage not_answered session=${session.id} stage=${stage}`);

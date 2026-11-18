@@ -1319,6 +1319,25 @@ class PostgresRepository {
     }));
   }
 
+  async listPendingCareManagerEscalations(limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const { rows } = await this.pool.query(
+      `SELECT id::text AS "sessionId",stage FROM (
+         SELECT s.id,'check_in'::text AS stage,s.updated_at AS updated_at,
+           s.active_context->'checkIn' AS stage_context
+         FROM attendance_sessions s WHERE s.session_status<>'cancelled' AND s.check_in_status='not_answered'
+         UNION ALL
+         SELECT s.id,'check_out'::text AS stage,s.updated_at AS updated_at,
+           s.active_context->'checkOut' AS stage_context
+         FROM attendance_sessions s WHERE s.session_status<>'cancelled' AND s.check_out_status='not_answered'
+       ) pending
+       WHERE COALESCE(stage_context->>'careManagerNotified','false')<>'true'
+         AND COALESCE(NULLIF(stage_context->>'careManagerEscalationAttempts',''),'0')::int=0
+       ORDER BY updated_at LIMIT $1`, [safeLimit],
+    );
+    return rows;
+  }
+
   async listAttendanceLedger(organizationId, { search = "", limit = 100, careManagerExternalId = null } = {}) {
     const sessions = await this.listAttendanceSessions(organizationId, { search, status: "completed", limit, careManagerExternalId });
     return sessions.filter((session) => session.checkIn.status === "confirmed" && session.checkOut.status === "confirmed");
