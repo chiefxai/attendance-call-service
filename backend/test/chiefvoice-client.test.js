@@ -50,7 +50,7 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
     assert.equal(captured.payload.post_call.time_format, "%Y-%m-%dT%H:%M:%S%z");
     assert.equal(captured.payload.post_call.output_schema.additionalProperties, false);
     assert.deepEqual(captured.payload.post_call.output_schema.required, [
-      "schema_version", "stage", "outcome", "identity", "reported_at", "callback_at", "exception_code", "summary",
+      "schema_version", "stage", "outcome", "identity", "reported_at", "callback_at", "exception_code", "summary", "transcript_summary",
     ]);
     assert.equal(captured.payload.post_call.output_schema.properties.schema_version.enum[0], "1.0");
     assert.deepEqual(captured.payload.post_call.output_schema.properties.identity.required, [
