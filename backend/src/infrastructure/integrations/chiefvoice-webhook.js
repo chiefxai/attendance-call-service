@@ -32,6 +32,42 @@ function validatePostCallResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     throw new Error("ChiefVoice webhook is missing the structured result object");
   }
+  if (result.schema_version === "1.0") {
+    const requiredCommon = ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary"];
+    const identityFields = ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"];
+    const expectedKeys = result.stage === "check_in"
+      ? [...requiredCommon, "identity"]
+      : requiredCommon;
+    if (!["check_in", "check_out"].includes(result.stage)) {
+      throw new Error("ChiefVoice result stage is unsupported");
+    }
+    if (Object.keys(result).some((field) => !expectedKeys.includes(field))
+      || requiredCommon.some((field) => !Object.prototype.hasOwnProperty.call(result, field))) {
+      throw new Error("ChiefVoice result does not match schema version 1.0");
+    }
+    const validOutcomes = result.stage === "check_in"
+      ? new Set(["arrived", "not_arrived", "unclear", "wrong_assignment"])
+      : new Set(["checked_out", "still_on_duty", "unclear", "wrong_assignment"]);
+    if (!validOutcomes.has(result.outcome)) throw new Error("ChiefVoice result outcome is unsupported for this stage");
+    if (typeof result.summary !== "string") throw new Error("ChiefVoice result summary must be a string");
+    for (const field of ["reported_at", "callback_at", "exception_code"]) {
+      const value = result[field];
+      if (value !== null && typeof value !== "string") throw new Error(`ChiefVoice result field ${field} must be a string or null`);
+    }
+    for (const field of ["reported_at", "callback_at"]) {
+      if (result[field] !== null && !Number.isFinite(Date.parse(result[field]))) {
+        throw new Error(`ChiefVoice result field ${field} must be an ISO timestamp or null`);
+      }
+    }
+    if (result.stage === "check_in") {
+      if (!result.identity || typeof result.identity !== "object" || Array.isArray(result.identity)
+        || Object.keys(result.identity).some((field) => !identityFields.includes(field))
+        || identityFields.some((field) => typeof result.identity[field] !== "boolean")) {
+        throw new Error("ChiefVoice check-in identity must contain the three boolean match fields");
+      }
+    }
+    return;
+  }
   for (const [field, value] of Object.entries(result)) {
     const allowed = RESULT_ENUMS[field];
     if (allowed && !allowed.has(value)) throw new Error(`ChiefVoice result field ${field} has an unsupported value`);
@@ -148,6 +184,47 @@ function comparableText(value) {
  */
 function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
   const outcome = { ...result };
+  if (result.schema_version === "1.0") {
+    if (result.stage !== stage) throw new Error("ChiefVoice result stage does not match the call stage");
+    const exceptionCode = result.exception_code;
+    if (stage === "check_in") {
+      const identity = result.identity;
+      const arrived = result.outcome === "arrived";
+      const notArrived = result.outcome === "not_arrived";
+      return {
+        ...outcome,
+        employeeIntent: arrived ? "arrival_confirmed"
+          : notArrived && result.callback_at ? "will_arrive_later"
+            : result.outcome === "wrong_assignment" ? "wrong_assignment" : "unclear",
+        employeeNameConfirmed: identity.caregiver_name_matches,
+        patientNameConfirmed: identity.patient_name_matches,
+        addressConfirmed: identity.patient_address_matches,
+        employeeVerified: identity.caregiver_name_matches,
+        clientVerified: identity.patient_name_matches && identity.patient_address_matches,
+        reachedPatient: arrived,
+        reportedArrivalTime: result.reported_at,
+        reportedArrivalTimeMentioned: result.reported_at !== null,
+        requestedCallbackAt: result.callback_at,
+        exceptionCode,
+        summary: result.summary,
+      };
+    }
+    if (stage === "check_out") {
+      return {
+        ...outcome,
+        employeeIntent: result.outcome === "checked_out" ? "departure_confirmed"
+          : result.outcome === "still_on_duty" ? "still_on_duty"
+            : result.outcome === "wrong_assignment" ? "wrong_assignment" : "unclear",
+        dutyComplete: result.outcome === "checked_out",
+        reportedDepartureTime: result.reported_at,
+        reportedDepartureTimeMentioned: result.reported_at !== null,
+        requestedCallbackAt: result.callback_at,
+        exceptionCode,
+        summary: result.summary,
+      };
+    }
+    return outcome;
+  }
   if (stage !== "check_in" || !Object.prototype.hasOwnProperty.call(result, "arrival_status")) {
     return outcome;
   }

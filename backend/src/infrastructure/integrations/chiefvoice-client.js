@@ -109,6 +109,47 @@ function createChiefVoiceClient({
       ].filter(Boolean);
       throw new Error(`${missing.join(" and ")} must be configured`);
     }
+    const checkInOutputSchema = {
+      type: "object",
+      properties: {
+        schema_version: { type: "string", enum: ["1.0"] },
+        stage: { type: "string", enum: ["check_in"] },
+        outcome: { type: "string", enum: ["arrived", "not_arrived", "unclear", "wrong_assignment"] },
+        identity: {
+          type: "object",
+          properties: {
+            caregiver_name_matches: { type: "boolean" },
+            patient_name_matches: { type: "boolean" },
+            patient_address_matches: { type: "boolean" },
+          },
+          required: ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"],
+          additionalProperties: false,
+        },
+        reported_at: { type: ["string", "null"] },
+        callback_at: { type: ["string", "null"] },
+        exception_code: { type: ["string", "null"] },
+        summary: { type: "string" },
+      },
+      required: ["schema_version", "stage", "outcome", "identity", "reported_at", "callback_at", "exception_code", "summary"],
+      additionalProperties: false,
+    };
+    const checkOutOutputSchema = {
+      type: "object",
+      properties: {
+        schema_version: { type: "string", enum: ["1.0"] },
+        stage: { type: "string", enum: ["check_out"] },
+        outcome: { type: "string", enum: ["checked_out", "still_on_duty", "unclear", "wrong_assignment"] },
+        reported_at: { type: ["string", "null"] },
+        callback_at: { type: ["string", "null"] },
+        exception_code: { type: ["string", "null"] },
+        summary: { type: "string" },
+      },
+      required: ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary"],
+      additionalProperties: false,
+    };
+    const outputSchema = scenario === "CARE_MANAGER_ESCALATION"
+      ? undefined
+      : stage === "check_out" ? checkOutOutputSchema : checkInOutputSchema;
     const payload = {
       channel: "phone",
       destination: to,
@@ -125,36 +166,7 @@ function createChiefVoiceClient({
         time_format: "%Y-%m-%dT%H:%M:%S%z",
         include_live_agent_context: true,
         tools: [{ type: "builtin", name: "time" }],
-        output_schema: {
-          type: "object",
-          properties: {
-            employeeIntent: { type: "string", enum: ["arrival_confirmed", "departure_confirmed", "will_arrive_later", "still_on_duty", "missed", "wrong_assignment", "unclear"] },
-            employeeNameConfirmed: { type: "boolean" },
-            patientNameConfirmed: { type: "boolean" },
-            addressConfirmed: { type: "boolean" },
-            employeeVerified: { type: "boolean" },
-            clientVerified: { type: "boolean" },
-            reachedPatient: { type: "boolean" },
-            dutyComplete: { type: "boolean" },
-            reportedArrivalTime: { type: ["string", "null"] },
-            reportedDepartureTime: { type: ["string", "null"] },
-            reportedArrivalTimeMentioned: { type: "boolean" },
-            reportedDepartureTimeMentioned: { type: "boolean" },
-            requestedCallbackAt: { type: ["string", "null"] },
-            exceptionCode: { type: ["string", "null"] },
-            summary: { type: "string" },
-            arrival_status: { type: "string", enum: ["arrived", "not_arrived", "unclear"] },
-            staff_name: { type: "string" },
-            patient_name: { type: "string" },
-            patient_address: { type: "string" },
-            expected_arrival_time: { type: "string" },
-            identity_verified: { type: "boolean" },
-            follow_up_required: { type: "boolean" },
-            conversation_summary: { type: "string" },
-          },
-          required: ["employeeIntent", "employeeNameConfirmed", "patientNameConfirmed", "addressConfirmed", "employeeVerified", "clientVerified", "reachedPatient", "dutyComplete", "reportedArrivalTime", "reportedDepartureTime", "reportedArrivalTimeMentioned", "reportedDepartureTimeMentioned", "requestedCallbackAt", "exceptionCode", "summary", "arrival_status", "staff_name", "patient_name", "patient_address", "expected_arrival_time", "identity_verified", "follow_up_required", "conversation_summary"],
-          additionalProperties: false,
-        },
+        ...(outputSchema ? { output_schema: outputSchema } : {}),
       },
     };
     return request("/v1/calls/outbound", {
