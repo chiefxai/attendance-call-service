@@ -902,7 +902,7 @@ class PostgresRepository {
       stage: row.stage,
       status: row.status,
       scheduledAt: row.scheduled_at,
-      nextCallAt: context.nextCallAt || null,
+      nextCallAt: row.status === "follow_up" ? context.nextCallAt || null : null,
       reportedAt: context.reportedAt || null,
       deliveryStatus: row.delivery_status,
       deliveryResponse: json(row.delivery_response),
@@ -937,8 +937,8 @@ class PostgresRepository {
       patient: { id: patient.id || null, name: patient.name || "Unknown patient" },
       scheduledStartAt: session.scheduledStartAt,
       scheduledEndAt: session.scheduledEndAt,
-      checkIn: { status: session.checkInStatus, reportedAt: context.checkIn?.reportedAt || null, nextCallAt: context.checkIn?.nextCallAt || null },
-      checkOut: { status: session.checkOutStatus, reportedAt: context.checkOut?.reportedAt || null, nextCallAt: context.checkOut?.nextCallAt || null },
+      checkIn: { status: session.checkInStatus, reportedAt: context.checkIn?.reportedAt || null, nextCallAt: session.checkInStatus === "follow_up" ? context.checkIn?.nextCallAt || null : null },
+      checkOut: { status: session.checkOutStatus, reportedAt: context.checkOut?.reportedAt || null, nextCallAt: session.checkOutStatus === "follow_up" ? context.checkOut?.nextCallAt || null : null },
       stageReasons: { checkIn: context.checkIn?.reason || null, checkOut: context.checkOut?.reason || null },
       sessionStatus: session.sessionStatus,
       backendDeliveryStatus: session.backendDeliveryStatus,
@@ -1578,6 +1578,16 @@ class PostgresRepository {
     const column = stage === "check_in" ? "check_in_status" : "check_out_status";
     const stageKey = stage === "check_in" ? "checkIn" : "checkOut";
     const persistedContextPatch = { status, ...contextPatch };
+    if (status === "follow_up" && contextPatch.reason === "employee_requested_callback" && contextPatch.nextCallAt) {
+      // Keep the caregiver's requested callback timestamp after the pending
+      // call is dispatched, while nextCallAt remains only the active queue time.
+      persistedContextPatch.lastCallbackAt = contextPatch.nextCallAt;
+    }
+    if (status !== "follow_up" && !Object.hasOwn(contextPatch, "nextCallAt")) {
+      // A callback/retry is no longer pending once the next call starts or
+      // the stage reaches a terminal/intermediate processing state.
+      persistedContextPatch.nextCallAt = null;
+    }
     await this.pool.query(
       `WITH updated AS (
          UPDATE attendance_sessions SET ${column}=$2,

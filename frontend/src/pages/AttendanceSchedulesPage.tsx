@@ -144,7 +144,11 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       else if (retryScheduled) displayStatus = "retry scheduled";
       else if (stageStatus.status === "review") displayStatus = "needs review";
 
-      const displayTime = stageStatus.status === "confirmed" ? stageStatus.reportedAt || scheduledTime : scheduledTime;
+      const displayTime = stageStatus.status === "confirmed"
+        ? stageStatus.reportedAt || scheduledTime
+        : stageStatus.status === "follow_up" && stageStatus.nextCallAt
+          ? stageStatus.nextCallAt
+          : scheduledTime;
 
       return <Stack key={record.sessionId} spacing={0.35} alignItems="flex-start">
         {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}</Typography>}

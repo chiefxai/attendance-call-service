@@ -142,6 +142,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     await repository.setStageStatus(sessionId, stage, "calling", { currentCallAttemptId: attempt.id, attemptNumber });
     const person = session.employee || {};
     try {
+      const stageContext = session.activeContext?.[stage === "check_in" ? "checkIn" : "checkOut"] || {};
       const callContext = {
         schedule: { start_at: session.scheduledStartAt, end_at: session.scheduledEndAt },
         language: session.language,
@@ -149,7 +150,9 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         scheduled_check_out_at: session.scheduledEndAt || "",
         attempt_number: String(attemptNumber || 1),
         consecutive_no_answer: String(consecutiveNoAnswer || 0),
-        callback_requested_at: session.activeContext?.[stage === "check_in" ? "checkIn" : "checkOut"]?.nextCallAt || "",
+        callback_requested_at: stageContext.lastCallbackAt
+          || (stageContext.reason === "employee_requested_callback" ? stageContext.nextCallAt : "")
+          || "",
       };
       const postCallContext = {
         ...callContext,
