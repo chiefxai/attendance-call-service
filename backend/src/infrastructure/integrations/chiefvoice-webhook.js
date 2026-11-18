@@ -22,7 +22,7 @@ const RESULT_TYPES = {
   reportedDepartureTimeMentioned: "boolean", reported_departure_time_mentioned: "boolean",
   requestedCallbackAt: "nullable-string", requested_callback_at: "nullable-string",
   exceptionCode: "nullable-string", exception_code: "nullable-string",
-  summary: "string", arrival_status: "enum",
+  summary: "string", transcript_summary: "string", arrival_status: "enum",
   staff_name: "string", patient_name: "string", patient_address: "string",
   expected_arrival_time: "string", identity_verified: "boolean",
   follow_up_required: "boolean", conversation_summary: "string",
@@ -36,8 +36,8 @@ function validatePostCallResult(result) {
     const requiredCommon = ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary"];
     const identityFields = ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"];
     const expectedKeys = result.stage === "check_in"
-      ? [...requiredCommon, "identity"]
-      : requiredCommon;
+      ? [...requiredCommon, "identity", "transcript_summary"]
+      : [...requiredCommon, "transcript_summary"];
     if (!["check_in", "check_out"].includes(result.stage)) {
       throw new Error("ChiefVoice result stage is unsupported");
     }
@@ -50,6 +50,9 @@ function validatePostCallResult(result) {
       : new Set(["checked_out", "still_on_duty", "no_human_answer", "unclear", "wrong_assignment"]);
     if (!validOutcomes.has(result.outcome)) throw new Error("ChiefVoice result outcome is unsupported for this stage");
     if (typeof result.summary !== "string") throw new Error("ChiefVoice result summary must be a string");
+    if (result.transcript_summary !== undefined && typeof result.transcript_summary !== "string") {
+      throw new Error("ChiefVoice transcript_summary must be a string when provided");
+    }
     for (const field of ["reported_at", "callback_at", "exception_code"]) {
       const value = result[field];
       if (value !== null && typeof value !== "string") throw new Error(`ChiefVoice result field ${field} must be a string or null`);
@@ -274,6 +277,7 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
         requestedCallbackAt: result.callback_at,
         exceptionCode,
         summary: result.summary,
+        transcript_summary: result.transcript_summary || "",
       };
     }
     if (stage === "check_out") {
@@ -289,6 +293,7 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
         requestedCallbackAt: result.callback_at,
         exceptionCode,
         summary: result.summary,
+        transcript_summary: result.transcript_summary || "",
       };
     }
     return outcome;

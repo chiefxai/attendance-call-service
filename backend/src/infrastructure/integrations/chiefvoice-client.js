@@ -201,8 +201,9 @@ function createChiefVoiceClient({
         },
         exception_code: { type: ["string", "null"] },
         summary: { type: "string" },
+        transcript_summary: { type: "string", description: "Concise factual summary of the full transcript; include confirmed details and uncertainties." },
       },
-      required: ["schema_version", "stage", "outcome", "identity", "reported_at", "callback_at", "exception_code", "summary"],
+      required: ["schema_version", "stage", "outcome", "identity", "reported_at", "callback_at", "exception_code", "summary", "transcript_summary"],
       additionalProperties: false,
     };
     const checkOutOutputSchema = {
@@ -221,8 +222,9 @@ function createChiefVoiceClient({
         },
         exception_code: { type: ["string", "null"] },
         summary: { type: "string" },
+        transcript_summary: { type: "string", description: "Concise factual summary of the full transcript; include confirmed details and uncertainties." },
       },
-      required: ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary"],
+      required: ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary", "transcript_summary"],
       additionalProperties: false,
     };
     const outputSchema = scenario === "CARE_MANAGER_ESCALATION"

@@ -107,6 +107,11 @@ export function AssignmentStatusPage() {
                 {attempts.length === 0 ? <Typography variant="body2" color="text.secondary">No calls have been placed for this stage yet.</Typography> : <Stack spacing={1.5}>
                   {attempts.map((attempt) => {
                     const transcript = artifacts.data.transcripts.find((item) => item.callAttemptId === attempt.id);
+                    const transcriptSummary = typeof attempt.outcome?.transcript_summary === "string"
+                      ? attempt.outcome.transcript_summary
+                      : typeof attempt.outcome?.transcriptSummary === "string"
+                        ? attempt.outcome.transcriptSummary
+                        : null;
                     return <Card key={attempt.id} variant="outlined" sx={{ boxShadow: "none" }}>
                       <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
                         <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1}>
@@ -122,6 +127,10 @@ export function AssignmentStatusPage() {
                           {attempt.endedAt ? ` · ended ${formatSessionTime(attempt.endedAt, query.data.timeZone)}` : ""}
                         </Typography>
                         <Divider sx={{ my: 1.5 }} />
+                        {transcriptSummary && <Box sx={{ mb: 1.5 }}>
+                          <Typography variant="subtitle2">Call summary</Typography>
+                          <Typography variant="body2" sx={{ mt: .5, overflowWrap: "anywhere" }}>{transcriptSummary}</Typography>
+                        </Box>}
                         {transcript ? <Box sx={{ mb: 1.5 }}>
                           <Typography variant="subtitle2">Transcript · {transcript.language}</Typography>
                           <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{transcript.text || "No speech was transcribed."}</Typography>

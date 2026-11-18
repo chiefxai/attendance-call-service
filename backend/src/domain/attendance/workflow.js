@@ -237,6 +237,30 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         return;
       }
       if (postCall.status === "failed") {
+        const failure = postCall.failure && typeof postCall.failure === "object" ? postCall.failure : {};
+        if (isNoAnswerFailureCode(failure.code || postCall.failure_code)) {
+          await repository.updateCallByProviderId({
+            provider: "chiefvoice",
+            providerCallId: attempt.providerCallId,
+            status: "no-answer",
+            durationSeconds: callStatus.duration_seconds || callStatus.durationSeconds || null,
+            endedAt: callStatus.ended_at || new Date().toISOString(),
+            failure: {
+              stage: "post_call",
+              code: String(failure.code || postCall.failure_code),
+              retryable: failure.retryable === true,
+              attempts: Number.isSafeInteger(failure.attempts) ? failure.attempts : null,
+            },
+            rawEvent: {
+              AnswerTime: callStatus.answered_at || callStatus.answer_time || callStatus.AnswerTime || null,
+              EndTime: callStatus.ended_at || null,
+            },
+          });
+          await queue.enqueue("process_call_result", { callAttemptId }, {
+            idempotencyKey: `call-result:${callAttemptId}`,
+          });
+          return;
+        }
         await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
           reason: "chiefvoice_post_call_failed", callAttemptId,
         });
@@ -332,7 +356,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       return;
     }
     if (callDisposition === "not_answered") {
-      if (attempt.failure && !isNoAnswerFailureCode(attempt.failure.code)) {
+      if (attempt.failure?.stage !== "post_call" && attempt.failure && !isNoAnswerFailureCode(attempt.failure.code)) {
         const maxTechnicalAttempts = Math.max(1, Number(process.env.CHIEFVOICE_CALL_FAILURE_MAX_ATTEMPTS) || 2);
         if (!attempt.failure.retryable || attempt.attemptNumber >= maxTechnicalAttempts) {
           await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
@@ -382,6 +406,10 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     }
     if (callDisposition !== "answered") return;
     if (!attempt.outcome) {
+      // The call-completed event can arrive before ChiefVoice finishes its
+      // separate post-call analysis. The placement workflow already polls for
+      // that result; don't expose a premature Review while that poll is active.
+      if (attempt.provider === "chiefvoice" && attempt.providerCallId) return;
       await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", { reason: "chiefvoice_post_call_result_missing", callAttemptId });
       await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, { idempotencyKey: `evaluate:${attempt.sessionId}:missing-result:${callAttemptId}` });
       return;

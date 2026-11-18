@@ -355,6 +355,11 @@ export function AttendanceSchedulesPage() {
                         {attempts.length === 0 ? <Typography variant="caption" color="text.secondary">No calls placed for this stage.</Typography> : <Stack spacing={1}>
                           {attempts.map((attempt) => {
                             const transcript = artifacts.transcripts.find((item) => item.callAttemptId === attempt.id);
+                            const transcriptSummary = typeof attempt.outcome?.transcript_summary === "string"
+                              ? attempt.outcome.transcript_summary
+                              : typeof attempt.outcome?.transcriptSummary === "string"
+                                ? attempt.outcome.transcriptSummary
+                                : null;
                             return <Card key={attempt.id} variant="outlined" sx={{ p: 1.5, boxShadow: "none", bgcolor: "#fff" }}>
                               <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={.75}>
                                 <Typography variant="body2" fontWeight={700}>Attempt {attempt.attemptNumber}</Typography>
@@ -368,6 +373,10 @@ export function AttendanceSchedulesPage() {
                               {attempt.failure && <Alert severity={attempt.failure.retryable ? "warning" : "error"} variant="outlined" sx={{ mt: 1 }}>
                                 Chiefvoice {attempt.failure.stage === "post_call" ? "post-call processing" : "call"} failed: {attempt.failure.code.replace(/[_.-]+/g, " ")}. {attempt.failure.retryable ? "A retry is allowed." : "This failure is not retryable."}
                               </Alert>}
+                              {transcriptSummary && <Box sx={{ mt: 1.25 }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={700}>CALL SUMMARY</Typography>
+                                <Typography variant="body2" sx={{ mt: .5, overflowWrap: "anywhere" }}>{transcriptSummary}</Typography>
+                              </Box>}
                               <Box sx={{ mt: 1.25, pt: 1.25, borderTop: "1px solid", borderColor: "divider" }}>
                                 <Typography variant="caption" color="text.secondary" fontWeight={700}>TRANSCRIPT{transcript?.language ? ` · ${transcript.language.toUpperCase()}` : ""}</Typography>
                                 {transcript?.text ? <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{transcript.text}</Typography> : <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: .5 }}>Transcript not available yet.</Typography>}

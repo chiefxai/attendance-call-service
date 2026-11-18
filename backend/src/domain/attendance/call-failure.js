@@ -2,9 +2,18 @@
 
 const NO_ANSWER_FAILURE_CODES = new Set([
   "no_answer",
+  "noanswer",
+  "no_answer_timeout",
+  "no_pickup",
+  "no_pick_up",
+  "no_pickup_timeout",
+  "call_not_answered",
   "not_answered",
+  "notanswered",
   "unanswered",
   "busy",
+  "user_busy",
+  "subscriber_busy",
 ]);
 
 function isNoAnswerFailureCode(code) {

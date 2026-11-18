@@ -218,6 +218,11 @@ export function ScheduledCallsPage() {
                 return <Stack spacing={1.5}>
                   {attempts.map((attempt) => {
                     const transcript = artifactsQuery.data.transcripts.find((item) => item.callAttemptId === attempt.id);
+                    const transcriptSummary = typeof attempt.outcome?.transcript_summary === "string"
+                      ? attempt.outcome.transcript_summary
+                      : typeof attempt.outcome?.transcriptSummary === "string"
+                        ? attempt.outcome.transcriptSummary
+                        : null;
                     return <Card key={attempt.id} variant="outlined" sx={{ p: 1.75, boxShadow: "none" }}>
                       <Stack spacing={1.25}>
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
@@ -229,6 +234,10 @@ export function ScheduledCallsPage() {
                         {attempt.recordingAvailable
                           ? <CallRecording sessionId={selectedSessionId} attemptId={attempt.id} />
                           : <Typography variant="body2" color="text.secondary">Recording is not available for this attempt yet.</Typography>}
+                        {transcriptSummary && <Box>
+                          <Typography variant="caption" fontWeight={700} color="text.secondary">CALL SUMMARY</Typography>
+                          <Typography variant="body2" sx={{ mt: .5, overflowWrap: "anywhere" }}>{transcriptSummary}</Typography>
+                        </Box>}
                         <Box>
                           <Typography variant="caption" fontWeight={700} color="text.secondary">TRANSCRIPT</Typography>
                           {transcript?.text

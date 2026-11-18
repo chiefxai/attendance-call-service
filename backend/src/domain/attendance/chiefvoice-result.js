@@ -90,8 +90,23 @@ async function processChiefVoiceFailure({ event, repository, queue }) {
     });
     if (!attempt) throw Object.assign(new Error("Call attempt not found"), { status: 404, safeCode: "call_not_found" });
 
-    const noAnswer = event.eventType === "call.failed" && isNoAnswerFailureCode(event.failure.code);
-    if (attempt.sessionId && event.eventType === "call.failed" && (event.failure.retryable || noAnswer)) {
+    const noAnswer = isNoAnswerFailureCode(event.failure.code)
+      || (event.eventType === "call.post_call.failed" && !attempt.answeredAt);
+    if (attempt.sessionId && (noAnswer || (event.eventType === "call.failed" && event.failure.retryable))) {
+      // Some unanswered calls are reported as a post-call analysis failure
+      // because there is no transcript to analyze. Keep them on the no-answer
+      // retry path instead of making the stage terminal in Review.
+      if (event.eventType === "call.post_call.failed" && noAnswer) {
+        await repository.updateCallByProviderId({
+          provider: "chiefvoice",
+          providerCallId: event.providerCallId,
+          status: "no-answer",
+          durationSeconds: event.durationSeconds,
+          endedAt: event.endedAt,
+          failure: event.failure,
+          rawEvent: { EndTime: event.endedAt || null },
+        });
+      }
       await queue.enqueue("process_call_result", { callAttemptId: attempt.id }, {
         idempotencyKey: `call-result:${attempt.id}`,
         client,
