@@ -28,6 +28,7 @@ Copy `.env.docker.example` to `.env` and configure:
 - `CHIEFVOICE_API_KEY` — bearer API key
 - `CHIEFVOICE_TEMPLATE_<SCENARIO>_LIVE_ID` and `CHIEFVOICE_TEMPLATE_<SCENARIO>_POST_CALL_ID` — scenario-specific reusable templates. Supported scenarios are `CHECK_IN`, `CHECK_OUT`, `CARE_MANAGER_ESCALATION`, `CHECK_IN_RETRY`, `CHECK_OUT_RETRY`, `CHECK_IN_FOLLOW_UP`, and `CHECK_OUT_FOLLOW_UP`. The Docker Compose defaults point to the templates created in the ChiefVoice API console; override them in `.env` when using another API tenant.
 - `CHIEFVOICE_CALLER_ID` — default E.164 caller ID; organization calling settings can override it
+- `ATHULYA_LATE_SCHEDULE_GRACE_MINUTES` — default `2`; if sync arrives after check-in/check-out time by this many minutes or less, queue the call immediately. Admins can change it in **Settings → Calling settings** (0–30; 0 disables late calls).
 - `CHIEFVOICE_WEBHOOK_SECRET` — signing secret shared with the webhook registration
 - `CHIEFVOICE_WEBHOOK_CALLBACK_URL` — public callback URL, `https://calls.elvoryx.in/api/call-service/webhooks/chiefvoice`
 - `CHIEFVOICE_RECORDING_ALLOWED` — defaults to `false`; enable only when recording is explicitly intended

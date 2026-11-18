@@ -15,6 +15,7 @@ type IntegrationForm = Pick<AthulyaIntegrationSettings, "integrationName" | "api
 const emptySettings: CallingForm = {
   defaultFromNumber: "",
   unansweredCallEscalation: "call_care_manager",
+  lateScheduleGraceMinutes: 2,
   retry: { maxConsecutiveNoAnswer: 3, initialMinutes: 3, multiplier: 1.2, maxMinutes: 30 },
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
@@ -40,7 +41,7 @@ export function SettingsPage() {
   const schedules = useQuery({ queryKey: ["athulya-schedules", syncFilters.scheduleDate], queryFn: () => fetchAthulyaSchedules({ fromDate: syncFilters.scheduleDate || undefined, toDate: syncFilters.scheduleDate || undefined }), enabled: tab === "athulya", retry: false });
   useEffect(() => {
     if (!settings.data) return;
-    setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, retry: settings.data.retry });
+    setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, lateScheduleGraceMinutes: settings.data.lateScheduleGraceMinutes, retry: settings.data.retry });
   }, [settings.data]);
   useEffect(() => {
     if (integration.data) setIntegrationForm({ integrationName: integration.data.integrationName, apiBaseUrl: integration.data.apiBaseUrl, enabled: integration.data.enabled, autoSyncEnabled: integration.data.autoSyncEnabled, autoSyncScope: integration.data.autoSyncScope, autoSyncScopeId: integration.data.autoSyncScopeId, apiKey: "" });
@@ -93,6 +94,12 @@ export function SettingsPage() {
             onChange={(event) => setForm((current) => ({ ...current, defaultFromNumber: event.target.value }))}
             helperText={settings.data.source.defaultFromNumber === "settings" ? "Workspace setting override · E.164 format" : "Using .env fallback · saving here overrides it"}
             inputProps={{ inputMode: "tel" }}
+          />
+          <TextField
+            fullWidth type="number" label="Late schedule call window (minutes)" value={form.lateScheduleGraceMinutes}
+            onChange={(event) => setForm((current) => ({ ...current, lateScheduleGraceMinutes: Number(event.target.value) }))}
+            inputProps={{ min: 0, max: 30, step: 1 }}
+            helperText={`${settings.data.source.lateScheduleGraceMinutes === "settings" ? "Workspace setting override" : "Using .env fallback"}. If sync runs after a scheduled time by this amount or less, the call starts immediately. Default is 2 minutes; 0 disables late calls.`}
           />
           <Box><Typography variant="h6">No-answer retry policy</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>The retry delay grows exponentially and stops at the configured attempt limit. {settings.data.source.retry === "settings" ? "Workspace override is active." : "Values currently come from .env."}</Typography></Box>
           <Grid container spacing={2}>

@@ -239,6 +239,10 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
       const upserted = await repository.upsertAthulyaSchedules(organizationId, records);
       const callSettings = await repository.getOrganizationCallSettings(organizationId);
       const fromNumber = callSettings.defaultFromNumber || process.env.CHIEFVOICE_CALLER_ID || "";
+      const configuredGrace = Number(callSettings.lateScheduleGraceMinutes ?? process.env.ATHULYA_LATE_SCHEDULE_GRACE_MINUTES ?? 2);
+      const lateScheduleGraceMinutes = Number.isInteger(configuredGrace) && configuredGrace >= 0 && configuredGrace <= 30
+        ? configuredGrace
+        : 2;
       let scheduledCalls = 0;
       let skippedSchedules = 0;
       for (const item of records) {
@@ -299,22 +303,33 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
             const stageTask = stage === "check_in" ? result.session.checkInTask : result.session.checkOutTask;
             if (!stageTask || ["confirmed", "missed", "not_answered", "review"].includes(stageTask.status)) continue;
             const runAt = new Date(stage === "check_in" ? result.session.scheduledStartAt : result.session.scheduledEndAt);
-            const job = await queue.enqueue("place_call", { sessionId: result.session.id, taskId: stageTask?.id, stage, attemptNumber: 1 }, {
-              idempotencyKey: `call:${result.session.id}:${stage}:1`, runAt, skipIfPast: true,
-            });
-            if (!job) {
+            const now = new Date();
+            const lateByMs = now.getTime() - runAt.getTime();
+            const withinLateGrace = lateByMs > 0 && lateByMs <= lateScheduleGraceMinutes * 60_000;
+            if (lateByMs > lateScheduleGraceMinutes * 60_000) {
               if (stageTask.status === "scheduled") {
-                const lateBySeconds = Math.max(0, Math.floor((Date.now() - runAt.getTime()) / 1000));
+                const lateBySeconds = Math.floor(lateByMs / 1000);
                 await repository.setStageStatus(result.session.id, stage, "missed", {
                   reason: "schedule_imported_after_scheduled_time",
-                  importedAt: new Date().toISOString(),
+                  importedAt: now.toISOString(),
                   lateBySeconds,
+                  graceMinutes: lateScheduleGraceMinutes,
                 });
-                console.info(`[athulya-sync] late schedule stage skipped; no call placed schedule=${scheduleId} caregiver=${caregiverId} stage=${stage} lateBySeconds=${lateBySeconds}`);
+                console.info(`[athulya-sync] late schedule stage skipped; no call placed schedule=${scheduleId} caregiver=${caregiverId} stage=${stage} lateBySeconds=${lateBySeconds} graceMinutes=${lateScheduleGraceMinutes}`);
               }
               continue;
             }
-            if (job?.status === "queued" || job?.status === "running") scheduledCalls += 1;
+            const queueRunAt = withinLateGrace ? now : runAt;
+            const job = await queue.enqueue("place_call", { sessionId: result.session.id, taskId: stageTask?.id, stage, attemptNumber: 1 }, {
+              idempotencyKey: `call:${result.session.id}:${stage}:1`, runAt: queueRunAt, skipIfPast: !withinLateGrace,
+            });
+            if (!job) continue;
+            if (job?.status === "queued" || job?.status === "running") {
+              scheduledCalls += 1;
+              if (withinLateGrace) {
+                console.info(`[athulya-sync] late schedule stage queued immediately schedule=${scheduleId} caregiver=${caregiverId} stage=${stage} lateBySeconds=${Math.floor(lateByMs / 1000)} graceMinutes=${lateScheduleGraceMinutes}`);
+              }
+            }
           }
           scheduledForRecord += 1;
         }

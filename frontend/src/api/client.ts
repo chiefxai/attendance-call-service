@@ -388,13 +388,14 @@ export interface AttendanceRecord {
 export interface CallingSettings {
   defaultFromNumber: string;
   unansweredCallEscalation: "platform_notification" | "call_care_manager";
+  lateScheduleGraceMinutes: number;
   retry: {
     maxConsecutiveNoAnswer: number;
     initialMinutes: number;
     multiplier: number;
     maxMinutes: number;
   };
-  source: { defaultFromNumber: "settings" | "environment"; retry: "settings" | "environment" };
+  source: { defaultFromNumber: "settings" | "environment"; lateScheduleGraceMinutes: "settings" | "environment"; retry: "settings" | "environment" };
 }
 
 export interface CareManagerNotification {

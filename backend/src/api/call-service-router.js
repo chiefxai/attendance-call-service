@@ -89,9 +89,12 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
   const getEffectiveCallingSettings = async (organizationId) => {
     const stored = await repository.getOrganizationCallSettings(organizationId);
     const storedRetry = stored.callRetry || {};
+    const configuredGrace = envNumber("ATHULYA_LATE_SCHEDULE_GRACE_MINUTES", 2);
+    const environmentGrace = Number.isInteger(configuredGrace) && configuredGrace >= 0 && configuredGrace <= 30 ? configuredGrace : 2;
     return {
       defaultFromNumber: stored.defaultFromNumber ?? process.env.CHIEFVOICE_CALLER_ID ?? "",
       unansweredCallEscalation: stored.unansweredCallEscalation ?? "call_care_manager",
+      lateScheduleGraceMinutes: stored.lateScheduleGraceMinutes ?? environmentGrace,
       retry: {
         maxConsecutiveNoAnswer: storedRetry.maxConsecutiveNoAnswer ?? envNumber("CALL_MAX_CONSECUTIVE_NO_ANSWER", 3),
         initialMinutes: storedRetry.initialMinutes ?? envNumber("CALL_RETRY_INITIAL_MINUTES", 3),
@@ -100,6 +103,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       },
       source: {
         defaultFromNumber: stored.defaultFromNumber ? "settings" : "environment",
+        lateScheduleGraceMinutes: stored.lateScheduleGraceMinutes != null ? "settings" : "environment",
         retry: Object.keys(storedRetry).length ? "settings" : "environment",
       },
     };
@@ -613,6 +617,10 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       if (body.unansweredCallEscalation !== undefined && !["platform_notification", "call_care_manager"].includes(body.unansweredCallEscalation)) {
         return res.status(400).json({ error: "unansweredCallEscalation must be platform_notification or call_care_manager" });
       }
+      const lateScheduleGraceMinutes = Number(body.lateScheduleGraceMinutes);
+      if (!Number.isInteger(lateScheduleGraceMinutes) || lateScheduleGraceMinutes < 0 || lateScheduleGraceMinutes > 30) {
+        return res.status(400).json({ error: "lateScheduleGraceMinutes must be an integer from 0 to 30" });
+      }
       const maxConsecutiveNoAnswer = Number(retry.maxConsecutiveNoAnswer);
       const initialMinutes = Number(retry.initialMinutes);
       const multiplier = Number(retry.multiplier);
@@ -626,6 +634,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       const existingSettings = await repository.getOrganizationCallSettings(organizationId);
       await repository.saveOrganizationCallSettings(organizationId, {
         defaultFromNumber,
+        lateScheduleGraceMinutes,
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
         unansweredCallEscalation: body.unansweredCallEscalation ?? existingSettings.unansweredCallEscalation ?? "call_care_manager",
       });
@@ -637,7 +646,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, callRetry: null, unansweredCallEscalation: "call_care_manager" });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, lateScheduleGraceMinutes: null, callRetry: null, unansweredCallEscalation: "call_care_manager" });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });
