@@ -140,20 +140,23 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     const person = session.employee || {};
     try {
       const callContext = {
-        employee: { name: person.name || person.fullName || "", phone_number: person.phoneNumber },
-        patient: { name: session.patient?.name || "", address: session.patient?.address || "" },
-        assignment: session.assignmentMetadata || {},
         schedule: { start_at: session.scheduledStartAt, end_at: session.scheduledEndAt },
         language: session.language,
-        organization_id: session.organizationId,
-        expected_staff_name: person.name || person.fullName || "",
-        expected_patient_name: session.patient?.name || "",
-        expected_patient_address: session.patient?.address || "",
         scheduled_check_in_at: session.scheduledStartAt || "",
         scheduled_check_out_at: session.scheduledEndAt || "",
         attempt_number: String(attemptNumber || 1),
         consecutive_no_answer: String(consecutiveNoAnswer || 0),
         callback_requested_at: session.activeContext?.[stage === "check_in" ? "checkIn" : "checkOut"]?.nextCallAt || "",
+      };
+      const postCallContext = {
+        ...callContext,
+        assignment: session.assignmentMetadata || {},
+        organization_id: session.organizationId,
+        expected_staff_name: person.name || person.fullName || "",
+        expected_patient_name: session.patient?.name || "",
+        expected_patient_address: session.patient?.address || "",
+        employee: { name: person.name || person.fullName || "" },
+        patient: { name: session.patient?.name || "", address: session.patient?.address || "" },
       };
       const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer });
       const call = await chiefvoice.createOutboundCall({
@@ -163,6 +166,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         stage,
         callAttemptId: attempt.id,
         context: callContext,
+        postCallContext,
         templateScenario,
       });
       const providerCallId = call.session_id || call.call_id || call.id;
@@ -369,18 +373,28 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     const stageTimeMentionedField = attempt.stage === "check_in" ? "reportedArrivalTimeMentioned" : "reportedDepartureTimeMentioned";
     const scheduledStageTime = attempt.stage === "check_in" ? session.scheduledStartAt : session.scheduledEndAt;
     const reportedTimeError = validateReportedTime(outcome[stageTimeField], now);
-    if (reportedTimeError) {
+    if (reportedTimeError === "reported_time_invalid") {
+      // A malformed optional extraction should not invalidate an otherwise
+      // confirmed call. Treat it as absent and use a safe backend timestamp.
+      outcome[stageTimeField] = null;
+      outcome[stageTimeMentionedField] = false;
+      outcome[`${stageTimeField}Source`] = "invalid_reported_time_fallback";
+    } else if (reportedTimeError) {
       outcome.exceptionCode = reportedTimeError;
       outcome.employeeIntent = "unclear";
       outcome.summary = `${outcome.summary || ""} ${reportedTimeError === "future_reported_time" ? "Reported attendance time is later than call completion." : "Reported attendance time could not be parsed."}`.trim();
-    } else if (outcome.employeeIntent === (attempt.stage === "check_in" ? "arrival_confirmed" : "departure_confirmed") && outcome[stageTimeMentionedField] === false) {
-      const scheduledDate = scheduledStageTime ? new Date(scheduledStageTime) : null;
-      outcome[stageTimeField] = scheduledDate && Number.isFinite(scheduledDate.getTime()) ? scheduledDate.toISOString() : null;
-      outcome[`${stageTimeField}Source`] = "scheduled_time_fallback";
-      const fallbackTimeError = validateReportedTime(outcome[stageTimeField], now);
-      if (fallbackTimeError) {
-        outcome.exceptionCode = fallbackTimeError === "future_reported_time" ? "scheduled_time_in_future" : fallbackTimeError;
-        outcome.employeeIntent = "unclear";
+    }
+    if (!reportedTimeError || reportedTimeError === "reported_time_invalid") {
+      if (outcome.employeeIntent === (attempt.stage === "check_in" ? "arrival_confirmed" : "departure_confirmed") && outcome[stageTimeMentionedField] === false) {
+        const scheduledDate = scheduledStageTime ? new Date(scheduledStageTime) : null;
+        const safeScheduledDate = scheduledDate && Number.isFinite(scheduledDate.getTime()) && scheduledDate <= now ? scheduledDate : null;
+        outcome[stageTimeField] = safeScheduledDate ? safeScheduledDate.toISOString() : callEndedAt;
+        outcome[`${stageTimeField}Source`] = safeScheduledDate ? "scheduled_time_fallback" : "call_time_fallback";
+        const fallbackTimeError = validateReportedTime(outcome[stageTimeField], now);
+        if (fallbackTimeError) {
+          outcome.exceptionCode = fallbackTimeError === "future_reported_time" ? "scheduled_time_in_future" : fallbackTimeError;
+          outcome.employeeIntent = "unclear";
+        }
       }
     }
     await repository.saveCallOutcome(callAttemptId, outcome);

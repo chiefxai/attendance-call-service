@@ -140,7 +140,7 @@ function createChiefVoiceClient({
     }
   }
 
-  async function createOutboundCall({ to, from, sessionId, stage, callAttemptId, context, templateScenario = null }) {
+  async function createOutboundCall({ to, from, sessionId, stage, callAttemptId, context, postCallContext = context, templateScenario = null }) {
     const callStartedAt = now();
     const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
     const currentLocalTime = new Intl.DateTimeFormat("sv-SE", {
@@ -180,7 +180,10 @@ function createChiefVoiceClient({
           required: ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"],
           additionalProperties: false,
         },
-        reported_at: { type: ["string", "null"] },
+        reported_at: {
+          type: ["string", "null"],
+          description: "Return the caregiver's explicitly stated actual arrival time as an ISO 8601 timestamp with the Asia/Kolkata offset. If the call did not ask for or receive an arrival time, return null; never copy scheduled_check_in_at.",
+        },
         callback_at: {
           type: ["string", "null"],
           description: "For a requested follow-up, return the absolute ISO 8601 date-time with timezone offset, calculated from current_local_time and time_zone. For example, if the person says 5 minutes, add 5 minutes. If they give a clock time such as 10:10, return its next future occurrence in that time zone. Otherwise null.",
@@ -197,7 +200,10 @@ function createChiefVoiceClient({
         schema_version: { type: "string", enum: ["1.0"] },
         stage: { type: "string", enum: ["check_out"] },
         outcome: { type: "string", enum: ["checked_out", "still_on_duty", "unclear", "wrong_assignment"] },
-        reported_at: { type: ["string", "null"] },
+        reported_at: {
+          type: ["string", "null"],
+          description: "Return the caregiver's explicitly stated actual departure time as an ISO 8601 timestamp with the Asia/Kolkata offset. If the call did not ask for or receive a departure time, return null; never copy scheduled_check_out_at.",
+        },
         callback_at: {
           type: ["string", "null"],
           description: "For a requested follow-up, return the absolute ISO 8601 date-time with timezone offset, calculated from current_local_time and time_zone. For example, if the person says 5 minutes, add 5 minutes. If they give a clock time such as 10:10, return its next future occurrence in that time zone. Otherwise null.",
@@ -232,7 +238,7 @@ function createChiefVoiceClient({
       post_call: {
         template_id: postCallTemplateId,
         context: {
-          ...context,
+          ...postCallContext,
           current_time_utc: callStartedAt.toISOString(),
           current_local_time: currentLocalTime,
           time_zone: timeZone,
