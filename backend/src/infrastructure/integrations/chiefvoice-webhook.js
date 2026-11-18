@@ -173,6 +173,34 @@ function normalizeChiefVoiceWebhook(payload, { headerEventId, headerEventType } 
   };
 }
 
+function normalizeChiefVoiceFailureWebhook(payload, { headerEventId, headerEventType } = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("ChiefVoice failure webhook body must be a JSON object");
+  const eventId = String(headerEventId || payload.event_id || "").trim();
+  const bodyEventId = String(payload.event_id || "").trim();
+  const eventType = String(headerEventType || payload.event || "").trim();
+  if (!eventId || eventId !== bodyEventId) throw new Error("ChiefVoice event ID header does not match the payload");
+  if (!["call.failed", "call.post_call.failed"].includes(eventType) || payload.event !== eventType) throw new Error("Unsupported or inconsistent ChiefVoice failure event type");
+  const call = payload.call;
+  if (!call || typeof call !== "object" || Array.isArray(call) || !String(call.session_id || "").trim()) throw new Error("ChiefVoice failure webhook is missing call.session_id");
+  const failure = payload.failure;
+  if (!failure || typeof failure !== "object" || Array.isArray(failure)) throw new Error("ChiefVoice failure webhook is missing failure metadata");
+  const code = String(failure.code || "").trim();
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(code)) throw new Error("ChiefVoice failure code is invalid");
+  if (typeof failure.retryable !== "boolean") throw new Error("ChiefVoice failure retryable must be a boolean");
+  const attempts = failure.attempts == null ? null : Number(failure.attempts);
+  if (attempts !== null && (!Number.isSafeInteger(attempts) || attempts < 0)) throw new Error("ChiefVoice failure attempts must be a non-negative integer or null");
+  const endedAt = call.ended_at || null;
+  if (endedAt && !Number.isFinite(Date.parse(endedAt))) throw new Error("ChiefVoice failure call.ended_at must be an ISO timestamp or null");
+  const started = Date.parse(call.started_at);
+  const ended = Date.parse(endedAt);
+  return {
+    eventId, eventType, providerCallId: String(call.session_id).trim(),
+    status: eventType === "call.failed" ? "failed" : "completed", endedAt,
+    durationSeconds: Number.isFinite(started) && Number.isFinite(ended) && ended >= started ? Math.round((ended - started) / 1000) : null,
+    failure: { stage: eventType === "call.failed" ? "call" : "post_call", code, retryable: failure.retryable, attempts },
+  };
+}
+
 function transcriptText(value, depth = 0) {
   if (depth > 4 || value == null) return "";
   if (typeof value === "string") return value.trim();
@@ -312,6 +340,7 @@ module.exports = {
   verifyChiefVoiceSignature,
   validatePostCallResult,
   normalizeChiefVoiceWebhook,
+  normalizeChiefVoiceFailureWebhook,
   extractChiefVoiceTranscript,
   mapChiefVoiceAttendanceResult,
 };

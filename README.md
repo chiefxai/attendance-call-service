@@ -33,6 +33,7 @@ Copy `.env.docker.example` to `.env` and configure:
 - `CHIEFVOICE_WEBHOOK_CALLBACK_URL` — public callback URL, `https://calls.elvoryx.in/api/call-service/webhooks/chiefvoice`
 - `CHIEFVOICE_RECORDING_ALLOWED` — defaults to `false`; enable only when recording is explicitly intended
 - `CHIEFVOICE_POLL_INITIAL_MS`, `CHIEFVOICE_POLL_INTERVAL_MS`, `CHIEFVOICE_POLL_MAX_ATTEMPTS` — durable status/result polling fallback settings
+- `CHIEFVOICE_CALL_FAILURE_MAX_ATTEMPTS` — bounded retries for retryable provider failures; these do not count toward caregiver no-answer escalation
 
 Register the callback in the **same ChiefVoice tenant/API-key scope** used for outbound calls. The API key must have both `calls:write` and `webhooks:write` scopes, and a caller ID assigned to it that matches `CHIEFVOICE_CALLER_ID`. After deploying the attendance service and setting its public URL, load the server-side environment and run:
 
@@ -41,7 +42,7 @@ set -a; source .env; set +a
 curl --fail-with-body -X PUT "$CHIEFVOICE_URL/v1/webhooks/post-call" \
   -H "Authorization: Bearer $CHIEFVOICE_API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"target_url\":\"$CHIEFVOICE_WEBHOOK_CALLBACK_URL\"}"
+  -d "{\"target_url\":\"$CHIEFVOICE_WEBHOOK_CALLBACK_URL\",\"failure_webhook_url\":\"$CHIEFVOICE_WEBHOOK_CALLBACK_URL\"}"
 ```
 
 ChiefVoice returns `signing_secret` **once**. Copy that value into `CHIEFVOICE_WEBHOOK_SECRET` in the attendance service's server-side `.env`, then restart the API container. Do not put the secret in the frontend or commit it. If the secret is lost, configure/rotate the callback again in ChiefVoice and update the attendance service with the newly returned secret.

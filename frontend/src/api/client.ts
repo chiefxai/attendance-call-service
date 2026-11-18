@@ -325,6 +325,7 @@ export interface SessionCallAttempt {
   endedAt: string | null;
   durationSeconds: number | null;
   outcome: Record<string, unknown> | null;
+  failure: { stage: string; code: string; retryable: boolean; attempts: number | null } | null;
   recordingAvailable: boolean;
   recordingUrl: string | null;
 }

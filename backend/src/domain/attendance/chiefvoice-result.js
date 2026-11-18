@@ -68,4 +68,47 @@ async function processChiefVoiceResult({ event, repository, queue }) {
   });
 }
 
-module.exports = { processChiefVoiceResult };
+async function processChiefVoiceFailure({ event, repository, queue }) {
+  return queue.transaction(async (client) => {
+    const firstDelivery = await repository.claimChiefVoiceWebhookEvent({
+      eventId: event.eventId,
+      providerCallId: event.providerCallId,
+      eventType: event.eventType,
+      client,
+    });
+    if (!firstDelivery) return { duplicate: true };
+
+    const attempt = await repository.updateCallByProviderId({
+      provider: "chiefvoice",
+      providerCallId: event.providerCallId,
+      status: event.status,
+      durationSeconds: event.durationSeconds,
+      endedAt: event.endedAt,
+      failure: event.failure,
+      rawEvent: { event: event.eventType, status: event.status, EndTime: event.endedAt },
+    });
+    if (!attempt) throw Object.assign(new Error("Call attempt not found"), { status: 404, safeCode: "call_not_found" });
+
+    if (attempt.sessionId && event.eventType === "call.failed" && event.failure.retryable) {
+      await queue.enqueue("process_call_result", { callAttemptId: attempt.id }, {
+        idempotencyKey: `call-result:${attempt.id}`,
+        client,
+      });
+    } else if (attempt.sessionId) {
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
+        reason: event.eventType === "call.post_call.failed" ? "chiefvoice_post_call_failed" : "chiefvoice_call_failed",
+        failureCode: event.failure.code,
+        failureRetryable: event.failure.retryable,
+        failureAttempts: event.failure.attempts,
+        callAttemptId: attempt.id,
+      });
+      await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
+        idempotencyKey: `evaluate:${attempt.sessionId}:chiefvoice-failed:${attempt.id}`,
+        client,
+      });
+    }
+    return { duplicate: false };
+  });
+}
+
+module.exports = { processChiefVoiceResult, processChiefVoiceFailure };

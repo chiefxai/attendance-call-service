@@ -5,8 +5,8 @@ const crypto = require("node:crypto");
 const { normalizeIndianMobile } = require("../domain/attendance/phone-number");
 const { assertRepository } = require("../domain/repository-contract");
 const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
-const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook } = require("../infrastructure/integrations/chiefvoice-webhook");
-const { processChiefVoiceResult } = require("../domain/attendance/chiefvoice-result");
+const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook, normalizeChiefVoiceFailureWebhook } = require("../infrastructure/integrations/chiefvoice-webhook");
+const { processChiefVoiceResult, processChiefVoiceFailure } = require("../domain/attendance/chiefvoice-result");
 
 function createCallServiceRouter({ express, repository, queue, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
@@ -773,6 +773,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
           endedAt: attempt.endedAt,
           durationSeconds: attempt.durationSeconds,
           outcome: attempt.outcome,
+          failure: attempt.failure,
           recordingAvailable: Boolean(attempt.recordingObjectKey),
           recordingUrl: attempt.recordingObjectKey
             ? `${baseUrl}/api/call-service/assignments/${encodeURIComponent(req.params.id)}/recordings/${encodeURIComponent(attempt.id)}`
@@ -813,8 +814,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     } catch (error) { fail(res, error); }
   });
 
-  // ChiefVoice sends call.analysis.completed after its structured post-call analysis.
-  // Its signature covers timestamp.event_id.raw_request_body (not the body alone).
+  // ChiefVoice signs outcome and fallback failure events over timestamp.event_id.raw_body.
   router.post("/webhooks/chiefvoice", async (req, res) => {
     try {
       const secret = String(process.env.CHIEFVOICE_WEBHOOK_SECRET || "");
@@ -830,15 +830,20 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
 
       let event;
       try {
-        event = normalizeChiefVoiceWebhook(req.body, {
+        const options = {
           headerEventId: eventIdHeader,
           headerEventType: eventTypeHeader,
-        });
+        };
+        event = ["call.failed", "call.post_call.failed"].includes(eventTypeHeader)
+          ? normalizeChiefVoiceFailureWebhook(req.body, options)
+          : normalizeChiefVoiceWebhook(req.body, options);
       } catch (error) {
         return res.status(400).json({ error: error.message });
       }
 
-      const acceptance = await processChiefVoiceResult({ event, repository, queue });
+      const acceptance = event.failure
+        ? await processChiefVoiceFailure({ event, repository, queue })
+        : await processChiefVoiceResult({ event, repository, queue });
       return res.status(200).json({ received: true, ...(acceptance.duplicate ? { duplicate: true } : {}) });
     } catch (error) {
       if (error.status === 404) return res.status(404).json({ received: false });

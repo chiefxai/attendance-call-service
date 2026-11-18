@@ -1413,6 +1413,7 @@ class PostgresRepository {
       provider: row.provider, status: row.status, scheduledAt: row.scheduled_at, answeredAt: row.answered_at, endedAt: row.ended_at,
       consecutiveNoAnswerBefore: row.consecutive_no_answer_before || 0, recordingUrl: row.recording_url,
       recordingObjectKey: row.recording_object_key, recordingContentType: row.recording_content_type,
+      failure: json(row.raw_provider_event)?.failure || null,
       outcome: json(row.outcome), durationSeconds: row.duration_seconds };
   }
   async getCallAttempt(id) {
@@ -1495,6 +1496,12 @@ class PostgresRepository {
           endTime: raw.EndTime || null,
           durationSeconds: event.durationSeconds || null,
           recordingAvailable: Boolean(raw.RecordingUrl || raw.recording_url),
+          ...(event.failure ? { failure: {
+            stage: event.failure.stage,
+            code: event.failure.code,
+            retryable: event.failure.retryable,
+            attempts: event.failure.attempts,
+          } } : {}),
         };
         await client.query(
           `UPDATE attendance_call_attempts SET status=$2, ended_at=$3, duration_seconds=$4,
@@ -1512,6 +1519,12 @@ class PostgresRepository {
             durationSeconds: event.durationSeconds || null, startTime: raw.StartTime || null,
             answerTime: raw.AnswerTime || null, endTime: raw.EndTime || null,
             recordingAvailable: Boolean(raw.RecordingUrl || raw.recording_url),
+            ...(event.failure ? { failure: {
+              stage: event.failure.stage,
+              code: event.failure.code,
+              retryable: event.failure.retryable,
+              attempts: event.failure.attempts,
+            } } : {}),
           })],
         );
         await client.query("COMMIT");

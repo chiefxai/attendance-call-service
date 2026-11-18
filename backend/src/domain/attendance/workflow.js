@@ -52,9 +52,10 @@ function validateReportedTime(value, now = new Date()) {
   return timestamp > now.getTime() ? "future_reported_time" : null;
 }
 
-function chiefVoiceTemplateScenario({ stage, attemptNumber = 1, consecutiveNoAnswer = 0, context = {} }) {
+function chiefVoiceTemplateScenario({ stage, attemptNumber = 1, consecutiveNoAnswer = 0, context = {}, technicalFailureRetry = false }) {
   if (context.call_purpose === "care_manager_escalation") return "CARE_MANAGER_ESCALATION";
   const stageKey = stage === "check_out" ? "CHECK_OUT" : "CHECK_IN";
+  if (technicalFailureRetry) return `${stageKey}_RETRY`;
   if (Number(attemptNumber) > 1) {
     return Number(consecutiveNoAnswer) > 0 ? `${stageKey}_RETRY` : `${stageKey}_FOLLOW_UP`;
   }
@@ -95,7 +96,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
   const taskFor = (session, stage) => stage === "check_in" ? session?.checkInTask : session?.checkOutTask;
 
-  async function placeCall({ sessionId, taskId, stage, attemptNumber, capacityWaitCount = 0, consecutiveNoAnswer = 0 }) {
+  async function placeCall({ sessionId, taskId, stage, attemptNumber, capacityWaitCount = 0, consecutiveNoAnswer = 0, technicalFailureRetry = false }) {
     const session = await repository.getAttendanceSession(sessionId);
     // Check-in and check-out are independent tasks. Exhausting check-in retries
     // must not close the shared assignment; only an explicit cancellation or a
@@ -129,7 +130,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     });
     if (!reserved) {
       const nextWait = capacityWaitCount + 1;
-      await queue.enqueue("place_call", { sessionId, taskId: task.id, stage, attemptNumber, capacityWaitCount: nextWait }, {
+      await queue.enqueue("place_call", { sessionId, taskId: task.id, stage, attemptNumber, capacityWaitCount: nextWait, consecutiveNoAnswer, technicalFailureRetry }, {
         idempotencyKey: `capacity:${sessionId}:${stage}:${attemptNumber}:${nextWait}`,
         runAt: new Date(Date.now() + (capacity.capacityPollMs || 2_000)),
       });
@@ -158,7 +159,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         employee: { name: person.name || person.fullName || "" },
         patient: { name: session.patient?.name || "", address: session.patient?.address || "" },
       };
-      const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer });
+      const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer, technicalFailureRetry });
       const call = await chiefvoice.createOutboundCall({
         to: person.phoneNumber,
         from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
@@ -327,6 +328,33 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       return;
     }
     if (callDisposition === "not_answered") {
+      if (attempt.failure) {
+        const maxTechnicalAttempts = Math.max(1, Number(process.env.CHIEFVOICE_CALL_FAILURE_MAX_ATTEMPTS) || 2);
+        if (!attempt.failure.retryable || attempt.attemptNumber >= maxTechnicalAttempts) {
+          await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
+            reason: "chiefvoice_call_failed", failureCode: attempt.failure.code,
+            failureRetryable: attempt.failure.retryable, failureAttempts: attempt.failure.attempts, callAttemptId,
+          });
+          await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
+            idempotencyKey: `evaluate:${attempt.sessionId}:call-failed:${callAttemptId}`,
+          });
+          return;
+        }
+        const settings = repository.getOrganizationCallSettings
+          ? await repository.getOrganizationCallSettings(attempt.organizationId) : {};
+        const delayMinutes = settings.callRetry?.initialMinutes ?? retry.initialMinutes ?? 3;
+        const runAt = new Date(Date.now() + Math.max(1, Number(delayMinutes)) * 60_000);
+        const session = await repository.getAttendanceSession(attempt.sessionId);
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "follow_up", {
+          reason: "chiefvoice_call_failed_retry", failureCode: attempt.failure.code, nextCallAt: runAt.toISOString(),
+        });
+        await queue.enqueue("place_call", {
+          sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
+          attemptNumber: attempt.attemptNumber + 1, consecutiveNoAnswer: attempt.consecutiveNoAnswerBefore || 0,
+          technicalFailureRetry: true,
+        }, { idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:${attempt.attemptNumber + 1}`, runAt });
+        return;
+      }
       const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
       const organizationSettings = repository.getOrganizationCallSettings ? await repository.getOrganizationCallSettings(attempt.organizationId) : {};
       const retrySettings = organizationSettings.callRetry || {};
