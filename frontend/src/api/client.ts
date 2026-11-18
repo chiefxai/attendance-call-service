@@ -398,8 +398,14 @@ export interface CallingSettings {
     multiplier: number;
     maxMinutes: number;
   };
+  webhookSecretConfigured: boolean;
+  webhookSecretEnvironmentConfigured: boolean;
+  webhookSecretSource: "settings" | "environment" | "missing";
   source: { defaultFromNumber: "settings" | "environment"; lateScheduleGraceMinutes: "settings" | "environment"; retry: "settings" | "environment" };
 }
+
+export type CallingSettingsUpdate = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource">
+  & { chiefvoiceWebhookSecret?: string; clearChiefVoiceWebhookSecret?: boolean };
 
 export interface CareManagerNotification {
   id: string;
@@ -544,7 +550,7 @@ export async function fetchCallingSettings() {
   return response.data;
 }
 
-export async function saveCallingSettings(settings: Omit<CallingSettings, "source">) {
+export async function saveCallingSettings(settings: CallingSettingsUpdate) {
   const response = await api.put<CallingSettings>("/settings/calling", settings);
   return response.data;
 }

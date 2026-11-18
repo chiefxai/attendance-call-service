@@ -101,6 +101,10 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         multiplier: storedRetry.multiplier ?? envNumber("CALL_RETRY_MULTIPLIER", 1.2),
         maxMinutes: storedRetry.maxMinutes ?? envNumber("CALL_RETRY_MAX_MINUTES", 30),
       },
+      webhookSecretConfigured: Boolean(stored.encryptedChiefVoiceWebhookSecret || process.env.CHIEFVOICE_WEBHOOK_SECRET),
+      webhookSecretEnvironmentConfigured: Boolean(process.env.CHIEFVOICE_WEBHOOK_SECRET),
+      webhookSecretSource: stored.encryptedChiefVoiceWebhookSecret ? "settings"
+        : process.env.CHIEFVOICE_WEBHOOK_SECRET ? "environment" : "missing",
       source: {
         defaultFromNumber: stored.defaultFromNumber ? "settings" : "environment",
         lateScheduleGraceMinutes: stored.lateScheduleGraceMinutes != null ? "settings" : "environment",
@@ -632,11 +636,27 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         return res.status(400).json({ error: "Retry limit must be 1–20, initial/max intervals 1–1440 minutes with max ≥ initial, and multiplier 1–5" });
       }
       const existingSettings = await repository.getOrganizationCallSettings(organizationId);
+      const webhookSecretInput = typeof body.chiefvoiceWebhookSecret === "string" ? body.chiefvoiceWebhookSecret.trim() : "";
+      const clearWebhookSecret = body.clearChiefVoiceWebhookSecret === true;
+      if (body.clearChiefVoiceWebhookSecret != null && typeof body.clearChiefVoiceWebhookSecret !== "boolean") {
+        return res.status(400).json({ error: "clearChiefVoiceWebhookSecret must be a boolean." });
+      }
+      if (webhookSecretInput && clearWebhookSecret) return res.status(400).json({ error: "Enter a webhook secret or request the environment fallback, not both." });
+      if (body.chiefvoiceWebhookSecret != null && typeof body.chiefvoiceWebhookSecret !== "string") {
+        return res.status(400).json({ error: "chiefvoiceWebhookSecret must be a string." });
+      }
+      if (webhookSecretInput.length > 4096 || /[\r\n]/.test(webhookSecretInput)) {
+        return res.status(400).json({ error: "Webhook signing secret must be a single line of at most 4096 characters." });
+      }
+      const encryptedChiefVoiceWebhookSecret = webhookSecretInput
+        ? encryptSecret(webhookSecretInput)
+        : clearWebhookSecret ? null : existingSettings.encryptedChiefVoiceWebhookSecret || null;
       await repository.saveOrganizationCallSettings(organizationId, {
         defaultFromNumber,
         lateScheduleGraceMinutes,
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
         unansweredCallEscalation: body.unansweredCallEscalation ?? existingSettings.unansweredCallEscalation ?? "call_care_manager",
+        encryptedChiefVoiceWebhookSecret,
       });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
@@ -646,7 +666,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, lateScheduleGraceMinutes: null, callRetry: null, unansweredCallEscalation: "call_care_manager" });
+      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, lateScheduleGraceMinutes: null, callRetry: null, unansweredCallEscalation: "call_care_manager", encryptedChiefVoiceWebhookSecret: null });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });
@@ -825,7 +845,16 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
   // ChiefVoice signs outcome and fallback failure events over timestamp.event_id.raw_body.
   router.post("/webhooks/chiefvoice", async (req, res) => {
     try {
-      const secret = String(process.env.CHIEFVOICE_WEBHOOK_SECRET || "");
+      const providerCallId = String(req.body?.call?.session_id || "").trim();
+      const attempt = providerCallId && repository.getCallAttemptByProviderCallId
+        ? await repository.getCallAttemptByProviderCallId("chiefvoice", providerCallId)
+        : null;
+      const organizationSettings = attempt?.organizationId
+        ? await repository.getOrganizationCallSettings(attempt.organizationId)
+        : {};
+      const secret = organizationSettings.encryptedChiefVoiceWebhookSecret
+        ? decryptSecret(organizationSettings.encryptedChiefVoiceWebhookSecret)
+        : String(process.env.CHIEFVOICE_WEBHOOK_SECRET || "");
       const eventIdHeader = String(req.get("x-chiefvoice-event-id") || "");
       const eventTypeHeader = String(req.get("x-chiefvoice-event") || "");
       const timestamp = String(req.get("x-chiefvoice-timestamp") || "");

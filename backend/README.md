@@ -24,6 +24,8 @@ The client sends `POST /v1/calls/outbound` with bearer API-key authentication (`
 
 The live and post-call prompts live in ChiefVoice reusable templates. The service selects a pair for each scenario: check-in, check-out, care-manager escalation, check-in/check-out retry, or check-in/check-out follow-up. It adds assignment, caregiver, patient, schedule, language, organization, attendance session, attempt, and stage context to each call, including the flat expected-name/address variables used by these templates.
 
+Admins can set an organization-specific webhook signing-secret override in **Settings → Calling settings**. It is encrypted with the credentials encryption key before storage, never returned to the browser, and selected for callbacks by the owning provider call ID. When no override is saved, the API uses `CHIEFVOICE_WEBHOOK_SECRET` from the server environment. Use **Use .env fallback** to remove the workspace override.
+
 ## Webhook
 
 Register this callback in the same ChiefVoice tenant/key scope (`PUT /v1/webhooks/post-call`, `webhooks:write`):

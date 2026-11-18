@@ -57,6 +57,7 @@ const repositoryMethods = Object.freeze([
   "isAttendanceSessionVisibleToCareManager(organizationId, sessionId, careManagerExternalId)",
   "createCallAttempt(attempt)",
   "getCallAttempt(callAttemptId)",
+  "getCallAttemptByProviderCallId(provider, providerCallId)",
   "markCallPlacing(callAttemptId)",
   "attachProviderCallId(callAttemptId, providerCallId, response)",
   "markCallPlacementFailed(callAttemptId, reason)",

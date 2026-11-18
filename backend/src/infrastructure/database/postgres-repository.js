@@ -1422,6 +1422,13 @@ class PostgresRepository {
     const r = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE id=$1", [id]);
     return this.mapAttempt(r.rows[0]);
   }
+  async getCallAttemptByProviderCallId(provider, providerCallId) {
+    const r = await this.pool.query(
+      "SELECT organization_id AS \"organizationId\" FROM attendance_call_attempts WHERE provider=$1 AND provider_call_id=$2 LIMIT 1",
+      [provider, providerCallId],
+    );
+    return r.rows[0] || null;
+  }
   async attachProviderCallId(id, providerCallId, response, provider = "chiefvoice") {
     const status = String(response?.status || "starting").toLowerCase();
     const safeInitial = { status, channel: response?.channel || null, direction: response?.direction || null };

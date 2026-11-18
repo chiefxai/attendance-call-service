@@ -9,7 +9,8 @@ import { fetchAthulyaAttendanceSubmissions, fetchAthulyaIntegration, fetchAthuly
 import { ApiAccessPage } from "./ApiAccessPage";
 import { PageHeader } from "../components/OperationsUI";
 
-type CallingForm = Omit<CallingSettings, "source">;
+type CallingForm = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource">
+  & { chiefvoiceWebhookSecret: string; clearChiefVoiceWebhookSecret: boolean };
 type SyncScope = "all" | "branch" | "care_manager";
 type IntegrationForm = Pick<AthulyaIntegrationSettings, "integrationName" | "apiBaseUrl" | "enabled" | "autoSyncEnabled" | "autoSyncScope" | "autoSyncScopeId"> & { apiKey: string };
 const emptySettings: CallingForm = {
@@ -17,6 +18,8 @@ const emptySettings: CallingForm = {
   unansweredCallEscalation: "call_care_manager",
   lateScheduleGraceMinutes: 2,
   retry: { maxConsecutiveNoAnswer: 3, initialMinutes: 3, multiplier: 1.2, maxMinutes: 30 },
+  chiefvoiceWebhookSecret: "",
+  clearChiefVoiceWebhookSecret: false,
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 const dateInTimeZone = (timeZone: string) => {
@@ -41,7 +44,7 @@ export function SettingsPage() {
   const schedules = useQuery({ queryKey: ["athulya-schedules", syncFilters.scheduleDate], queryFn: () => fetchAthulyaSchedules({ fromDate: syncFilters.scheduleDate || undefined, toDate: syncFilters.scheduleDate || undefined }), enabled: tab === "athulya", retry: false });
   useEffect(() => {
     if (!settings.data) return;
-    setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, lateScheduleGraceMinutes: settings.data.lateScheduleGraceMinutes, retry: settings.data.retry });
+    setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, lateScheduleGraceMinutes: settings.data.lateScheduleGraceMinutes, retry: settings.data.retry, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: false });
   }, [settings.data]);
   useEffect(() => {
     if (integration.data) setIntegrationForm({ integrationName: integration.data.integrationName, apiBaseUrl: integration.data.apiBaseUrl, enabled: integration.data.enabled, autoSyncEnabled: integration.data.autoSyncEnabled, autoSyncScope: integration.data.autoSyncScope, autoSyncScopeId: integration.data.autoSyncScopeId, apiKey: "" });
@@ -54,7 +57,10 @@ export function SettingsPage() {
 
   const save = useMutation({
     mutationFn: saveCallingSettings,
-    onSuccess: (data) => queryClient.setQueryData(["calling-settings"], data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["calling-settings"], data);
+      setForm((current) => ({ ...current, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: false }));
+    },
   });
   const reset = useMutation({
     mutationFn: resetCallingSettings,
@@ -95,6 +101,26 @@ export function SettingsPage() {
             helperText={settings.data.source.defaultFromNumber === "settings" ? "Workspace setting override · E.164 format" : "Using .env fallback · saving here overrides it"}
             inputProps={{ inputMode: "tel" }}
           />
+          <Box><Typography variant="h6">ChiefVoice webhook signing secret</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Used to verify incoming ChiefVoice callbacks. Workspace overrides are encrypted in the database and never displayed after saving.</Typography></Box>
+          <TextField
+            fullWidth type="password" label="Webhook signing secret" autoComplete="new-password"
+            value={form.chiefvoiceWebhookSecret}
+            onChange={(event) => setForm((current) => ({ ...current, chiefvoiceWebhookSecret: event.target.value, clearChiefVoiceWebhookSecret: false }))}
+            placeholder={settings.data.webhookSecretSource === "settings" ? "Workspace override saved" : settings.data.webhookSecretSource === "environment" ? "Using .env secret" : "Enter a signing secret"}
+            helperText={form.clearChiefVoiceWebhookSecret
+              ? settings.data.webhookSecretEnvironmentConfigured
+                ? "Saving will remove the workspace override and use the .env secret."
+                : "No .env fallback is configured; saving will leave webhook verification without a secret."
+              : settings.data.webhookSecretSource === "settings"
+                ? "Workspace override active. Leave blank to keep it, or enter a new value to replace it."
+                : settings.data.webhookSecretSource === "environment"
+                  ? "Using .env fallback. Enter a value to override it for this workspace."
+                  : "No secret is configured. Enter the signing secret or configure CHIEFVOICE_WEBHOOK_SECRET in .env."}
+          />
+          {settings.data.webhookSecretSource === "settings" && <Button
+            variant="text" sx={{ alignSelf: "flex-start" }}
+            onClick={() => setForm((current) => ({ ...current, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: !current.clearChiefVoiceWebhookSecret }))}
+          >{form.clearChiefVoiceWebhookSecret ? "Keep workspace override" : "Use .env fallback"}</Button>}
           <TextField
             fullWidth type="number" label="Late schedule call window (minutes)" value={form.lateScheduleGraceMinutes}
             onChange={(event) => setForm((current) => ({ ...current, lateScheduleGraceMinutes: Number(event.target.value) }))}
