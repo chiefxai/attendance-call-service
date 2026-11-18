@@ -13,8 +13,26 @@ function todayIndia() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 }
 
+function defaultScheduleTimes() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+  const nowMinutes = hour * 60 + minute;
+  const startMinutes = nowMinutes + 60;
+  const endMinutes = nowMinutes + 5 * 60;
+  // If there is not enough time left today for the requested offsets, use a short future window.
+  const start = new Date(Date.UTC(2000, 0, 1, 0, startMinutes < 1440 && endMinutes < 1440 ? startMinutes : nowMinutes + 1));
+  const end = new Date(Date.UTC(2000, 0, 1, 0, startMinutes < 1440 && endMinutes < 1440 ? endMinutes : nowMinutes + 5));
+  const format = (value: Date) => `${String(value.getUTCHours()).padStart(2, "0")}:${String(value.getUTCMinutes()).padStart(2, "0")}:00`;
+  // Keep the default date on today; late-evening schedules can be adjusted to tomorrow.
+  return { start_time: format(start), end_time: format(end) };
+}
+
 const emptySchedule = (): Partial<MockAthulyaSchedule> => ({
-  schedule_date: todayIndia(), start_time: "10:00:00", end_time: "11:00:00",
+  schedule_date: todayIndia(), ...defaultScheduleTimes(),
   client_name: "Mock Patient", patient_id: "MOCK-PATIENT-001", patient_uhid: "MOCK-UHID-001",
   patient_address: "1 Test Street, Chennai, Tamil Nadu, India",
   care_manager_id: "MOCK-CM-001", care_manager_name: "Mock Care Manager", care_manager_phone: "+919999900001",
@@ -73,6 +91,16 @@ export function MockSchedulesPage() {
   const normalizedCareManagerPhone = form.care_manager_phone ? normalizeIndianMobile(form.care_manager_phone) : "";
   const normalizedCaregiverPhones = normalizeMobileList(form.caregiver_phones || "");
   const phoneInvalid = Boolean(phoneErrors.care_manager_phone || phoneErrors.caregiver_phones);
+  const timeError = (() => {
+    const date = String(form.schedule_date || "");
+    const start = String(form.start_time || "").slice(0, 5);
+    const end = String(form.end_time || "").slice(0, 5);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return "Enter a valid date, start time, and end time.";
+    if (start >= end) return "Start time must be earlier than end time.";
+    const scheduledStart = new Date(`${date}T${start}:00+05:30`);
+    if (scheduledStart.getTime() <= Date.now()) return "Schedule start must be in the future. Choose a future date or time.";
+    return "";
+  })();
   const schedules = useQuery({ queryKey: ["mock-athulya-schedules"], queryFn: fetchMockAthulyaSchedules, refetchInterval: 5000 });
   const runs = useQuery({ queryKey: ["athulya-sync-runs"], queryFn: fetchAthulyaSyncRuns, refetchInterval: 2500 });
   const refresh = async () => {
@@ -83,7 +111,7 @@ export function MockSchedulesPage() {
   };
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload = { ...form, care_manager_phone: normalizedCareManagerPhone || "", caregiver_phones: normalizedCaregiverPhones || "" };
+      const payload = { ...form, care_manager_phone: normalizedCareManagerPhone || "", caregiver_phones: normalizedCaregiverPhones || "", schedule_status: form.schedule_status || "Scheduled" };
       return editing?.schedule_id
         ? updateMockAthulyaSchedule(editing.schedule_id, payload)
         : createMockAthulyaSchedule(payload);
@@ -207,8 +235,9 @@ export function MockSchedulesPage() {
             {fields.map((field) => <Grid size={{ xs: 12, sm: 6 }} key={field.key}>
               <TextField fullWidth size="small" type={field.type || "text"} label={field.label} value={String(form[field.key] ?? "")}
                 onChange={(e) => setField(field.key, e.target.value)} InputLabelProps={field.type === "date" || field.type === "time" ? { shrink: true } : undefined}
-                error={field.key === "care_manager_phone" ? Boolean(phoneErrors.care_manager_phone) : field.key === "caregiver_phones" ? Boolean(phoneErrors.caregiver_phones) : false}
-                helperText={field.key === "care_manager_phone" ? phoneErrors.care_manager_phone || "Saved in +91 format." : field.key === "caregiver_phones" ? phoneErrors.caregiver_phones || "For multiple caregivers, separate numbers with commas." : undefined} />
+                error={field.key === "start_time" || field.key === "end_time" || field.key === "schedule_date" ? Boolean(timeError) : field.key === "care_manager_phone" ? Boolean(phoneErrors.care_manager_phone) : field.key === "caregiver_phones" ? Boolean(phoneErrors.caregiver_phones) : false}
+                inputProps={field.type === "date" && !editing ? { min: todayIndia() } : undefined}
+                helperText={field.key === "start_time" || field.key === "end_time" || field.key === "schedule_date" ? timeError : field.key === "care_manager_phone" ? phoneErrors.care_manager_phone || "Saved in +91 format." : field.key === "caregiver_phones" ? phoneErrors.caregiver_phones || "For multiple caregivers, separate numbers with commas." : undefined} />
             </Grid>)}
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField select fullWidth size="small" label="Schedule status" value={String(form.schedule_status || "Scheduled")} onChange={(e) => setField("schedule_status", e.target.value)}>
@@ -219,7 +248,7 @@ export function MockSchedulesPage() {
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" disabled={saveMutation.isPending || phoneInvalid || !form.client_name || !form.patient_id || !form.schedule_date} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? "Saving…" : "Save schedule"}</Button>
+          <Button variant="contained" disabled={saveMutation.isPending || phoneInvalid || Boolean(timeError) || !form.client_name || !form.patient_id || !form.schedule_date} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? "Saving…" : "Save schedule"}</Button>
         </DialogActions>
       </Dialog>
     </Stack>

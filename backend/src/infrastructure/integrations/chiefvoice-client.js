@@ -1,5 +1,7 @@
 "use strict";
 
+const { resilientRequest } = require("./resilient-request");
+
 /**
  * ChiefVoice owns telephony, the live agent and post-call extraction.
  * This service only schedules calls and consumes the resulting attendance data.
@@ -16,6 +18,7 @@ function createChiefVoiceClient({
   if (typeof fetchImpl !== "function") throw new Error("A Fetch-compatible implementation is required");
 
   const root = baseUrl.replace(/\/+$/, "");
+  const circuitKey = `chiefvoice:${new URL(root).host}`;
 
   function redactProviderText(value, requestBody) {
     let text = String(value || "").slice(0, 240);
@@ -62,6 +65,7 @@ function createChiefVoiceClient({
   }
 
   async function request(path, { method = "GET", body, idempotencyKey } = {}) {
+    return resilientRequest(circuitKey, async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -86,15 +90,19 @@ function createChiefVoiceClient({
         const details = response.status === 422 ? safeValidationSummary(data, body) : "";
         const error = new Error(`ChiefVoice API returned HTTP ${response.status}${details ? `: ${details}` : ""}`);
         error.status = response.status;
+        const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
         throw error;
       }
       return data;
     } finally {
       clearTimeout(timeout);
     }
+    });
   }
 
   async function getRecording(sessionId, { maxBytes = Number(process.env.MAX_RECORDING_DOWNLOAD_BYTES) || 100 * 1024 * 1024 } = {}) {
+    return resilientRequest(circuitKey, async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Math.max(timeoutMs, 30_000));
     try {
@@ -106,6 +114,8 @@ function createChiefVoiceClient({
       if (!response.ok) {
         const error = new Error(`ChiefVoice recording request returned HTTP ${response.status}`);
         error.status = response.status;
+        const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
         throw error;
       }
       const declaredLength = Number(response.headers?.get?.("content-length") || 0);
@@ -138,6 +148,7 @@ function createChiefVoiceClient({
     } finally {
       clearTimeout(timeout);
     }
+    });
   }
 
   async function createOutboundCall({ to, from, sessionId, stage, callAttemptId, context, postCallContext = context, templateScenario = null }) {

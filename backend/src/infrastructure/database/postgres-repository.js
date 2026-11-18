@@ -499,7 +499,9 @@ class PostgresRepository {
   async failAthulyaAttendanceSubmission(id, { statusCode, errorMessage, terminal = false } = {}) {
     await this.pool.query(
       `UPDATE athulya_attendance_submissions SET status=$2,response_code=$3,
-         error_message=$4,next_attempt_at=CASE WHEN $2='retry_scheduled' THEN NOW()+INTERVAL '1 minute' ELSE NULL END,
+         error_message=$4,next_attempt_at=CASE WHEN $2='retry_scheduled'
+           THEN NOW() + (LEAST(1800, 30 * POWER(2, GREATEST(0, attempt_count - 1))) * INTERVAL '1 second')
+           ELSE NULL END,
          updated_at=NOW() WHERE id=$1 AND status<>'synced'`,
       [id, terminal ? 'failed' : 'retry_scheduled', statusCode || null, String(errorMessage || 'Athulya attendance submission failed').slice(0, 2000)],
     );

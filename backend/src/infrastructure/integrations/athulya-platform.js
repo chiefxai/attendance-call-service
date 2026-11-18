@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { resilientRequest } = require("./resilient-request");
 
 const DEFAULT_BASE_URL = "https://homecare.athulyaliving.net/api";
 
@@ -186,21 +187,29 @@ async function fetchAthulyaSchedules({ apiBaseUrl, apiKey, filters = {}, fetchIm
     if (filters[key] != null && String(filters[key]).trim()) url.searchParams.set(key, String(filters[key]).trim());
   }
   if (filters.from_date && filters.to_date && filters.to_date < filters.from_date) throw new Error("to_date must be the same as or later than from_date");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
-  try {
-    const response = await fetchImpl(url, { headers: { "x-api-key": apiKey, Accept: "application/json" }, signal: controller.signal });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`Athulya returned HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ""}`);
-    let payload;
-    try { payload = JSON.parse(text); } catch { throw new Error("Athulya response was not valid JSON"); }
-    const records = sourceRecords(payload);
-    const fromDate = filters.from_date ? String(filters.from_date) : null;
-    const toDate = filters.to_date ? String(filters.to_date) : null;
-    return records.filter(({ scheduleDate }) => scheduleDate
-      && (!fromDate || scheduleDate >= fromDate)
-      && (!toDate || scheduleDate <= toDate));
-  } finally { clearTimeout(timeout); }
+  return resilientRequest(`athulya:${new URL(base).host}`, async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const response = await fetchImpl(url, { headers: { "x-api-key": apiKey, Accept: "application/json" }, signal: controller.signal });
+      const text = await response.text();
+      if (!response.ok) {
+        const error = new Error(`Athulya returned HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ""}`);
+        error.statusCode = response.status;
+        const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
+        throw error;
+      }
+      let payload;
+      try { payload = JSON.parse(text); } catch { throw new Error("Athulya response was not valid JSON"); }
+      const records = sourceRecords(payload);
+      const fromDate = filters.from_date ? String(filters.from_date) : null;
+      const toDate = filters.to_date ? String(filters.to_date) : null;
+      return records.filter(({ scheduleDate }) => scheduleDate
+        && (!fromDate || scheduleDate >= fromDate)
+        && (!toDate || scheduleDate <= toDate));
+    } finally { clearTimeout(timeout); }
+  });
 }
 
 async function resolveAthulyaConnection(repository, organizationId) {

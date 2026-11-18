@@ -1,5 +1,7 @@
 "use strict";
 
+const { resilientRequest } = require("./resilient-request");
+
 function createAttendanceBackendClient({
   endpoint = process.env.ATTENDANCE_BACKEND_URL,
   token = process.env.ATTENDANCE_BACKEND_TOKEN,
@@ -15,6 +17,7 @@ function createAttendanceBackendClient({
       "Idempotency-Key": idempotencyKey,
     };
     if (token) headers.Authorization = `Bearer ${token}`;
+    return resilientRequest(`attendance-backend:${new URL(endpoint).host}`, async () => {
     const response = await fetchImpl(endpoint, {
       method: "POST",
       headers,
@@ -25,8 +28,15 @@ function createAttendanceBackendClient({
     let result = null;
     try { result = text ? JSON.parse(text) : null; }
     catch { result = { message: text.slice(0, 1000) }; }
-    if (!response.ok) throw new Error(`Attendance backend returned ${response.status}: ${result?.message || result?.error || response.statusText}`);
+    if (!response.ok) {
+      const error = new Error(`Attendance backend returned ${response.status}: ${result?.message || result?.error || response.statusText}`);
+      error.statusCode = response.status;
+      const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));
+      if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
+      throw error;
+    }
     return { status: response.status, body: result };
+    });
   }
 
   return { sendAttendance };

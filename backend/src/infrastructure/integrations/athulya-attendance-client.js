@@ -1,6 +1,7 @@
 "use strict";
 
 const { resolveAthulyaConnection } = require("./athulya-platform");
+const { resilientRequest } = require("./resilient-request");
 
 function formatTimingWithOffset(value, timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata") {
   const date = value instanceof Date ? value : new Date(value);
@@ -31,6 +32,7 @@ function createAthulyaAttendanceClient({ repository, fetchImpl = globalThis.fetc
     const endpoint = new URL("check-in-out", `${baseUrl.replace(/\/+$/, "")}/`);
     const payload = { schedule_id: String(scheduleId), type, timing: formatTimingWithOffset(timing) };
     const timeoutMs = Math.max(1_000, Math.min(Number(process.env.ATHULYA_ATTENDANCE_TIMEOUT_MS) || 15_000, 120_000));
+    return resilientRequest(`athulya:${new URL(baseUrl).host}`, async () => {
     const response = await fetchImpl(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}) },
@@ -45,9 +47,12 @@ function createAthulyaAttendanceClient({ repository, fetchImpl = globalThis.fetc
       const detail = body?.message || response.statusText || "Athulya attendance request failed";
       const error = new Error(`Athulya attendance API returned ${response.status}: ${String(detail).slice(0, 500)}`);
       error.statusCode = response.status;
+      const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));
+      if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
       throw error;
     }
     return { status: response.status, body, payload };
+    });
   }
 
   return { sendAttendance };

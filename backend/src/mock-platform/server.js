@@ -2,7 +2,7 @@
 
 const http = require("node:http");
 const crypto = require("node:crypto");
-const { localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
+const { localDateInTimeZone, localScheduleDateTimeToUtc } = require("../infrastructure/integrations/athulya-platform");
 
 const port = Math.max(1, Number(process.env.PORT) || 4000);
 const apiKey = String(process.env.ATHULYA_MOCK_API_KEY || "");
@@ -61,14 +61,23 @@ schedules.set(scheduleFor(today).schedule_id, scheduleFor(today));
 
 function normalizeSchedule(input, existing = {}) {
   const date = String(input.schedule_date || existing.schedule_date || today).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Object.assign(new Error("schedule_date must use YYYY-MM-DD"), { status: 400 });
+  const dateCheck = new Date(`${date}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(dateCheck.getTime()) || dateCheck.toISOString().slice(0, 10) !== date) {
+    throw Object.assign(new Error("schedule_date must be a valid date in YYYY-MM-DD format"), { status: 400 });
+  }
   const value = { ...scheduleFor(date), ...existing, ...input, schedule_date: date };
+  value.schedule_status = String(input.schedule_status || existing.schedule_status || "Scheduled");
   value.schedule_id = String(input.schedule_id || existing.schedule_id || `MOCK-${date.replaceAll("-", "")}-${crypto.randomUUID().slice(0, 8)}`);
   value.schedule_pk = String(input.schedule_pk || existing.schedule_pk || `MOCK-PK-${value.schedule_id}`);
   for (const field of ["client_name", "patient_id", "caregiver_ids", "caregiver_names", "caregiver_phones"]) {
     value[field] = String(value[field] ?? "").trim();
   }
   if (!value.client_name || !value.patient_id) throw Object.assign(new Error("client_name and patient_id are required"), { status: 400 });
+  const startAt = localScheduleDateTimeToUtc(date, value.start_time, timeZone);
+  const endAt = localScheduleDateTimeToUtc(date, value.end_time, timeZone);
+  if (!startAt || !endAt) throw Object.assign(new Error("start_time and end_time must be valid times (HH:mm or HH:mm:ss)"), { status: 400 });
+  if (Date.parse(startAt) >= Date.parse(endAt)) throw Object.assign(new Error("start_time must be earlier than end_time"), { status: 400 });
+  if (Date.parse(startAt) <= Date.now()) throw Object.assign(new Error("Schedule start must be in the future; choose a future date or time"), { status: 400 });
   return value;
 }
 
