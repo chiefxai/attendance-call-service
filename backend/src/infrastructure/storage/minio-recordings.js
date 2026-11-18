@@ -92,6 +92,22 @@ function createMinioRecordingStore({
     return { key, bucket, contentType: "audio/wav", sizeBytes: buffer.length };
   }
 
+  async function storeProviderRecordingBuffer(buffer, { organizationId, sessionId, callAttemptId, contentType } = {}) {
+    if (!Buffer.isBuffer(buffer) || !buffer.length || !organizationId || !sessionId || !callAttemptId) {
+      throw new Error("Provider recording buffer and call ownership IDs are required");
+    }
+    const key = `attendance/${encodeURIComponent(organizationId)}/${sessionId}/${callAttemptId}/recording.audio`;
+    await s3.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType || "application/octet-stream",
+      ServerSideEncryption: process.env.MINIO_SERVER_SIDE_ENCRYPTION || undefined,
+      Metadata: { organizationid: String(organizationId), sessionid: String(sessionId), callattemptid: String(callAttemptId) },
+    }));
+    return { key, bucket, contentType: contentType || null, sizeBytes: buffer.length };
+  }
+
   async function getObjectBuffer(key) {
     const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     return Buffer.from(await result.Body.transformToByteArray());
@@ -102,7 +118,7 @@ function createMinioRecordingStore({
     await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   }
 
-  return { importProviderRecording, storeCallRecordingBuffer, getObjectBuffer, deleteObject, bucket };
+  return { importProviderRecording, storeCallRecordingBuffer, storeProviderRecordingBuffer, getObjectBuffer, deleteObject, bucket };
 }
 
 module.exports = { createMinioRecordingStore };

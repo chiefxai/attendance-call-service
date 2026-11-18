@@ -1,13 +1,14 @@
 "use strict";
 
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
-const { normalizeChiefVoiceWebhook } = require("../../infrastructure/integrations/chiefvoice-webhook");
+const { normalizeChiefVoiceWebhook, extractChiefVoiceTranscript } = require("../../infrastructure/integrations/chiefvoice-webhook");
 const { processChiefVoiceResult } = require("./chiefvoice-result");
 
 function classifyCallStatus(status) {
   const value = String(status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   if (["completed", "answered", "inprogress"].includes(value)) return "answered";
-  if (["noanswer", "busy", "failed", "unanswered", "timeout"].includes(value)) return "not_answered";
+  if (["noanswer", "notanswered", "unanswered", "busy", "failed", "timeout"].includes(value)) return "not_answered";
+  if (["canceled", "cancelled"].includes(value)) return "cancelled";
   return "unknown";
 }
 
@@ -74,7 +75,10 @@ function chooseAttendanceAction(stage, outcome = {}) {
     return { action: "review", reason: "check_in_not_confirmed" };
   }
   if (stage === "check_out") {
-    if (outcome.employeeIntent === "departure_confirmed" && outcome.dutyComplete === true) {
+    // The check-out prompt confirms completion on the assigned caregiver phone
+    // and intentionally does not ask for a name. Requiring employeeVerified
+    // here would force an extra identity question and contradict that flow.
+    if (outcome.employeeIntent === "departure_confirmed" && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
       return { action: "confirm_stage", reportedAt: outcome.reportedDepartureTime || null };
     }
     if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {
@@ -85,7 +89,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
   return { action: "review", reason: "invalid_stage" };
 }
 
-function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
+function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = null, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
   const required = { repository, queue, chiefvoice, backend };
   const missing = Object.entries(required).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
@@ -202,9 +206,8 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
       if (error.status === 404 || error.status >= 500 || !error.status) return scheduleNext();
       throw error;
     }
-    const status = String(callStatus.status || "").toLowerCase().replace(/[ _-]/g, "");
-    const terminalNoResult = new Set(["noanswer", "busy", "failed", "canceled", "cancelled", "timeout"]);
-    if (terminalNoResult.has(status)) {
+    const callDisposition = classifyCallStatus(callStatus.status);
+    if (callDisposition === "not_answered" || callDisposition === "cancelled") {
       await repository.updateCallByProviderId({
         provider: "chiefvoice", providerCallId: attempt.providerCallId, status: callStatus.status,
         endedAt: callStatus.ended_at || new Date().toISOString(),
@@ -238,10 +241,88 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
     await scheduleNext();
   }
 
+  async function syncChiefVoiceArtifacts({ callAttemptId, pollCount = 0 }) {
+    const attempt = await repository.getCallAttempt(callAttemptId);
+    if (!attempt?.providerCallId || attempt.provider !== "chiefvoice" || !attempt.sessionId) return;
+    const retryLater = async () => {
+      const maxPolls = Number(process.env.CHIEFVOICE_ARTIFACT_POLL_MAX_ATTEMPTS) || 12;
+      if (pollCount >= maxPolls) {
+        console.warn(`[attendance-worker] ChiefVoice artifacts remain unavailable attempt=${callAttemptId}`);
+        return;
+      }
+      const nextPoll = pollCount + 1;
+      const delayMs = Number(process.env.CHIEFVOICE_ARTIFACT_POLL_INTERVAL_MS) || 30_000;
+      await queue.enqueue("sync_chiefvoice_artifacts", { callAttemptId, pollCount: nextPoll }, {
+        idempotencyKey: `chiefvoice-artifacts:${callAttemptId}:${nextPoll}`,
+        runAt: new Date(Date.now() + delayMs),
+      });
+    };
+
+    const [statusResult, postCallResult] = await Promise.allSettled([
+      chiefvoice.getCallStatus(attempt.providerCallId),
+      chiefvoice.getPostCallResult(attempt.providerCallId),
+    ]);
+    for (const result of [statusResult, postCallResult]) {
+      if (result.status === "rejected" && result.reason?.status !== 404) throw result.reason;
+    }
+    const sources = [
+      statusResult.status === "fulfilled" ? statusResult.value : null,
+      postCallResult.status === "fulfilled" ? postCallResult.value : null,
+      postCallResult.status === "fulfilled" ? postCallResult.value?.result : null,
+      postCallResult.status === "fulfilled" ? postCallResult.value?.call : null,
+    ];
+    const transcript = extractChiefVoiceTranscript(...sources);
+    let transcriptSaved = Boolean(await repository.getTranscriptForCall(callAttemptId));
+    if (transcript && !transcriptSaved) {
+      const session = await repository.getAttendanceSession(attempt.sessionId);
+      const language = sources.map((source) => source?.transcript_language || source?.transcriptLanguage || source?.language)
+        .find((value) => typeof value === "string" && value.trim()) || session?.language || "";
+      await repository.saveTranscript({
+        organizationId: attempt.organizationId,
+        sessionId: attempt.sessionId,
+        callAttemptId,
+        language,
+        text: transcript,
+      });
+      transcriptSaved = true;
+    }
+
+    const recordingExpected = process.env.CHIEFVOICE_RECORDING_ALLOWED === "true";
+    let recordingSaved = Boolean(attempt.recordingObjectKey);
+    let recordingPending = false;
+    if (recordingExpected && !recordingSaved) {
+      if (!recordings?.storeProviderRecordingBuffer) throw new Error("ChiefVoice recording storage is unavailable");
+      try {
+        const recording = await chiefvoice.getRecording(attempt.providerCallId);
+        const stored = await recordings.storeProviderRecordingBuffer(recording.buffer, {
+          organizationId: attempt.organizationId,
+          sessionId: attempt.sessionId,
+          callAttemptId,
+          contentType: recording.contentType,
+        });
+        await repository.setRecordingObjectKey(callAttemptId, stored.key, stored.contentType);
+        recordingSaved = true;
+      } catch (error) {
+        if (error.status === 404) recordingPending = true;
+        else throw error;
+      }
+    }
+    if ((!transcriptSaved || (recordingExpected && !recordingSaved)) && (recordingPending || postCallResult.status === "rejected" || !transcriptSaved)) {
+      await retryLater();
+    }
+  }
+
   async function processCallResult({ callAttemptId }) {
     const attempt = await repository.getCallAttempt(callAttemptId);
     if (!attempt) return;
-    if (classifyCallStatus(attempt.status) === "not_answered") {
+    const callDisposition = classifyCallStatus(attempt.status);
+    if (callDisposition === "cancelled") {
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
+        reason: "chiefvoice_call_cancelled", callAttemptId,
+      });
+      return;
+    }
+    if (callDisposition === "not_answered") {
       const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
       const organizationSettings = repository.getOrganizationCallSettings ? await repository.getOrganizationCallSettings(attempt.organizationId) : {};
       const retrySettings = organizationSettings.callRetry || {};
@@ -263,7 +344,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
       });
       return;
     }
-    if (classifyCallStatus(attempt.status) !== "answered") return;
+    if (callDisposition !== "answered") return;
     if (!attempt.outcome) {
       await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", { reason: "chiefvoice_post_call_result_missing", callAttemptId });
       await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, { idempotencyKey: `evaluate:${attempt.sessionId}:missing-result:${callAttemptId}` });
@@ -437,12 +518,12 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
               templateScenario: "CARE_MANAGER_ESCALATION",
               context: {
                 call_purpose: "care_manager_escalation",
-                message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} (Staff ID ${session.employee?.id || session.employee?.employeeId || session.employee?.staffId || "unavailable"}) did not answer ${maxNoAnswer} ${stageLabel} calls.`,
+                message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`,
                 care_manager_name: manager.displayName || manager.name || "", organization_id: session.organizationId,
                 expected_staff_name: session.employee?.name || session.employee?.fullName || "",
-                expected_staff_id: String(session.employee?.id || session.employee?.employeeId || session.employee?.staffId || ""),
-                attendance_stage: stageLabel,
-                no_answer_attempts: String(maxNoAnswer),
+                expected_patient_name: patient.name || "",
+                expected_patient_address: session.patient?.address || "",
+                escalation_message: `Repeated ${stageLabel} calls were unanswered. Please contact operations.`,
                 language: session.language || "ta-IN",
               },
             });
@@ -474,6 +555,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, backend, athu
   return {
     place_call: placeCall,
     poll_chiefvoice_call: pollChiefVoiceCall,
+    sync_chiefvoice_artifacts: syncChiefVoiceArtifacts,
     process_call_result: processCallResult,
     extract_intent: extractIntent,
     evaluate_attendance: evaluateAttendance,

@@ -32,7 +32,7 @@ export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accen
 }
 
 export function StatusChip({ status, compact = false }: { status: string; compact?: boolean }) {
-  const normalized = String(status || "unknown").toLowerCase().trim().replaceAll(/[_-]+/g, " ").replaceAll(/\\s+/g, " ");
+  const normalized = String(status || "unknown").toLowerCase().trim().replaceAll(/[_-]+/g, " ").replaceAll(/\s+/g, " ");
   const compactLabels: Record<string, string> = {
     "attention required": "Review",
     "needs review": "Review",

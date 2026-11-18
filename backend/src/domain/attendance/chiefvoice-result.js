@@ -20,8 +20,17 @@ async function processChiefVoiceResult({ event, repository, queue }) {
     if (!attempt) throw Object.assign(new Error("Call attempt not found"), { status: 404, safeCode: "call_not_found" });
 
     if (attempt.sessionId) {
-      const result = event.postCallResult;
       const session = await repository.getAttendanceSession(attempt.sessionId);
+      if (event.transcript) {
+        await repository.saveTranscript({
+          organizationId: attempt.organizationId,
+          sessionId: attempt.sessionId,
+          callAttemptId: attempt.id,
+          language: event.transcriptLanguage || session?.language || "",
+          text: event.transcript,
+        });
+      }
+      const result = event.postCallResult;
       const outcome = {
         ...result,
         employeeIntent: result.employeeIntent ?? result.employee_intent,
@@ -49,6 +58,10 @@ async function processChiefVoiceResult({ event, repository, queue }) {
       }
       await queue.enqueue("extract_intent", { callAttemptId: attempt.id }, {
         idempotencyKey: `extract:${attempt.id}`, client,
+      });
+      await queue.enqueue("sync_chiefvoice_artifacts", { callAttemptId: attempt.id, pollCount: 0 }, {
+        idempotencyKey: `chiefvoice-artifacts:${attempt.id}:0`, client,
+        runAt: new Date(Date.now() + 10_000),
       });
     }
     return { duplicate: false };

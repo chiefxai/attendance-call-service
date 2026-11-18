@@ -34,6 +34,7 @@ async function main() {
     repository,
     queue,
     chiefvoice,
+    recordings,
     backend,
     athulyaAttendanceClient,
     retry: config.callRetry,

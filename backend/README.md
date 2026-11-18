@@ -10,7 +10,7 @@ The backend schedules attendance calls and applies attendance business rules. Ch
 - ChiefVoice outbound API client.
 - Signed ChiefVoice webhook receiver.
 - Durable ChiefVoice call-status and post-call-result polling fallback.
-- MinIO remains available for retained legacy recording artifacts and existing recording views.
+- Private MinIO storage for recordings downloaded from ChiefVoice and the existing recording views.
 
 There is no Vobiz media bridge, local Gemini/Vertex runtime, local speech transcription, or local post-call LLM extraction.
 
@@ -32,9 +32,9 @@ Register this callback in the same ChiefVoice tenant/key scope (`PUT /v1/webhook
 POST https://calls.elvoryx.in/api/call-service/webhooks/chiefvoice
 ```
 
-Store the one-time registration response's signing secret in server-side `CHIEFVOICE_WEBHOOK_SECRET`. The receiver expects `X-Chiefvoice-Signature: sha256=<hex>` over HMAC-SHA256 of `timestamp + "." + event_id + "." + exact raw JSON body`; `X-Chiefvoice-Timestamp` must be within five minutes. The event ID and event type headers must match the signed body, which contains `event_id`, `event: "call.analysis.completed"`, `call.session_id`, and structured `result`. Retries are deduplicated by event ID.
+Store the one-time registration response's signing secret in server-side `CHIEFVOICE_WEBHOOK_SECRET`. The receiver expects `X-Chiefvoice-Signature: sha256=<hex>` over HMAC-SHA256 of `timestamp + "." + event_id + "." + exact raw JSON body`; `X-Chiefvoice-Timestamp` must be within five minutes. The event ID and event type headers must match the signed body, which contains `event_id`, `event: "call.analysis.completed"`, `call.session_id`, and structured `result`. Retries are deduplicated by event ID. The API key used by the worker needs `calls:read`, `calls:write`, `webhooks:read`, and `webhooks:write` for the documented polling and integration flows.
 
-The webhook updates the attempt using provider `chiefvoice`, stores the post-call result, and queues deterministic attendance validation. The worker also polls `GET /v1/calls/{session_id}` and `GET /v1/calls/{session_id}/post-call` (`calls:read`) with bounded backoff. Callback and poll results use the same validation, processing, and event-ID deduplication path.
+The webhook updates the attempt using provider `chiefvoice`, stores the post-call result, and queues deterministic attendance validation and artifact retrieval. The worker polls `GET /v1/calls/{session_id}` and `GET /v1/calls/{session_id}/post-call`, then downloads recordings from `GET /v1/calls/{session_id}/recording` using the same Bearer API key. Recordings are stored in private MinIO under the owning organization/session/attempt; the UI streams them through its authenticated recording route. Transcript text is saved when returned in the call status, post-call result, or webhook envelope. Missing artifacts are retried for a bounded period without logging their contents. Set `CHIEFVOICE_RECORDING_ALLOWED=true` for new calls only when recording is enabled for the ChiefVoice API/account; the default remains off.
 
 ## Environment
 
@@ -60,6 +60,8 @@ CHIEFVOICE_TEMPLATE_CHECK_OUT_FOLLOW_UP_POST_CALL_ID=
 CHIEFVOICE_CALLER_ID=
 CHIEFVOICE_TIMEOUT_MS=20000
 CHIEFVOICE_RECORDING_ALLOWED=false
+CHIEFVOICE_ARTIFACT_POLL_INTERVAL_MS=30000
+CHIEFVOICE_ARTIFACT_POLL_MAX_ATTEMPTS=12
 CHIEFVOICE_POLL_INITIAL_MS=15000
 CHIEFVOICE_POLL_INTERVAL_MS=15000
 CHIEFVOICE_POLL_MAX_ATTEMPTS=60

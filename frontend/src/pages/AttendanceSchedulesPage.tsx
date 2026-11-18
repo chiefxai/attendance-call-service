@@ -149,7 +149,7 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       return <Stack key={record.sessionId} spacing={0.35} alignItems="flex-start">
         {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}</Typography>}
         <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="nowrap">
-          <Typography variant="body2" color={displayTime ? "text.secondary" : "text.disabled"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
+          <Typography variant="body2" color={stageStatus.status === "confirmed" ? "text.primary" : displayTime ? "text.secondary" : "text.disabled"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
             {displayTime ? scheduleClock(displayTime) : emptyLabel}
           </Typography>
           <StatusChip compact status={displayStatus} />

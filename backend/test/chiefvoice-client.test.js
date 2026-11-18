@@ -15,6 +15,7 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
     const client = createChiefVoiceClient({
       baseUrl: "https://chiefvoice.example.test",
       apiKey: "test-key",
+      now: () => new Date("2026-11-18T04:30:00.000Z"),
       fetchImpl: async (url, options) => {
         captured = { url, options, payload: JSON.parse(options.body) };
         return { ok: true, status: 202, text: async () => JSON.stringify({ session_id: "session-123", status: "starting" }) };
@@ -40,7 +41,11 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
     assert.equal(captured.payload.caller_id, "+911234567890");
     assert.equal(captured.payload.live_agent.template_id, "live-template");
     assert.equal(captured.payload.live_agent.context.attendance_stage, "check_in");
+    assert.equal(captured.payload.live_agent.context.current_time_utc, "2026-11-18T04:30:00.000Z");
+    assert.equal(captured.payload.live_agent.context.current_local_time, "2026-11-18 10:00:00");
+    assert.equal(captured.payload.live_agent.context.time_zone, "Asia/Kolkata");
     assert.equal(captured.payload.post_call.template_id, "post-call-template");
+    assert.equal(captured.payload.post_call.context.current_time_utc, "2026-11-18T04:30:00.000Z");
     assert.equal(captured.payload.post_call.time_zone, "Asia/Kolkata");
     assert.equal(captured.payload.post_call.time_format, "%Y-%m-%dT%H:%M:%S%z");
     assert.equal(captured.payload.post_call.output_schema.additionalProperties, false);

@@ -168,7 +168,45 @@ function normalizeChiefVoiceWebhook(payload, { headerEventId, headerEventType } 
     durationSeconds,
     endedAt: call.ended_at || null,
     postCallResult,
+    transcript: extractChiefVoiceTranscript(payload, call, payload.result),
+    transcriptLanguage: String(payload.transcript_language || call.transcript_language || payload.language || "").slice(0, 40) || null,
   };
+}
+
+function transcriptText(value, depth = 0) {
+  if (depth > 4 || value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (typeof item === "string") return item.trim();
+      const text = transcriptText(item, depth + 1);
+      const speaker = typeof item?.speaker === "string" ? item.speaker
+        : typeof item?.role === "string" ? item.role : "";
+      return text && speaker ? `${speaker}: ${text}` : text;
+    }).filter(Boolean).join("\n");
+  }
+  if (typeof value !== "object") return "";
+  for (const key of ["text", "transcript_text", "transcriptText", "utterance", "content"]) {
+    if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
+  }
+  for (const key of ["transcript", "segments", "turns", "messages", "entries"]) {
+    if (value[key] != null) {
+      const text = transcriptText(value[key], depth + 1);
+      if (text) return text;
+    }
+  }
+  return "";
+}
+
+function extractChiefVoiceTranscript(...sources) {
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    for (const key of ["transcript", "transcript_text", "transcriptText", "conversation_transcript", "conversationTranscript", "segments", "turns", "messages"]) {
+      const text = transcriptText(source[key]);
+      if (text) return text.slice(0, 1_000_000);
+    }
+  }
+  return null;
 }
 
 
@@ -245,6 +283,9 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
   const notArrived = result.arrival_status === "not_arrived";
   const expectedArrivalTime = String(result.expected_arrival_time || "").trim();
   const callbackAt = String(result.requestedCallbackAt || result.requested_callback_at || "").trim()
+    // Legacy templates may return a human-readable time (for example,
+    // "in 20 minutes") in expected_arrival_time. Preserve that callback
+    // request; the versioned schema uses callback_at for an ISO timestamp.
     || expectedArrivalTime;
 
   return {
@@ -271,5 +312,6 @@ module.exports = {
   verifyChiefVoiceSignature,
   validatePostCallResult,
   normalizeChiefVoiceWebhook,
+  extractChiefVoiceTranscript,
   mapChiefVoiceAttendanceResult,
 };
