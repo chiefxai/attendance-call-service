@@ -298,6 +298,8 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
             scheduledStartAt, scheduledEndAt, language, sourceStatus: status,
             metadata: {
               careManagerId: String(source.care_manager_id || "").trim(),
+              careManagerName: String(source.care_manager_name || "").trim(),
+              careManagerPhone: String(source.care_manager_phone || "").trim(),
               branch: String(source.branch || "").trim(),
               serviceName: String(source.service_name || "").trim(),
               vendorCompany: String(source.vendor_company || "ATHULYA").trim() || "ATHULYA",

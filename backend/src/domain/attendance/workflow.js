@@ -2,6 +2,7 @@
 
 const { backoffMilliseconds } = require("../../infrastructure/database/postgres-queue");
 const { normalizeChiefVoiceWebhook, extractChiefVoiceTranscript } = require("../../infrastructure/integrations/chiefvoice-webhook");
+const { normalizeIndianMobile } = require("./phone-number");
 const { processChiefVoiceResult } = require("./chiefvoice-result");
 const { isNoAnswerFailureCode } = require("./call-failure");
 
@@ -654,6 +655,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       const stageLabel = stage === "check_out" ? "check-out" : "check-in";
       const notifications = await repository.notifyCareManagerForPatient({
         organizationId: session.organizationId,
+        assignmentId: session.assignmentId,
         patientId: patient.id,
         patientUhid: patient.patientUhid || patient.uhid,
         careManagerExternalId: session.metadata?.careManagerId,
@@ -666,18 +668,32 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       let careManagerNotified = notifications.some((manager) => manager.notificationCreated === true);
       if (escalation === "call_care_manager") {
         careManagerNotified = false;
-        for (const manager of notifications) {
-          if (!manager.careManagerPhone) continue;
+        const managers = [...notifications];
+        const sessionManagerPhone = normalizeIndianMobile(session.metadata?.careManagerPhone);
+        if (sessionManagerPhone && !managers.some((manager) => normalizeIndianMobile(manager.careManagerPhone) === sessionManagerPhone)) {
+          managers.push({
+            id: session.metadata?.careManagerId || session.assignmentId,
+            careManagerName: session.metadata?.careManagerName || "Assigned care manager",
+            careManagerPhone: sessionManagerPhone,
+          });
+        }
+        let escalationError = null;
+        for (const manager of managers) {
+          const managerPhone = normalizeIndianMobile(manager.careManagerPhone);
+          if (!managerPhone) {
+            if (manager.careManagerPhone) console.warn(`[attendance-worker] invalid care-manager phone; cannot place escalation session=${session.id} manager=${manager.id}`);
+            continue;
+          }
           const escalationAttemptId = `escalation-${session.id}-${stage}-${manager.id}`;
           try {
             await chiefvoice.createOutboundCall({
-              to: manager.careManagerPhone, from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
+              to: managerPhone, from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
               sessionId: session.id, stage, callAttemptId: escalationAttemptId,
               templateScenario: "CARE_MANAGER_ESCALATION",
               context: {
                 call_purpose: "care_manager_escalation",
                 message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`,
-                care_manager_name: manager.careManagerName || manager.name || "", organization_id: session.organizationId,
+                care_manager_name: manager.careManagerName || manager.displayName || manager.name || "", organization_id: session.organizationId,
                 expected_staff_name: session.employee?.name || session.employee?.fullName || "",
                 expected_patient_name: patient.name || "",
                 expected_patient_address: session.patient?.address || "",
@@ -688,7 +704,14 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
             careManagerNotified = true;
           } catch (error) {
             console.error(`[attendance-worker] ChiefVoice care-manager escalation failed session=${session.id} stage=${stage}: ${error.message}`);
+            escalationError ||= error;
           }
+        }
+        if (escalationError) {
+          // Let the durable worker retry this stage-level escalation. The
+          // provider idempotency key prevents duplicate calls if ChiefVoice
+          // accepted a request but the response was lost.
+          throw escalationError;
         }
       } else if (careManagerNotified) {
         const recipients = notifications.filter((manager) => manager.notificationCreated === true).length;
