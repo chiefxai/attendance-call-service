@@ -556,31 +556,42 @@ class PostgresRepository {
     return json(rows[0].settings) || {};
   }
 
-  async notifyCareManagerForPatient({ organizationId, patientId, patientUhid, title, message, referenceType, referenceId, type = "unanswered_call" }) {
-    if (!organizationId || (!patientId && !patientUhid) || !referenceType || !referenceId) return [];
+  async notifyCareManagerForPatient({ organizationId, patientId, patientUhid, careManagerExternalId, title, message, referenceType, referenceId, type = "unanswered_call" }) {
+    if (!organizationId || (!patientId && !patientUhid && !careManagerExternalId) || !referenceType || !referenceId) return [];
     const { rows } = await this.pool.query(
       `WITH managers AS (
-        SELECT cm.id AS care_manager_id,cm.app_user_id
+        SELECT DISTINCT ON (cm.id) cm.id AS care_manager_id,cm.app_user_id,cm.name AS "careManagerName",
+          COALESCE(NULLIF(cm.phone,''),NULLIF(s.care_manager_phone,'')) AS "careManagerPhone",cm.active
         FROM athulya_schedules s
         JOIN athulya_care_managers cm ON cm.organization_id=s.organization_id
           AND cm.athulya_care_manager_id=s.care_manager_external_id
-        WHERE s.organization_id=$1 AND (s.patient_external_id=$2 OR ($3<>'' AND s.patient_uhid=$3))
-          AND cm.active=TRUE AND cm.app_user_id IS NOT NULL
-        ORDER BY s.schedule_date DESC NULLS LAST,s.updated_at DESC LIMIT 1
+        WHERE s.organization_id=$1 AND (
+          (NULLIF($2,'') IS NOT NULL AND s.patient_external_id=$2)
+          OR (NULLIF($3,'') IS NOT NULL AND s.patient_uhid=$3)
+          OR (NULLIF($4,'') IS NOT NULL AND s.care_manager_external_id=$4)
+        )
+        ORDER BY cm.id,s.schedule_date DESC NULLS LAST,s.updated_at DESC
       ), inserted AS (
       INSERT INTO care_manager_notifications
         (organization_id,user_id,care_manager_id,notification_type,title,message,reference_type,reference_id)
-      SELECT $1,app_user_id,care_manager_id,$8,$4,$5,$6,$7 FROM managers
+      SELECT $1,app_user_id,care_manager_id,$9,$5,$6,$7,$8 FROM managers
+      WHERE active=TRUE AND app_user_id IS NOT NULL
       ON CONFLICT (user_id,reference_type,reference_id) DO NOTHING
       RETURNING id,user_id,care_manager_id,created_at
       )
-      SELECT ins.*,cm.name AS "careManagerName",cm.phone AS "careManagerPhone"
-      FROM inserted ins JOIN athulya_care_managers cm ON cm.id=ins.care_manager_id`,
-      [organizationId,String(patientId || ""),String(patientUhid || ""),String(title).slice(0,160),String(message).slice(0,2000),referenceType,referenceId,type],
+      SELECT m.care_manager_id AS id,COALESCE(ins.id,existing.id) AS "notificationId",m.app_user_id AS user_id,m.care_manager_id,
+        COALESCE(ins.created_at,existing.created_at,NOW()) AS created_at,
+        m."careManagerName",m."careManagerPhone",
+        COALESCE(ins.id,existing.id) IS NOT NULL AS "notificationCreated"
+      FROM managers m
+      LEFT JOIN inserted ins ON ins.care_manager_id=m.care_manager_id
+      LEFT JOIN care_manager_notifications existing ON existing.user_id=m.app_user_id
+        AND existing.reference_type=$7 AND existing.reference_id=$8`,
+      [organizationId,String(patientId || ""),String(patientUhid || ""),String(careManagerExternalId || ""),
+        String(title).slice(0,160),String(message).slice(0,2000),referenceType,referenceId,type],
     );
     return rows;
   }
-
   async listCareManagerNotifications(organizationId, userId, limit = 100) {
     const { rows } = await this.pool.query(
       `SELECT id,notification_type AS "type",title,message,reference_type AS "referenceType",

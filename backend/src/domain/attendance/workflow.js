@@ -656,13 +656,16 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         organizationId: session.organizationId,
         patientId: patient.id,
         patientUhid: patient.patientUhid || patient.uhid,
+        careManagerExternalId: session.metadata?.careManagerId,
         title: `Unanswered ${stageLabel} calls`,
         message: `${session.employee?.name || "Assigned staff"} did not answer ${maxNoAnswer} ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please follow up.`,
         referenceType: "attendance_stage",
         referenceId: `${session.id}:${stage}`,
         type: escalation === "call_care_manager" ? "care_manager_call_log" : "unanswered_call",
       });
-      if (notifications.length && escalation === "call_care_manager") {
+      let careManagerNotified = notifications.some((manager) => manager.notificationCreated === true);
+      if (escalation === "call_care_manager") {
+        careManagerNotified = false;
         for (const manager of notifications) {
           if (!manager.careManagerPhone) continue;
           const escalationAttemptId = `escalation-${session.id}-${stage}-${manager.id}`;
@@ -674,7 +677,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
               context: {
                 call_purpose: "care_manager_escalation",
                 message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`,
-                care_manager_name: manager.displayName || manager.name || "", organization_id: session.organizationId,
+                care_manager_name: manager.careManagerName || manager.name || "", organization_id: session.organizationId,
                 expected_staff_name: session.employee?.name || session.employee?.fullName || "",
                 expected_patient_name: patient.name || "",
                 expected_patient_address: session.patient?.address || "",
@@ -682,20 +685,22 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
                 language: session.language || "ta-IN",
               },
             });
+            careManagerNotified = true;
           } catch (error) {
             console.error(`[attendance-worker] ChiefVoice care-manager escalation failed session=${session.id} stage=${stage}: ${error.message}`);
           }
         }
-      } else if (notifications.length) {
-        console.info(`[attendance-worker] care-manager platform notification created session=${session.id} stage=${stage} recipients=${notifications.length}`);
+      } else if (careManagerNotified) {
+        const recipients = notifications.filter((manager) => manager.notificationCreated === true).length;
+        console.info(`[attendance-worker] care-manager platform notification created session=${session.id} stage=${stage} recipients=${recipients}`);
       }
       await repository.setStageStatus(sessionId, stage, "not_answered", {
         reason: "consecutive_no_answer_limit_reached",
         consecutiveNoAnswer: maxNoAnswer,
-        careManagerNotified: notifications.length > 0,
+        careManagerNotified,
       });
-      if (escalation === "call_care_manager" && notifications.length === 0) {
-        console.info(`[attendance-worker] no care manager found; keeping stage not_answered session=${session.id} stage=${stage}`);
+      if (escalation === "call_care_manager" && !careManagerNotified) {
+        console.info(`[attendance-worker] no reachable care manager found; keeping stage not_answered session=${session.id} stage=${stage}`);
       }
     }
     const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
