@@ -245,7 +245,7 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
   const notArrived = result.arrival_status === "not_arrived";
   const expectedArrivalTime = String(result.expected_arrival_time || "").trim();
   const callbackAt = String(result.requestedCallbackAt || result.requested_callback_at || "").trim()
-    || (/^\\d{4}-\\d{2}-\\d{2}T/.test(expectedArrivalTime) ? expectedArrivalTime : "");
+    || expectedArrivalTime;
 
   return {
     ...outcome,
