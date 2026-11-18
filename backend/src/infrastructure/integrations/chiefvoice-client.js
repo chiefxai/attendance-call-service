@@ -180,13 +180,13 @@ function createChiefVoiceClient({
       properties: {
         schema_version: { type: "string", enum: ["1.0"] },
         stage: { type: "string", enum: ["check_in"] },
-        outcome: { type: "string", enum: ["arrived", "not_arrived", "unclear", "wrong_assignment"] },
+        outcome: { type: "string", enum: ["arrived", "not_arrived", "no_human_answer", "unclear", "wrong_assignment"], description: "Use no_human_answer when voicemail, iPhone Live Voicemail, automated screening, or a recorded greeting answers and no caregiver speaks." },
         identity: {
           type: "object",
           properties: {
-            caregiver_name_matches: { type: "boolean" },
-            patient_name_matches: { type: "boolean" },
-            patient_address_matches: { type: "boolean" },
+            caregiver_name_matches: { type: "boolean", description: "True for a clear, unambiguous partial name that matches the expected caregiver name; do not require the caller to say every name part." },
+            patient_name_matches: { type: "boolean", description: "True for a clear, unambiguous partial patient name matching a part of the expected name (for example Ram for Ram Kumar), when the call context supports the same patient." },
+            patient_address_matches: { type: "boolean", description: "Compare distinctive locality/place names, not exact full-string spelling. Correct obvious ASR or transliteration variants using the call audio/transcript and expected address. A stated locality such as Subiksha Nagar can match 1 Subiksha Nagar, Chennai, Tamil Nadu when consistent; do not invent unstated details or accept contradictions." },
           },
           required: ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"],
           additionalProperties: false,
@@ -210,7 +210,7 @@ function createChiefVoiceClient({
       properties: {
         schema_version: { type: "string", enum: ["1.0"] },
         stage: { type: "string", enum: ["check_out"] },
-        outcome: { type: "string", enum: ["checked_out", "still_on_duty", "unclear", "wrong_assignment"] },
+        outcome: { type: "string", enum: ["checked_out", "still_on_duty", "no_human_answer", "unclear", "wrong_assignment"], description: "Use no_human_answer when voicemail, iPhone Live Voicemail, automated screening, or a recorded greeting answers and no caregiver speaks." },
         reported_at: {
           type: ["string", "null"],
           description: "Return the caregiver's explicitly stated actual departure time as an ISO 8601 timestamp with the Asia/Kolkata offset. If the call did not ask for or receive a departure time, return null; never copy scheduled_check_out_at.",
@@ -250,6 +250,8 @@ function createChiefVoiceClient({
         template_id: postCallTemplateId,
         context: {
           ...postCallContext,
+          identity_matching_instructions: "Compare the spoken names semantically, not by exact full-string equality. A clear, unambiguous part of an expected multi-part name (for example, 'Ram' for 'Ram Kumar') is a match when the rest of the conversation supports the same person. Compare the patient address by distinctive locality and consistent place names; normalize obvious speech-recognition spelling or transliteration errors using the audio/transcript and expected address (for example, 'Subiksha Nagar' for '1 Subiksha Nagar, Chennai, Tamil Nadu'). Do not require every address component to be spoken. Never invent a name or address detail, and do not mark a match when the caller says nothing about it or gives a conflicting detail. Set each identity boolean from the caller's actual words and the evidence in the call.",
+          automated_answer_instructions: "If an iPhone or other device answers with voicemail, Live Voicemail, an automated call-screening voice, a recorded greeting, or a prompt to leave a message, treat this as no human answer unless the caregiver clearly takes over and responds. Do not infer attendance or identity from the recording. Return outcome 'no_human_answer', with reported_at and callback_at null, and explain the automated answer briefly in summary.",
           current_time_utc: callStartedAt.toISOString(),
           current_local_time: currentLocalTime,
           time_zone: timeZone,

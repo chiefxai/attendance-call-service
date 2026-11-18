@@ -71,7 +71,14 @@ export function AssignmentStatusPage() {
             {stage.value.status === "processing" && <Alert severity="info" sx={{ mb: 2 }}>Call ended. Recording and attendance details are being processed.</Alert>}
             {stage.value.status === "calling" && <Alert severity="warning" sx={{ mb: 2 }}>The outbound call is in progress.</Alert>}
             {stage.value.status === "scheduled" && stage.value.scheduledAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Call scheduled for {formatSessionTime(stage.value.scheduledAt, query.data.timeZone)}</Typography>}
-            {stage.value.status === "follow_up" && stage.value.nextCallAt && (new Date(stage.value.nextCallAt).getTime() <= Date.now() ? <Alert severity="warning" sx={{ mb: 1.5 }}>Retry overdue since {formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}. The service is checking for missed work and will place the call as soon as possible.</Alert> : <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Next call scheduled for {formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}</Typography>)}
+            {stage.value.status === "follow_up" && stage.value.nextCallAt && (() => {
+              const label = stage.value.nextCallReason === "employee_requested_callback" ? "Follow-up call" : "Retry call";
+              const attempt = stage.value.nextAttemptNumber || 1;
+              const retryNumber = Math.max(1, attempt - 1);
+              return new Date(stage.value.nextCallAt).getTime() <= Date.now()
+                ? <Alert severity="warning" sx={{ mb: 1.5 }}>{label} #{retryNumber} · attempt {attempt} overdue since {formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}. The service is checking for missed work and will place the call as soon as possible.</Alert>
+                : <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{label} #{retryNumber} · attempt {attempt} scheduled for {formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}</Typography>;
+            })()}
             <Typography variant="body2" color="text.secondary">Reported time</Typography><Typography fontWeight={650} sx={{ mb: 2 }}>{formatSessionTime(stage.value.reportedAt, query.data.timeZone)}</Typography>
             <Button fullWidth sx={{ mt: 1 }} variant="outlined" startIcon={<HistoryRoundedIcon />} onClick={() => showCallLogs(stage.label === "Check-in" ? "check_in" : "check_out")}>View {stage.label.toLowerCase()} logs</Button>
           </CardContent></Card></Grid>)}

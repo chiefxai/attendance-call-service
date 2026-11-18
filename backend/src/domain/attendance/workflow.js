@@ -64,6 +64,7 @@ function chiefVoiceTemplateScenario({ stage, attemptNumber = 1, consecutiveNoAns
 }
 
 function chooseAttendanceAction(stage, outcome = {}) {
+  if (outcome.employeeIntent === "no_human_answer") return { action: "retry_no_answer" };
   if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment" || outcome.employeeIntent === "unclear") {
     return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
   }
@@ -448,7 +449,35 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         }
       }
       const decision = chooseAttendanceAction(attempt.stage, outcome);
-      if (decision.action === "confirm_stage") {
+      if (decision.action === "retry_no_answer") {
+        const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
+        const settings = repository.getOrganizationCallSettings ? await repository.getOrganizationCallSettings(session.organizationId) : {};
+        const retrySettings = settings.callRetry || {};
+        const maxConsecutiveNoAnswer = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
+        if (noAnswerCount >= maxConsecutiveNoAnswer) {
+          await repository.setStageStatus(sessionId, attempt.stage, "not_answered", {
+            reason: "automated_answer_no_human_retry_limit_reached", consecutiveNoAnswer: noAnswerCount, callAttemptId,
+          });
+          await queue.enqueue("evaluate_session", { sessionId, stage: attempt.stage }, {
+            idempotencyKey: `evaluate:automated-answer-limit:${sessionId}:${attempt.stage}`,
+          });
+        } else {
+          const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
+          const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
+          const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
+          const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, {
+            initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000,
+          }));
+          const nextNumber = await repository.nextAttemptNumber(sessionId, attempt.stage);
+          await repository.setStageStatus(sessionId, attempt.stage, "follow_up", {
+            reason: "automated_answer_no_human_retry", nextCallAt: runAt.toISOString(), consecutiveNoAnswer: noAnswerCount, callAttemptId,
+          });
+          await queue.enqueue("place_call", {
+            sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
+            attemptNumber: nextNumber, consecutiveNoAnswer: noAnswerCount,
+          }, { idempotencyKey: `call:${sessionId}:${attempt.stage}:${nextNumber}`, runAt });
+        }
+      } else if (decision.action === "confirm_stage") {
         await repository.setStageStatus(sessionId, attempt.stage, "confirmed", { reportedAt: decision.reportedAt, nextCallAt: null, callAttemptId });
         await queue.enqueue("deliver_attendance", { sessionId, stage: attempt.stage, callAttemptId }, {
           idempotencyKey: `deliver:${sessionId}:${attempt.stage}:${callAttemptId}`,

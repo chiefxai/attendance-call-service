@@ -726,6 +726,10 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       const session = await repository.getAttendanceSession(req.params.id);
       if (!session || session.organizationId !== organizationId || !await assertSessionVisible(req, req.params.id, res)) return;
       const context = session.activeContext || {};
+      const [checkInNextAttemptNumber, checkOutNextAttemptNumber] = await Promise.all([
+        repository.nextAttemptNumber(req.params.id, "check_in"),
+        repository.nextAttemptNumber(req.params.id, "check_out"),
+      ]);
       res.json({
         sessionId: session.id,
         assignmentId: session.assignmentId,
@@ -739,6 +743,8 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
           reportedAt: context.checkIn?.reportedAt || null,
           scheduledAt: session.scheduledStartAt,
           nextCallAt: context.checkIn?.nextCallAt || null,
+          nextCallReason: context.checkIn?.reason || null,
+          nextAttemptNumber: checkInNextAttemptNumber,
         },
         checkOut: {
           taskId: session.checkOutTask?.id || null,
@@ -748,6 +754,8 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
           reportedAt: context.checkOut?.reportedAt || null,
           scheduledAt: session.scheduledEndAt,
           nextCallAt: context.checkOut?.nextCallAt || null,
+          nextCallReason: context.checkOut?.reason || null,
+          nextAttemptNumber: checkOutNextAttemptNumber,
         },
         backendDeliveryStatus: session.backendDeliveryStatus,
       });

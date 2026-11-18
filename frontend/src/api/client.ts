@@ -303,6 +303,8 @@ export interface AttendanceStageStatus {
   reportedAt: string | null;
   scheduledAt?: string | null;
   nextCallAt?: string | null;
+  nextCallReason?: string | null;
+  nextAttemptNumber?: number;
 }
 
 export interface AssignmentStatus {

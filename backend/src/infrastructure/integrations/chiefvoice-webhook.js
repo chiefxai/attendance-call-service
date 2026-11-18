@@ -46,8 +46,8 @@ function validatePostCallResult(result) {
       throw new Error("ChiefVoice result does not match schema version 1.0");
     }
     const validOutcomes = result.stage === "check_in"
-      ? new Set(["arrived", "not_arrived", "unclear", "wrong_assignment"])
-      : new Set(["checked_out", "still_on_duty", "unclear", "wrong_assignment"]);
+      ? new Set(["arrived", "not_arrived", "no_human_answer", "unclear", "wrong_assignment"])
+      : new Set(["checked_out", "still_on_duty", "no_human_answer", "unclear", "wrong_assignment"]);
     if (!validOutcomes.has(result.outcome)) throw new Error("ChiefVoice result outcome is unsupported for this stage");
     if (typeof result.summary !== "string") throw new Error("ChiefVoice result summary must be a string");
     for (const field of ["reported_at", "callback_at", "exception_code"]) {
@@ -259,7 +259,8 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
       const notArrived = result.outcome === "not_arrived";
       return {
         ...outcome,
-        employeeIntent: arrived ? "arrival_confirmed"
+        employeeIntent: result.outcome === "no_human_answer" ? "no_human_answer"
+          : arrived ? "arrival_confirmed"
           : notArrived && result.callback_at ? "will_arrive_later"
             : result.outcome === "wrong_assignment" ? "wrong_assignment" : "unclear",
         employeeNameConfirmed: identity.caregiver_name_matches,
@@ -278,7 +279,8 @@ function mapChiefVoiceAttendanceResult(result, { stage, session } = {}) {
     if (stage === "check_out") {
       return {
         ...outcome,
-        employeeIntent: result.outcome === "checked_out" ? "departure_confirmed"
+        employeeIntent: result.outcome === "no_human_answer" ? "no_human_answer"
+          : result.outcome === "checked_out" ? "departure_confirmed"
           : result.outcome === "still_on_duty" ? "still_on_duty"
             : result.outcome === "wrong_assignment" ? "wrong_assignment" : "unclear",
         dutyComplete: result.outcome === "checked_out",

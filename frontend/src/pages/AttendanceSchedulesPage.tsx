@@ -155,7 +155,7 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
           <StatusChip compact status={displayStatus} />
         </Stack>
         {stageStatus.status === "follow_up" && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary">
-          {employeeRequestedDelay ? "Callback scheduled:" : "Retry scheduled:"} {dateTimeLabel(stageStatus.nextCallAt)}
+          {employeeRequestedDelay ? `Follow-up #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:` : `Retry #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:`} {dateTimeLabel(stageStatus.nextCallAt)}
         </Typography>}
         {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary">Retry limit reached or no further retry is scheduled</Typography>}
       </Stack>;
