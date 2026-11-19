@@ -78,7 +78,7 @@ function chiefVoiceTemplateScenario({ stage, attemptNumber = 1, consecutiveNoAns
 
 function chooseAttendanceAction(stage, outcome = {}) {
   if (outcome.employeeIntent === "no_human_answer") return { action: "retry_no_answer" };
-  if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment" || outcome.employeeIntent === "unclear") {
+  if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment") {
     return { action: "review", reason: outcome.exceptionCode || outcome.employeeIntent || "unclear" };
   }
   if (stage === "check_in") {
@@ -88,6 +88,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
     if (outcome.employeeIntent === "will_arrive_later" || outcome.requestedCallbackAt) {
       return { action: "follow_up", runAt: outcome.requestedCallbackAt || null };
     }
+    if (outcome.employeeIntent === "unclear") return { action: "review", reason: "unclear" };
     return { action: "review", reason: "check_in_not_confirmed" };
   }
   if (stage === "check_out") {
@@ -100,9 +101,10 @@ function chooseAttendanceAction(stage, outcome = {}) {
     if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {
       return { action: "follow_up", runAt: outcome.requestedCallbackAt || null };
     }
+    if (outcome.employeeIntent === "unclear") return { action: "review", reason: "unclear" };
     return { action: "review", reason: "check_out_not_confirmed" };
   }
-  return { action: "review", reason: "invalid_stage" };
+  return { action: "review", reason: outcome.employeeIntent === "unclear" ? "unclear" : "invalid_stage" };
 }
 
 function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = null, backend, athulyaAttendanceClient = null, retry = {}, capacity = {}, additionalHandlers = {} }) {
