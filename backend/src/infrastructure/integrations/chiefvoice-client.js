@@ -227,8 +227,23 @@ function createChiefVoiceClient({
       required: ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary", "transcript_summary"],
       additionalProperties: false,
     };
+    const careManagerOutputSchema = {
+      type: "object",
+      properties: {
+        schema_version: { type: "string", enum: ["1.0"] },
+        stage: { type: "string", enum: ["check_in", "check_out"] },
+        outcome: { type: "string", enum: ["notified", "unable_to_contact", "unclear"] },
+        escalation_message_delivered: { type: "boolean" },
+        summary: { type: "string" },
+        transcript_summary: { type: "string" },
+      },
+      required: ["schema_version", "stage", "outcome", "escalation_message_delivered", "summary", "transcript_summary"],
+      additionalProperties: false,
+    };
+    // Every configured post-call template must receive an output schema unless
+    // the provider template has a default. Do not rely on that optional setting.
     const outputSchema = scenario === "CARE_MANAGER_ESCALATION"
-      ? undefined
+      ? careManagerOutputSchema
       : stage === "check_out" ? checkOutOutputSchema : checkInOutputSchema;
     const mandatoryFields = scenario === "CARE_MANAGER_ESCALATION"
       ? ["escalation_message_delivered"]

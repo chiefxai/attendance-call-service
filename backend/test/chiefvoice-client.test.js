@@ -79,3 +79,43 @@ test("ChiefVoice API error details are not exposed to logs or persisted error me
     return true;
   });
 });
+
+test("care-manager escalation requests include a post-call output schema", async () => {
+  const names = [
+    "CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_LIVE_ID",
+    "CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_POST_CALL_ID",
+  ];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  process.env.CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_LIVE_ID = "manager-live-template";
+  process.env.CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_POST_CALL_ID = "manager-post-template";
+  let payload;
+  try {
+    const client = createChiefVoiceClient({
+      baseUrl: "https://chiefvoice.example.test",
+      apiKey: "test-key",
+      fetchImpl: async (_url, options) => {
+        payload = JSON.parse(options.body);
+        return { ok: true, status: 202, text: async () => JSON.stringify({ session_id: "manager-session" }) };
+      },
+    });
+    await client.createOutboundCall({
+      to: "+919876543210",
+      from: "+911234567890",
+      sessionId: "attendance-1",
+      stage: "check_in",
+      callAttemptId: "manager-attempt-1",
+      context: { call_purpose: "care_manager_escalation" },
+      templateScenario: "CARE_MANAGER_ESCALATION",
+    });
+
+    assert.equal(payload.post_call.template_id, "manager-post-template");
+    assert.deepEqual(payload.post_call.output_schema.required, [
+      "schema_version", "stage", "outcome", "escalation_message_delivered", "summary", "transcript_summary",
+    ]);
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
