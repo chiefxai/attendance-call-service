@@ -8,7 +8,7 @@ import AssignmentLateRoundedIcon from "@mui/icons-material/AssignmentLateRounded
 import { fetchSupervisionQueue, type SupervisionItem } from "../api/client";
 import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
 
-const typeLabel = (item: SupervisionItem) => item.status === "not_answered" || item.status === "missed" ? "No answer" : item.stage === "check_out" ? "Check-out review" : "Attendance review";
+const typeLabel = (item: SupervisionItem) => item.status === "escalated" || item.status === "unresolved" ? "Care manager escalation" : item.status === "not_answered" || item.status === "missed" ? "No answer" : item.stage === "check_out" ? "Check-out review" : "Attendance review";
 
 export function ExceptionsPage() {
   const navigate = useNavigate();
@@ -23,7 +23,7 @@ export function ExceptionsPage() {
     {queue.isError && <Alert severity="error">Could not load attendance exceptions from the backend.</Alert>}
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Open exceptions" value={String(all.length)} detail="Current attendance review queue" icon={<AssignmentLateRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Not answered" value={String(all.filter((item) => item.status === "not_answered" || item.status === "missed").length)} detail="Retry limit reached" icon={<CallEndRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Escalated / unresolved" value={String(all.filter((item) => ["escalated", "unresolved", "not_answered", "missed"].includes(item.status)).length)} detail="Care manager call cycle or retry limit reached" icon={<CallEndRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Needs review" value={String(all.filter((item) => item.status === "review").length)} detail="Attendance details unclear" icon={<AccessTimeRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Location review" value="Unavailable" detail="GPS integration is not connected" icon={<AccessTimeRoundedIcon />} tint="#edf1f8" accent="#69778d" /></Grid>
     </Grid>
@@ -35,3 +35,4 @@ export function ExceptionsPage() {
     </Card>
   </Stack>;
 }
+

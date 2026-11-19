@@ -604,7 +604,7 @@ class PostgresRepository {
     const { rows } = await this.pool.query(
       `SELECT id,notification_type AS "type",title,message,reference_type AS "referenceType",
         reference_id AS "referenceId",created_at AS "createdAt",read_at AS "readAt"
-       FROM care_manager_notifications WHERE organization_id=$1 AND user_id=$2 AND notification_type='unanswered_call'
+       FROM care_manager_notifications WHERE organization_id=$1 AND user_id=$2 AND notification_type IN ('unanswered_call','care_manager_call_log')
        ORDER BY created_at DESC LIMIT $3`, [organizationId,userId,Math.min(Math.max(Number(limit) || 100,1),200)],
     );
     return rows;
@@ -974,8 +974,8 @@ class PostgresRepository {
     const safeOffset = Math.max(Number(offset) || 0, 0);
     const r = await this.pool.query(
       `SELECT s.*, COUNT(a.id)::int AS call_attempt_count,
-         COUNT(a.id) FILTER (WHERE a.stage='check_in')::int AS check_in_attempt_count,
-         COUNT(a.id) FILTER (WHERE a.stage='check_out')::int AS check_out_attempt_count
+         COUNT(a.id) FILTER (WHERE a.stage='check_in' AND a.call_target_role='employee')::int AS check_in_attempt_count,
+         COUNT(a.id) FILTER (WHERE a.stage='check_out' AND a.call_target_role='employee')::int AS check_out_attempt_count
        FROM attendance_sessions s
        LEFT JOIN attendance_call_attempts a ON a.session_id=s.id
        WHERE s.organization_id=$1
@@ -998,9 +998,9 @@ class PostgresRepository {
            COUNT(*) FILTER (WHERE scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS scheduled_today,
            COUNT(*) FILTER (WHERE check_in_status='confirmed' AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_ins_confirmed,
            COUNT(*) FILTER (WHERE check_out_status='confirmed' AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_confirmed,
-           COUNT(*) FILTER (WHERE check_in_status IN ('scheduled','calling','processing','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_ins_pending,
-           COUNT(*) FILTER (WHERE check_out_status IN ('scheduled','calling','processing','follow_up') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_pending,
-           COUNT(*) FILTER (WHERE check_in_status IN ('not_answered','missed','review') OR check_out_status IN ('not_answered','missed','review'))::int AS exceptions
+           COUNT(*) FILTER (WHERE check_in_status IN ('scheduled','calling','processing','retry','follow_up','escalated') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_ins_pending,
+           COUNT(*) FILTER (WHERE check_out_status IN ('scheduled','calling','processing','retry','follow_up','escalated') AND scheduled_start_at >= bounds.day_start AND scheduled_start_at < bounds.day_start + INTERVAL '1 day')::int AS check_outs_pending,
+           COUNT(*) FILTER (WHERE check_in_status IN ('not_answered','unresolved','missed','review') OR check_out_status IN ('not_answered','unresolved','missed','review'))::int AS exceptions
            ,COUNT(*) FILTER (WHERE session_status='completed')::int AS completed_schedules
          FROM attendance_sessions s CROSS JOIN bounds WHERE s.organization_id=$1 AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$3))`, [organizationId, timezone, careManagerExternalId || null],
       ),
@@ -1268,8 +1268,8 @@ class PostgresRepository {
     for (const session of sessions) {
       for (const stage of ["checkIn", "checkOut"]) {
         const stageState = session[stage].status;
-        if (!["not_answered", "missed", "review"].includes(stageState)) continue;
-        const critical = stageState === "not_answered" || stageState === "missed";
+        if (!["not_answered", "escalated", "unresolved", "missed", "review"].includes(stageState)) continue;
+        const critical = stageState === "not_answered" || stageState === "unresolved" || stageState === "missed";
         const reason = session.stageReasons?.[stage] || (critical ? "No answer retry limit reached" : "Attendance detail needs operations review");
         const item = { id: `${session.sessionId}:${stage}`, sessionId: session.sessionId, assignmentId: session.assignmentId,
           employee: session.employee, patient: session.patient, stage: stage === "checkIn" ? "check_in" : "check_out",
@@ -1286,19 +1286,21 @@ class PostgresRepository {
     const sql = [
       "WITH followups AS (",
       "SELECT t.id AS task_id,t.assignment_session_id AS session_id,t.organization_id,t.stage,t.active_context AS stage_context",
-      "FROM attendance_stage_tasks t WHERE t.status='follow_up'",
+      "FROM attendance_stage_tasks t WHERE t.status IN ('follow_up','retry','escalated')",
       ")",
       "SELECT f.task_id, f.session_id, f.organization_id, f.stage, f.stage_context->>'reason' AS reason, f.stage_context->>'nextCallAt' AS due_at,",
-      "COALESCE((SELECT MAX(a.attempt_number) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage),0)::int AS max_call_attempt,",
-      "COALESCE((SELECT MAX((j.payload->>'attemptNumber')::int) FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage),0)::int AS max_job_attempt,",
-      "(SELECT j.id FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_job_id,",
-      "(SELECT (j.payload->>'attemptNumber')::int FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_attempt_number,",
-      "EXISTS(SELECT 1 FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND j.status='running') AS has_running_job,",
-      "(SELECT COALESCE(a.consecutive_no_answer_before,0)::int FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_no_answer_before,",
-      "(SELECT LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_attempt_status",
+      "COALESCE(NULLIF(f.stage_context->>'careManagerMaxAttempts','')::int,0) AS care_manager_max_attempts,",
+      "CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END AS call_target_role,",
+      "COALESCE((SELECT MAX(a.attempt_number) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage AND a.call_target_role=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END),0)::int AS max_call_attempt,",
+      "COALESCE((SELECT MAX((j.payload->>'attemptNumber')::int) FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND COALESCE(j.payload->>'callTargetRole','employee')=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END),0)::int AS max_job_attempt,",
+      "(SELECT j.id FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND COALESCE(j.payload->>'callTargetRole','employee')=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_job_id,",
+      "(SELECT (j.payload->>'attemptNumber')::int FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND COALESCE(j.payload->>'callTargetRole','employee')=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END AND j.status='queued' ORDER BY j.run_at,j.created_at LIMIT 1) AS queued_attempt_number,",
+      "EXISTS(SELECT 1 FROM attendance_jobs j WHERE j.job_type='place_call' AND j.payload->>'sessionId'=f.session_id::text AND j.payload->>'stage'=f.stage AND COALESCE(j.payload->>'callTargetRole','employee')=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END AND j.status='running') AS has_running_job,",
+      "(SELECT COALESCE(a.consecutive_no_answer_before,0)::int FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage AND a.call_target_role=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_no_answer_before,",
+      "(SELECT LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage AND a.call_target_role=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END ORDER BY a.attempt_number DESC,a.created_at DESC LIMIT 1) AS last_attempt_status",
       "FROM followups f",
       "WHERE NULLIF(f.stage_context->>'nextCallAt','') IS NOT NULL AND (f.stage_context->>'nextCallAt')::timestamptz <= NOW()",
-      "AND NOT EXISTS(SELECT 1 FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage AND a.ended_at IS NULL AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('placing','ringing','answered','inprogress'))",
+      "AND NOT EXISTS(SELECT 1 FROM attendance_call_attempts a WHERE a.session_id=f.session_id AND a.stage=f.stage AND a.call_target_role=CASE WHEN f.stage_context->>'status'='escalated' THEN 'care_manager' ELSE 'employee' END AND a.ended_at IS NULL AND LOWER(REPLACE(REPLACE(REPLACE(a.status,'-',''),'_',''),' ','')) IN ('placing','ringing','answered','inprogress'))",
       "ORDER BY (f.stage_context->>'nextCallAt')::timestamptz LIMIT $1",
     ].join(" ");
     const { rows } = await this.pool.query(sql, [safeLimit]);
@@ -1307,6 +1309,8 @@ class PostgresRepository {
       sessionId: row.session_id,
       organizationId: row.organization_id,
       stage: row.stage,
+      callTargetRole: row.call_target_role,
+      careManagerMaxAttempts: Number(row.care_manager_max_attempts) || 0,
       reason: row.reason,
       dueAt: row.due_at,
       maxCallAttempt: Number(row.max_call_attempt) || 0,
@@ -1345,7 +1349,7 @@ class PostgresRepository {
   async getCallCenterData(organizationId, { careManagerExternalId = null } = {}) {
     const [active, retries] = await Promise.all([
       this.pool.query(
-        `SELECT a.id AS attempt_id,a.provider_call_id,a.stage,a.status,a.attempt_number,a.answered_at,a.created_at,
+        `SELECT a.id AS attempt_id,a.provider_call_id,a.stage,a.status,a.attempt_number,a.call_target_role,a.answered_at,a.created_at,
                 s.id AS session_id,s.external_assignment_id,s.language,s.employee->>'id' AS employee_id,
                 s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name,
                 s.patient->>'id' AS patient_id,s.active_context
@@ -1355,6 +1359,7 @@ class PostgresRepository {
       ),
       this.pool.query(
         `SELECT j.id,j.run_at,j.payload->>'stage' AS stage,j.payload->>'attemptNumber' AS attempt_number,
+                COALESCE(j.payload->>'callTargetRole','employee') AS call_target_role,
                 s.id AS session_id,s.external_assignment_id,s.language,s.employee->>'id' AS employee_id,
                 s.employee->>'name' AS employee_name,s.patient->>'name' AS patient_name
          FROM attendance_jobs j JOIN attendance_sessions s ON j.payload->>'sessionId'=s.id::text
@@ -1364,11 +1369,11 @@ class PostgresRepository {
     ]);
     return {
       activeCalls: active.rows.map((row) => ({ attemptId: row.attempt_id, callId: row.provider_call_id, sessionId: row.session_id,
-        assignmentId: row.external_assignment_id, stage: row.stage, status: row.status, attemptNumber: row.attempt_number,
+        assignmentId: row.external_assignment_id, stage: row.stage, status: row.status, attemptNumber: row.attempt_number, callTargetRole: row.call_target_role,
         employee: { id: row.employee_id, name: row.employee_name }, patient: { id: row.patient_id, name: row.patient_name },
         language: row.language, startedAt: row.answered_at || row.created_at })),
       retryQueue: retries.rows.map((row) => ({ jobId: row.id, sessionId: row.session_id, assignmentId: row.external_assignment_id,
-        stage: row.stage, attemptNumber: Number(row.attempt_number) || 1, runAt: row.run_at, language: row.language,
+        stage: row.stage, attemptNumber: Number(row.attempt_number) || 1, callTargetRole: row.call_target_role, runAt: row.run_at, language: row.language,
         employee: { id: row.employee_id, name: row.employee_name }, patient: { name: row.patient_name } })),
       maxConcurrentCalls: Number(process.env.MAX_CONCURRENT_CALLS) || 20,
     };
@@ -1436,11 +1441,11 @@ class PostgresRepository {
     const r = await this.pool.query(
       `INSERT INTO attendance_call_attempts (organization_id,session_id,stage,attempt_number,call_target_role,scheduled_at,status,consecutive_no_answer_before)
        VALUES ($1,$2,$3,$4,$5,$6,'scheduled',$7)
-       ON CONFLICT (session_id,stage,attempt_number) DO NOTHING
+       ON CONFLICT (session_id,stage,call_target_role,attempt_number) DO NOTHING
        RETURNING *`, [organizationId, sessionId, stage, attemptNumber, callTargetRole, scheduledAt, consecutiveNoAnswer],
     );
     if (r.rows[0]) return { ...this.mapAttempt(r.rows[0]), shouldPlace: true };
-    const existing = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 AND attempt_number=$3", [sessionId, stage, attemptNumber]);
+    const existing = await this.pool.query("SELECT * FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 AND call_target_role=$3 AND attempt_number=$4", [sessionId, stage, callTargetRole, attemptNumber]);
     const attempt = this.mapAttempt(existing.rows[0]);
     // Capacity-deferred attempts stay scheduled; the conditional transition
     // in markCallPlacing below ensures only one worker can place the call.
@@ -1608,8 +1613,8 @@ class PostgresRepository {
       `UPDATE attendance_transcripts SET extraction=$2::jsonb WHERE call_attempt_id=$1`, [callAttemptId, JSON.stringify(outcome)],
     );
   }
-  async nextAttemptNumber(sessionId, stage) {
-    const r = await this.pool.query("SELECT COALESCE(MAX(attempt_number),0)+1 AS next FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2", [sessionId, stage]);
+  async nextAttemptNumber(sessionId, stage, callTargetRole = "employee") {
+    const r = await this.pool.query("SELECT COALESCE(MAX(attempt_number),0)+1 AS next FROM attendance_call_attempts WHERE session_id=$1 AND stage=$2 AND call_target_role=$3", [sessionId, stage, callTargetRole]);
     return Number(r.rows[0].next);
   }
   async setStageStatus(sessionId, stage, status, contextPatch = {}) {
@@ -1621,7 +1626,7 @@ class PostgresRepository {
       // call is dispatched, while nextCallAt remains only the active queue time.
       persistedContextPatch.lastCallbackAt = contextPatch.nextCallAt;
     }
-    if (status !== "follow_up" && !Object.hasOwn(contextPatch, "nextCallAt")) {
+    if (!["follow_up", "retry", "escalated"].includes(status) && !Object.hasOwn(contextPatch, "nextCallAt")) {
       // A callback/retry is no longer pending once the next call starts or
       // the stage reaches a terminal/intermediate processing state.
       persistedContextPatch.nextCallAt = null;
@@ -1781,3 +1786,4 @@ class PostgresRepository {
 }
 
 module.exports = { PostgresRepository };
+

@@ -63,7 +63,7 @@ function scheduledInstant(dateValue: string | null | undefined, timeValue: strin
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-type AttendanceStatus = "upcoming" | "in_progress" | "delayed" | "retry_scheduled" | "attention_required" | "completed" | "cancelled";
+type AttendanceStatus = "upcoming" | "in_progress" | "delayed" | "retry" | "escalated" | "unresolved" | "retry_scheduled" | "attention_required" | "completed" | "cancelled";
 
 function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]): AttendanceStatus {
   const externalStatus = String(schedule.status || "").trim().toLowerCase().replaceAll(/[\s_-]/g, "");
@@ -81,6 +81,9 @@ function scheduleStatus(schedule: AthulyaSchedule, records: AttendanceRecord[]):
     { status: record.checkOut.status },
   ]);
   if (stages.every(({ status }) => status === "confirmed")) return "completed";
+  if (stages.some(({ status }) => status === "unresolved")) return "unresolved";
+  if (stages.some(({ status }) => status === "escalated")) return "escalated";
+  if (stages.some(({ status }) => status === "retry")) return "retry";
   if (records.some((record) => record.sessionStatus === "exception")
     || stages.some(({ status }) => ["not_answered", "missed", "review"].includes(status))) {
     return "attention_required";
@@ -158,20 +161,23 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       const attemptCount = stage === "checkIn" ? record.checkInAttemptCount : record.checkOutAttemptCount;
       const reason = stage === "checkIn" ? record.stageReasons.checkIn : record.stageReasons.checkOut;
       const employeeRequestedDelay = stageStatus.status === "follow_up" && reason === "employee_requested_callback";
-      const retryScheduled = stageStatus.status === "follow_up" && !employeeRequestedDelay;
+      const retryScheduled = stageStatus.status === "retry" || (stageStatus.status === "follow_up" && !employeeRequestedDelay);
       const wasNotPlaced = overdue && attemptCount === 0 && stageStatus.status === "scheduled";
 
       let displayStatus = stageStatus.status;
       if (stageStatus.status === "confirmed") displayStatus = stageName;
       else if (stageStatus.status === "scheduled") displayStatus = wasNotPlaced ? "call not placed" : "upcoming";
       else if (employeeRequestedDelay) displayStatus = "delayed";
+      else if (stageStatus.status === "retry") displayStatus = "retry";
+      else if (stageStatus.status === "escalated") displayStatus = "escalated";
+      else if (stageStatus.status === "unresolved") displayStatus = "unresolved";
       else if (retryScheduled && reason === "not_answered") displayStatus = "not answered";
       else if (retryScheduled) displayStatus = "retry scheduled";
       else if (stageStatus.status === "review") displayStatus = "needs review";
 
       const displayTime = stageStatus.status === "confirmed"
         ? stageStatus.reportedAt || scheduledTime
-        : stageStatus.status === "follow_up" && stageStatus.nextCallAt
+        : ["follow_up", "retry", "escalated"].includes(stageStatus.status) && stageStatus.nextCallAt
           ? stageStatus.nextCallAt
           : scheduledTime;
 
@@ -183,10 +189,11 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
           </Typography>
           <StatusChip compact status={displayStatus} />
         </Stack>
-        {stageStatus.status === "follow_up" && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary">
-          {employeeRequestedDelay ? `Follow-up #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:` : `Retry #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:`} {dateTimeLabel(stageStatus.nextCallAt)}
+        {(["follow_up", "retry", "escalated"].includes(stageStatus.status)) && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary">
+          {stageStatus.status === "escalated" ? `Care manager call scheduled:` : employeeRequestedDelay ? `Follow-up #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:` : `Retry #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:`} {dateTimeLabel(stageStatus.nextCallAt)}
         </Typography>}
-        {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary">Retry limit reached or no further retry is scheduled</Typography>}
+        {stageStatus.status === "unresolved" && <Typography variant="caption" color="text.secondary">Care manager retry limit reached</Typography>}
+        {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary">Caregiver retry limit reached</Typography>}
       </Stack>;
     })}
   </Stack>;
@@ -236,8 +243,8 @@ export function AttendanceSchedulesPage() {
     const status = statusesBySchedule.get(schedule.id) || "upcoming";
     result[status] += 1;
     return result;
-  }, { upcoming: 0, in_progress: 0, delayed: 0, retry_scheduled: 0, attention_required: 0, completed: 0, cancelled: 0 });
-  const statusPriority: Record<AttendanceStatus, number> = { in_progress: 0, upcoming: 1, retry_scheduled: 2, delayed: 2, attention_required: 3, completed: 4, cancelled: 5 };
+  }, { upcoming: 0, in_progress: 0, delayed: 0, retry: 0, escalated: 0, unresolved: 0, retry_scheduled: 0, attention_required: 0, completed: 0, cancelled: 0 });
+  const statusPriority: Record<AttendanceStatus, number> = { in_progress: 0, upcoming: 1, retry: 2, retry_scheduled: 2, delayed: 2, escalated: 3, attention_required: 4, unresolved: 5, completed: 6, cancelled: 7 };
   const sortedSchedules = [...schedulesData].sort((a, b) => {
     const startA = scheduledInstant(a.date, a.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const startB = scheduledInstant(b.date, b.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
@@ -401,7 +408,7 @@ export function AttendanceSchedulesPage() {
                                 : null;
                             return <Card key={attempt.id} variant="outlined" sx={{ p: 1.5, boxShadow: "none", bgcolor: "#fff" }}>
                               <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={.75}>
-                                <Typography variant="body2" fontWeight={700}>Attempt {attempt.attemptNumber}</Typography>
+                                <Typography variant="body2" fontWeight={700}>{attempt.callTargetRole === "care_manager" ? "Care manager" : "Caregiver"} · attempt {attempt.attemptNumber}</Typography>
                                 <Stack direction="row" spacing={1} alignItems="center"><StatusChip status={attempt.status} />{attempt.durationSeconds != null && <Typography variant="caption" color="text.secondary">{attempt.durationSeconds}s</Typography>}</Stack>
                               </Stack>
                               <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: .5 }}>

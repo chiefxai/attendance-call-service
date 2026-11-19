@@ -10,13 +10,13 @@ import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import ArticleRoundedIcon from "@mui/icons-material/ArticleRounded";
 import { fetchAssignmentStatus, fetchSessionArtifacts } from "../api/client";
 import { useNavigate } from "react-router-dom";
-import { PageHeader } from "../components/OperationsUI";
+import { PageHeader, StatusChip } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
 
 function statusColor(status: string): "success" | "error" | "warning" | "default" {
   if (status === "confirmed" || status === "completed") return "success";
-  if (status === "not_answered" || status === "review" || status === "exception") return "error";
-  if (status === "calling" || status === "processing" || status === "follow_up") return "warning";
+  if (status === "not_answered" || status === "unresolved" || status === "retry" || status === "review" || status === "exception") return "error";
+  if (status === "calling" || status === "processing" || status === "follow_up" || status === "escalated") return "warning";
   return "default";
 }
 
@@ -62,14 +62,17 @@ export function AssignmentStatusPage() {
       {query.isLoading && <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>}
       {query.isError && <Alert severity="error">Could not load this session. Confirm the session ID and that your account can access this assignment.</Alert>}
       {query.data && <>
-        {query.data.checkIn.flag === "not_answered" || query.data.checkOut.flag === "not_answered" ? <Alert severity="error" icon={<ErrorOutlineRoundedIcon />}>The call retry limit was reached for {query.data.checkIn.flag === "not_answered" && query.data.checkOut.flag === "not_answered" ? "check-in and check-out" : query.data.checkIn.flag === "not_answered" ? "check-in" : "check-out"}. Operations follow-up is required.</Alert> : null}
+        {(query.data.checkIn.flag === "unresolved" || query.data.checkOut.flag === "unresolved") ? <Alert severity="error" icon={<ErrorOutlineRoundedIcon />}>Caregiver and care manager retry limits were reached. This attendance case is unresolved.</Alert> : null}
         <Stack direction="row" justifyContent="flex-end"><Typography variant="caption" color="text.secondary">Times shown in {query.data.timeZone || "Asia/Kolkata"}</Typography></Stack>
         <Grid container spacing={2.5}>
           {[{ label: "Check-in", value: query.data.checkIn }, { label: "Check-out", value: query.data.checkOut }].map((stage) => <Grid key={stage.label} size={{ xs: 12, md: 6 }}><Card><CardContent sx={{ p: 3 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="h6">{stage.label}</Typography><Chip color={statusColor(stage.value.status)} label={stage.value.flag ? "Not answered" : stage.value.status.replaceAll("_", " ")} sx={{ textTransform: "capitalize", fontWeight: 650 }} /></Stack>
+            <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="h6">{stage.label}</Typography><StatusChip status={stage.value.flag || stage.value.status} /></Stack>
             <Box sx={{ minHeight: 100, display: "grid", placeItems: "center", py: 2 }}>{stage.value.status === "confirmed" ? <CheckCircleRoundedIcon color="success" sx={{ fontSize: 42 }} /> : stage.value.flag ? <ErrorOutlineRoundedIcon color="error" sx={{ fontSize: 42 }} /> : <ScheduleRoundedIcon color="disabled" sx={{ fontSize: 42 }} />}</Box>
             {stage.value.status === "processing" && <Alert severity="info" sx={{ mb: 2 }}>Call ended. Recording and attendance details are being processed.</Alert>}
             {stage.value.status === "calling" && <Alert severity="warning" sx={{ mb: 2 }}>The outbound call is in progress.</Alert>}
+            {stage.value.status === "retry" && stage.value.nextCallAt && <Alert severity="error" sx={{ mb: 1.5 }}>Caregiver retry · attempt {stage.value.nextAttemptNumber || 1} scheduled for {formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}.</Alert>}
+            {stage.value.status === "escalated" && <Alert severity="warning" sx={{ mb: 1.5 }}>Caregiver attempts are exhausted. Care manager attempt {stage.value.nextCallAt ? stage.value.careManagerNextAttemptNumber || 1 : stage.value.careManagerAttemptNumber || 1} of {stage.value.careManagerMaxAttempts || "configured limit"}{stage.value.nextCallAt ? ` · next call ${formatSessionTime(stage.value.nextCallAt, query.data.timeZone)}` : ""}.</Alert>}
+            {stage.value.status === "unresolved" && <Alert severity="error" sx={{ mb: 1.5 }}>The care manager retry limit was reached. This case requires manual follow-up.</Alert>}
             {stage.value.status === "scheduled" && stage.value.scheduledAt && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Call scheduled for {formatSessionTime(stage.value.scheduledAt, query.data.timeZone)}</Typography>}
             {stage.value.status === "follow_up" && stage.value.nextCallAt && (() => {
               const label = stage.value.nextCallReason === "employee_requested_callback" ? "Follow-up call" : "Retry call";
@@ -159,3 +162,4 @@ export function AssignmentStatusPage() {
     </Stack>
   );
 }
+

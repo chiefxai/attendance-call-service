@@ -747,8 +747,12 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       if (!session || session.organizationId !== organizationId || !await assertSessionVisible(req, req.params.id, res)) return;
       const context = session.activeContext || {};
       const [checkInNextAttemptNumber, checkOutNextAttemptNumber] = await Promise.all([
-        repository.nextAttemptNumber(req.params.id, "check_in"),
-        repository.nextAttemptNumber(req.params.id, "check_out"),
+        repository.nextAttemptNumber(req.params.id, "check_in", "employee"),
+        repository.nextAttemptNumber(req.params.id, "check_out", "employee"),
+      ]);
+      const [checkInCareManagerNextAttemptNumber, checkOutCareManagerNextAttemptNumber] = await Promise.all([
+        repository.nextAttemptNumber(req.params.id, "check_in", "care_manager"),
+        repository.nextAttemptNumber(req.params.id, "check_out", "care_manager"),
       ]);
       res.json({
         sessionId: session.id,
@@ -759,23 +763,29 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
           taskId: session.checkInTask?.id || null,
           deliveryStatus: session.checkInTask?.deliveryStatus || "pending",
           status: session.checkInStatus,
-          flag: session.checkInStatus === "not_answered" || context.checkIn?.reason === "consecutive_no_answer_limit_reached" ? "not_answered" : null,
+          flag: session.checkInStatus === "unresolved" ? "unresolved" : session.checkInStatus === "not_answered" || context.checkIn?.reason === "consecutive_no_answer_limit_reached" ? "not_answered" : null,
           reportedAt: context.checkIn?.reportedAt || null,
           scheduledAt: session.scheduledStartAt,
-          nextCallAt: session.checkInStatus === "follow_up" ? context.checkIn?.nextCallAt || null : null,
+          nextCallAt: ["follow_up", "retry", "escalated"].includes(session.checkInStatus) ? context.checkIn?.nextCallAt || null : null,
           nextCallReason: context.checkIn?.reason || null,
           nextAttemptNumber: checkInNextAttemptNumber,
+          careManagerNextAttemptNumber: checkInCareManagerNextAttemptNumber,
+          careManagerAttemptNumber: Number(context.checkIn?.careManagerAttemptNumber || 0),
+          careManagerMaxAttempts: Number(context.checkIn?.careManagerMaxAttempts || 0),
         },
         checkOut: {
           taskId: session.checkOutTask?.id || null,
           deliveryStatus: session.checkOutTask?.deliveryStatus || "pending",
           status: session.checkOutStatus,
-          flag: session.checkOutStatus === "not_answered" || context.checkOut?.reason === "consecutive_no_answer_limit_reached" ? "not_answered" : null,
+          flag: session.checkOutStatus === "unresolved" ? "unresolved" : session.checkOutStatus === "not_answered" || context.checkOut?.reason === "consecutive_no_answer_limit_reached" ? "not_answered" : null,
           reportedAt: context.checkOut?.reportedAt || null,
           scheduledAt: session.scheduledEndAt,
-          nextCallAt: session.checkOutStatus === "follow_up" ? context.checkOut?.nextCallAt || null : null,
+          nextCallAt: ["follow_up", "retry", "escalated"].includes(session.checkOutStatus) ? context.checkOut?.nextCallAt || null : null,
           nextCallReason: context.checkOut?.reason || null,
           nextAttemptNumber: checkOutNextAttemptNumber,
+          careManagerNextAttemptNumber: checkOutCareManagerNextAttemptNumber,
+          careManagerAttemptNumber: Number(context.checkOut?.careManagerAttemptNumber || 0),
+          careManagerMaxAttempts: Number(context.checkOut?.careManagerMaxAttempts || 0),
         },
         backendDeliveryStatus: session.backendDeliveryStatus,
       });
@@ -794,6 +804,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         callAttempts: artifacts.callAttempts.map((attempt) => ({
           id: attempt.id,
           stage: attempt.stage,
+          callTargetRole: attempt.callTargetRole,
           attemptNumber: attempt.attemptNumber,
           status: attempt.status,
           scheduledAt: attempt.scheduledAt,
@@ -894,3 +905,4 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
 }
 
 module.exports = { createCallServiceRouter };
+

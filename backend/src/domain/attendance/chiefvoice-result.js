@@ -21,6 +21,12 @@ async function processChiefVoiceResult({ event, repository, queue }) {
     if (!attempt) throw Object.assign(new Error("Call attempt not found"), { status: 404, safeCode: "call_not_found" });
 
     if (attempt.sessionId) {
+      if (attempt.callTargetRole === "care_manager") {
+        await queue.enqueue("process_call_result", { callAttemptId: attempt.id }, {
+          idempotencyKey: `call-result:${attempt.id}`, client,
+        });
+        return { duplicate: false, careManagerAttempt: true };
+      }
       const session = await repository.getAttendanceSession(attempt.sessionId);
       if (event.transcript) {
         await repository.saveTranscript({
@@ -92,6 +98,12 @@ async function processChiefVoiceFailure({ event, repository, queue }) {
 
     const noAnswer = isNoAnswerFailureCode(event.failure.code)
       || (event.eventType === "call.post_call.failed" && !attempt.answeredAt);
+    if (attempt.callTargetRole === "care_manager" && attempt.sessionId) {
+      await queue.enqueue("process_call_result", { callAttemptId: attempt.id }, {
+        idempotencyKey: `call-result:${attempt.id}`, client,
+      });
+      return { duplicate: false, careManagerAttempt: true };
+    }
     if (attempt.sessionId && (noAnswer || (event.eventType === "call.failed" && event.failure.retryable))) {
       // Some unanswered calls are reported as a post-call analysis failure
       // because there is no transcript to analyze. Keep them on the no-answer
@@ -129,3 +141,4 @@ async function processChiefVoiceFailure({ event, repository, queue }) {
 }
 
 module.exports = { processChiefVoiceResult, processChiefVoiceFailure };
+

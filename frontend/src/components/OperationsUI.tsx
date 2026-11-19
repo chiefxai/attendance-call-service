@@ -41,6 +41,9 @@ export function StatusChip({ status, compact = false }: { status: string; compac
     "not answered": "No answer",
     "no answer": "No answer",
     "retry scheduled": "Retry",
+    retry: "Retry",
+    escalated: "Escalated",
+    unresolved: "Unresolved",
     delayed: "Callback",
     completed: "Done",
     confirmed: "Done",
@@ -51,9 +54,12 @@ export function StatusChip({ status, compact = false }: { status: string; compac
   };
   const label = compact ? compactLabels[normalized] || normalized : ["not placed", "call not placed"].includes(normalized) ? "Call Not Placed" : normalized === "not answered" ? "Not Answered" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
   const color = ["verified", "confirmed", "completed", "checked in", "active", "synced", "delivered", "check in", "check out"].includes(normalized) ? "success"
-    : ["not placed", "not answered", "no answer", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable"].includes(normalized) ? "error"
-      : ["delayed", "late", "retrying", "retry scheduled", "pending", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";
-  return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={label} sx={{ textTransform: "capitalize", fontWeight: 650, ...(compact ? { height: 22, fontSize: "0.72rem", "& .MuiChip-label": { px: 0.8 } } : {}) }} />;
+    : ["not placed", "not answered", "no answer", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable", "retry", "retry scheduled", "unresolved"].includes(normalized) ? "error"
+      : ["delayed", "late", "retrying", "retry scheduled", "escalated", "pending", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";
+  const escalationColors = normalized === "retry" || normalized === "retry scheduled" || normalized === "unresolved"
+    ? { bgcolor: "#DC2626", color: "#fff", "&.MuiChip-filled": { bgcolor: "#DC2626" } }
+    : normalized === "escalated" ? { bgcolor: "#F59E0B", color: "#1f2937", "&.MuiChip-filled": { bgcolor: "#F59E0B" } } : {};
+  return <Chip size="small" color={color} variant={color === "default" ? "outlined" : "filled"} label={label} sx={{ textTransform: "capitalize", fontWeight: 650, ...escalationColors, ...(compact ? { height: 22, fontSize: "0.72rem", "& .MuiChip-label": { px: 0.8 } } : {}) }} />;
 }
 
 export function SectionCard({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode }) {
@@ -130,3 +136,4 @@ export function SearchFilterBar({
     </Popover>
   </>;
 }
+

@@ -299,12 +299,15 @@ export interface AttendanceStageStatus {
   taskId?: string | null;
   deliveryStatus?: string;
   status: string;
-  flag: "not_answered" | null;
+  flag: "not_answered" | "unresolved" | null;
   reportedAt: string | null;
   scheduledAt?: string | null;
   nextCallAt?: string | null;
   nextCallReason?: string | null;
   nextAttemptNumber?: number;
+  careManagerNextAttemptNumber?: number;
+  careManagerAttemptNumber?: number;
+  careManagerMaxAttempts?: number;
 }
 
 export interface AssignmentStatus {
@@ -320,6 +323,7 @@ export interface AssignmentStatus {
 export interface SessionCallAttempt {
   id: string;
   stage: "check_in" | "check_out";
+  callTargetRole: "employee" | "patient" | "care_manager";
   attemptNumber: number;
   status: string;
   scheduledAt: string | null;
@@ -518,12 +522,12 @@ export interface SupervisionItem {
 export interface CallCenterData {
   activeCalls: Array<{
     attemptId: string; callId: string | null; sessionId: string; assignmentId: string;
-    stage: string; status: string; attemptNumber: number;
+    stage: string; status: string; attemptNumber: number; callTargetRole: "employee" | "patient" | "care_manager";
     employee: { id: string | null; name: string }; patient: { id: string | null; name: string };
     language: string; startedAt: string;
   }>;
   retryQueue: Array<{
-    jobId: string; sessionId: string; assignmentId: string; stage: string;
+    jobId: string; sessionId: string; assignmentId: string; stage: string; callTargetRole: "employee" | "patient" | "care_manager";
     attemptNumber: number; runAt: string; language: string;
     employee: { id: string | null; name: string }; patient: { name: string };
   }>;
@@ -657,3 +661,4 @@ export async function revokeServiceApiKey(id: string) {
   const response = await api.delete<{ success: boolean }>(`/api-keys/${id}`);
   return response.data;
 }
+

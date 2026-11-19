@@ -69,7 +69,7 @@ const repositoryMethods = Object.freeze([
   "saveTranscript(transcript)",
   "getTranscriptForCall(callAttemptId)",
   "saveCallOutcome(callAttemptId, outcome)",
-  "nextAttemptNumber(sessionId, stage)",
+  "nextAttemptNumber(sessionId, stage, callTargetRole)",
   "markSessionCompleted(sessionId)",
   "markSessionException(sessionId)",
   "buildBackendAttendancePayload(sessionId, stage, callAttemptId)",
@@ -86,3 +86,4 @@ function assertRepository(repository) {
 }
 
 module.exports = { repositoryMethods, assertRepository };
+

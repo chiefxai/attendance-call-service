@@ -124,7 +124,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
   if (missing.length) throw new Error(`Attendance workflow dependencies required: ${missing.join(", ")}`);
   const taskFor = (session, stage) => stage === "check_in" ? session?.checkInTask : session?.checkOutTask;
 
-  async function placeCall({ sessionId, taskId, stage, attemptNumber, capacityWaitCount = 0, consecutiveNoAnswer = 0, technicalFailureRetry = false }) {
+  async function placeCall({ sessionId, taskId, stage, attemptNumber, callTargetRole = "employee", capacityWaitCount = 0, consecutiveNoAnswer = 0, technicalFailureRetry = false }) {
     const session = await repository.getAttendanceSession(sessionId);
     // Check-in and check-out are independent tasks. Exhausting check-in retries
     // must not close the shared assignment; only an explicit cancellation or a
@@ -133,10 +133,10 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     const task = stage === "check_in" ? session.checkInTask : session.checkOutTask;
     if (!task || (taskId && task.id !== taskId)) return;
     const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
-    if (["confirmed", "missed", "not_answered", "review"].includes(stageStatus)) return;
+    if (["confirmed", "missed", "not_answered", "unresolved", "review"].includes(stageStatus)) return;
     const attempt = await repository.createCallAttempt({
       organizationId: session.organizationId, sessionId, stage, attemptNumber,
-      callTargetRole: "employee", scheduledAt: new Date(), consecutiveNoAnswer,
+      callTargetRole, scheduledAt: new Date(), consecutiveNoAnswer,
     });
     if (attempt.providerCallId && attempt.provider === "chiefvoice" && !attempt.outcome) {
       await queue.enqueue("poll_chiefvoice_call", { callAttemptId: attempt.id, pollCount: 0 }, {
@@ -158,15 +158,42 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     });
     if (!reserved) {
       const nextWait = capacityWaitCount + 1;
-      await queue.enqueue("place_call", { sessionId, taskId: task.id, stage, attemptNumber, capacityWaitCount: nextWait, consecutiveNoAnswer, technicalFailureRetry }, {
-        idempotencyKey: `capacity:${sessionId}:${stage}:${attemptNumber}:${nextWait}`,
+      await queue.enqueue("place_call", { sessionId, taskId: task.id, stage, attemptNumber, callTargetRole, capacityWaitCount: nextWait, consecutiveNoAnswer, technicalFailureRetry }, {
+        idempotencyKey: `capacity:${sessionId}:${stage}:${callTargetRole}:${attemptNumber}:${nextWait}`,
         runAt: new Date(Date.now() + (capacity.capacityPollMs || 2_000)),
       });
       return;
     }
     if (!await repository.markCallPlacing(attempt.id)) return;
-    await repository.setStageStatus(sessionId, stage, "calling", { currentCallAttemptId: attempt.id, attemptNumber });
-    const person = session.employee || {};
+    if (callTargetRole === "employee") await repository.setStageStatus(sessionId, stage, "calling", { currentCallAttemptId: attempt.id, attemptNumber });
+    else await repository.setStageStatus(sessionId, stage, "escalated", { currentCallAttemptId: attempt.id, careManagerAttemptNumber: attemptNumber });
+    const stageContextForRole = session.activeContext?.[stage === "check_in" ? "checkIn" : "checkOut"] || {};
+    let person = callTargetRole === "care_manager"
+      ? { name: stageContextForRole.careManagerName || session.metadata?.careManagerName || "Care Manager", phoneNumber: stageContextForRole.careManagerId ? null : session.metadata?.careManagerPhone }
+      : session.employee || {};
+    if (callTargetRole === "care_manager" && (!normalizeIndianMobile(person.phoneNumber) || stageContextForRole.careManagerId) && repository.notifyCareManagerForPatient) {
+      const managers = await repository.notifyCareManagerForPatient({
+        organizationId: session.organizationId, assignmentId: session.assignmentId,
+        patientId: session.patient?.id, patientUhid: session.patient?.patientUhid || session.patient?.uhid,
+        careManagerExternalId: stageContextForRole.careManagerId || session.metadata?.careManagerId,
+        title: `Unanswered ${stage === "check_out" ? "check-out" : "check-in"} calls`,
+        message: `${session.employee?.name || "Assigned staff"} did not answer repeated attendance calls. Please follow up.`,
+        referenceType: "attendance_stage", referenceId: `${session.id}:${stage}`, type: "care_manager_call_log",
+      });
+      const manager = managers.find((candidate) => candidate.id === stageContextForRole.careManagerId)
+        || managers.find((candidate) => normalizeIndianMobile(candidate.careManagerPhone) === normalizeIndianMobile(session.metadata?.careManagerPhone))
+        || managers[0];
+      if (manager) person = { name: manager.careManagerName || person.name, phoneNumber: manager.careManagerPhone };
+    }
+    const normalizedTargetPhone = normalizeIndianMobile(person.phoneNumber);
+    if (!normalizedTargetPhone) {
+      await repository.markCallPlacementFailed(attempt.id, "Target phone number is unavailable or invalid");
+      await repository.releaseOutboundCallSlot(attempt.id);
+      await repository.setStageStatus(sessionId, stage, callTargetRole === "care_manager" ? "unresolved" : "review", {
+        reason: callTargetRole === "care_manager" ? "care_manager_phone_unavailable" : "caregiver_phone_unavailable",
+      });
+      return;
+    }
     try {
       const stageContext = session.activeContext?.[stage === "check_in" ? "checkIn" : "checkOut"] || {};
       const expectedStaffName = person.name || person.fullName || "";
@@ -198,31 +225,41 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         scheduled_check_in_at: session.scheduledStartAt || "",
         scheduled_check_out_at: session.scheduledEndAt || "",
         attempt_number: String(attemptNumber || 1),
+        call_target_role: callTargetRole,
         consecutive_no_answer: String(consecutiveNoAnswer || 0),
         callback_requested_at: stageContext.lastCallbackAt
           || (stageContext.reason === "employee_requested_callback" ? stageContext.nextCallAt : "")
           || "",
       };
+      if (callTargetRole === "care_manager") {
+        const stageLabel = stage === "check_out" ? "check-out" : "check-in";
+        callContext.call_purpose = "care_manager_escalation";
+        callContext.care_manager_name = person.name || "Care Manager";
+        callContext.organization_id = session.organizationId;
+        callContext.expected_staff_name = session.employee?.name || session.employee?.fullName || "";
+        callContext.message = `Athulya attendance alert. ${session.employee?.name || "Assigned caregiver"} did not answer the configured ${stageLabel} call attempts for ${session.patient?.name || "the assigned patient"}. Please contact operations.`;
+        callContext.escalation_message = `Repeated ${stageLabel} calls were unanswered. Please contact operations.`;
+      }
       const postCallContext = {
         ...callContext,
         assignment: session.assignmentMetadata || {},
         organization_id: session.organizationId,
-        expected_staff_name: person.name || person.fullName || "",
+        expected_staff_name: callTargetRole === "care_manager" ? session.employee?.name || session.employee?.fullName || "" : person.name || person.fullName || "",
         expected_patient_name: session.patient?.name || "",
         expected_patient_address: session.patient?.address || "",
-        employee: { name: person.name || person.fullName || "" },
+        employee: { name: callTargetRole === "care_manager" ? session.employee?.name || session.employee?.fullName || "" : person.name || person.fullName || "" },
         patient: { name: session.patient?.name || "", address: session.patient?.address || "" },
       };
       const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer, technicalFailureRetry });
       const call = await chiefvoice.createOutboundCall({
-        to: person.phoneNumber,
+        to: normalizedTargetPhone,
         from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
         sessionId,
         stage,
         callAttemptId: attempt.id,
         context: callContext,
         postCallContext,
-        templateScenario,
+        templateScenario: callTargetRole === "care_manager" ? "CARE_MANAGER_ESCALATION" : templateScenario,
       });
       const providerCallId = call.session_id || call.call_id || call.id;
       if (!providerCallId) throw new Error("ChiefVoice response did not include session_id; reconcile before retrying");
@@ -271,6 +308,17 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         provider: "chiefvoice", providerCallId: attempt.providerCallId, status: callStatus.status,
         endedAt: callStatus.ended_at || new Date().toISOString(),
         rawEvent: { EndTime: callStatus.ended_at || null },
+      });
+      await queue.enqueue("process_call_result", { callAttemptId }, { idempotencyKey: `call-result:${callAttemptId}` });
+      return;
+    }
+    if (attempt.callTargetRole === "care_manager" && callDisposition === "answered"
+      && (Boolean(callStatus.ended_at || callStatus.endedAt) || String(callStatus.status || "").toLowerCase() === "completed")) {
+      await repository.updateCallByProviderId({
+        provider: "chiefvoice", providerCallId: attempt.providerCallId, status: callStatus.status,
+        durationSeconds: callStatus.duration_seconds || callStatus.durationSeconds || null,
+        endedAt: callStatus.ended_at || new Date().toISOString(),
+        rawEvent: { AnswerTime: callStatus.answered_at || callStatus.answer_time || callStatus.AnswerTime || null, EndTime: callStatus.ended_at || null },
       });
       await queue.enqueue("process_call_result", { callAttemptId }, { idempotencyKey: `call-result:${callAttemptId}` });
       return;
@@ -401,6 +449,52 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     const attempt = await repository.getCallAttempt(callAttemptId);
     if (!attempt) return;
     const callDisposition = classifyCallStatus(attempt.status);
+    if (attempt.callTargetRole === "care_manager") {
+      if (callDisposition === "answered") {
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
+          reason: "care_manager_reached", careManagerAnsweredAt: attempt.answeredAt || attempt.endedAt || new Date().toISOString(),
+          careManagerAttemptNumber: attempt.attemptNumber, callAttemptId,
+        });
+        await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
+          idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-reached:${attempt.stage}`,
+        });
+        return;
+      }
+      if (callDisposition === "not_answered" || callDisposition === "cancelled") {
+        const settings = repository.getOrganizationCallSettings ? await repository.getOrganizationCallSettings(attempt.organizationId) : {};
+        const retrySettings = settings.callRetry || {};
+        const maxAttempts = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
+        if (attempt.attemptNumber >= maxAttempts) {
+          await repository.setStageStatus(attempt.sessionId, attempt.stage, "unresolved", {
+            reason: "care_manager_retry_limit_reached", careManagerAttemptNumber: attempt.attemptNumber,
+            careManagerMaxAttempts: maxAttempts, callAttemptId,
+          });
+          await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
+            idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-unresolved:${attempt.stage}`,
+          });
+          return;
+        }
+        const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
+        const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
+        const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
+        const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, {
+          initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000,
+        }));
+        const nextNumber = await repository.nextAttemptNumber(attempt.sessionId, attempt.stage, "care_manager");
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
+          reason: "care_manager_retry", nextCallAt: runAt.toISOString(), careManagerAttemptNumber: attempt.attemptNumber,
+          careManagerMaxAttempts: maxAttempts, callAttemptId,
+        });
+        const session = await repository.getAttendanceSession(attempt.sessionId);
+        await queue.enqueue("place_call", {
+          sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
+          attemptNumber: nextNumber, callTargetRole: "care_manager",
+        }, {
+          idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:care_manager:${nextNumber}`, runAt,
+        });
+      }
+      return;
+    }
     if (callDisposition === "cancelled") {
       await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
         reason: "chiefvoice_call_cancelled", callAttemptId,
@@ -425,14 +519,14 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         const delayMinutes = settings.callRetry?.initialMinutes ?? retry.initialMinutes ?? 3;
         const runAt = new Date(Date.now() + Math.max(1, Number(delayMinutes)) * 60_000);
         const session = await repository.getAttendanceSession(attempt.sessionId);
-        await repository.setStageStatus(attempt.sessionId, attempt.stage, "follow_up", {
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "retry", {
           reason: "chiefvoice_call_failed_retry", failureCode: attempt.failure.code, nextCallAt: runAt.toISOString(),
         });
         await queue.enqueue("place_call", {
           sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
-          attemptNumber: attempt.attemptNumber + 1, consecutiveNoAnswer: attempt.consecutiveNoAnswerBefore || 0,
+          attemptNumber: attempt.attemptNumber + 1, callTargetRole: "employee", consecutiveNoAnswer: attempt.consecutiveNoAnswerBefore || 0,
           technicalFailureRetry: true,
-        }, { idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:${attempt.attemptNumber + 1}`, runAt });
+        }, { idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:employee:${attempt.attemptNumber + 1}`, runAt });
         return;
       }
       const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
@@ -449,10 +543,10 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         return;
       }
       const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, config));
-      await repository.setStageStatus(attempt.sessionId, attempt.stage, "follow_up", { reason: "not_answered", nextCallAt: runAt.toISOString() });
+      await repository.setStageStatus(attempt.sessionId, attempt.stage, "retry", { reason: "not_answered", nextCallAt: runAt.toISOString(), caregiverAttemptNumber: attempt.attemptNumber });
       const session = await repository.getAttendanceSession(attempt.sessionId);
       await queue.enqueue("place_call", { sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage, attemptNumber: attempt.attemptNumber + 1, consecutiveNoAnswer: noAnswerCount }, {
-        idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:${attempt.attemptNumber + 1}`, runAt,
+        idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:employee:${attempt.attemptNumber + 1}`, runAt,
       });
       return;
     }
@@ -591,13 +685,13 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
             initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000,
           }));
           const nextNumber = await repository.nextAttemptNumber(sessionId, attempt.stage);
-          await repository.setStageStatus(sessionId, attempt.stage, "follow_up", {
+          await repository.setStageStatus(sessionId, attempt.stage, "retry", {
             reason: "automated_answer_no_human_retry", nextCallAt: runAt.toISOString(), consecutiveNoAnswer: noAnswerCount, callAttemptId,
           });
           await queue.enqueue("place_call", {
             sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
-            attemptNumber: nextNumber, consecutiveNoAnswer: noAnswerCount,
-          }, { idempotencyKey: `call:${sessionId}:${attempt.stage}:${nextNumber}`, runAt });
+            attemptNumber: nextNumber, callTargetRole: "employee", consecutiveNoAnswer: noAnswerCount,
+          }, { idempotencyKey: `call:${sessionId}:${attempt.stage}:employee:${nextNumber}`, runAt });
         }
       } else if (decision.action === "confirm_stage") {
         await repository.setStageStatus(sessionId, attempt.stage, "confirmed", { reportedAt: decision.reportedAt, nextCallAt: null, callAttemptId });
@@ -619,7 +713,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
             const callbackAt = runAt;
             await repository.setStageStatus(sessionId, attempt.stage, "follow_up", { reason: "employee_requested_callback", nextCallAt: callbackAt.toISOString(), callAttemptId });
             await queue.enqueue("place_call", { sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage, attemptNumber: nextNumber, consecutiveNoAnswer: 0 }, {
-              idempotencyKey: `call:${sessionId}:${attempt.stage}:${nextNumber}`, runAt: callbackAt,
+              idempotencyKey: `call:${sessionId}:${attempt.stage}:employee:${nextNumber}`, runAt: callbackAt,
             });
           }
         }
@@ -632,7 +726,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     if (current.checkInStatus === "confirmed" && current.checkOutStatus === "confirmed") {
       await repository.markSessionCompleted(sessionId);
     } else {
-      const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
+    const terminal = new Set(["confirmed", "missed", "not_answered", "escalated", "unresolved", "review"]);
       const bothStagesSettled = terminal.has(current.checkInStatus) && terminal.has(current.checkOutStatus);
       if (bothStagesSettled) await repository.markSessionException(sessionId);
     }
@@ -710,7 +804,6 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       });
       let careManagerNotified = notifications.some((manager) => manager.notificationCreated === true);
       if (escalation === "call_care_manager") {
-        careManagerNotified = false;
         const managers = [...notifications];
         const sessionManagerPhone = normalizeIndianMobile(session.metadata?.careManagerPhone);
         if (sessionManagerPhone && !managers.some((manager) => normalizeIndianMobile(manager.careManagerPhone) === sessionManagerPhone)) {
@@ -720,57 +813,37 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
             careManagerPhone: sessionManagerPhone,
           });
         }
-        let escalationError = null;
-        for (const manager of managers) {
-          const managerPhone = normalizeIndianMobile(manager.careManagerPhone);
-          if (!managerPhone) {
-            if (manager.careManagerPhone) console.warn(`[attendance-worker] invalid care-manager phone; cannot place escalation session=${session.id} manager=${manager.id}`);
-            continue;
-          }
-          const escalationAttemptId = `escalation-${session.id}-${stage}-${manager.id}`;
-          try {
-            await chiefvoice.createOutboundCall({
-              to: managerPhone, from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
-              sessionId: session.id, stage, callAttemptId: escalationAttemptId,
-              templateScenario: "CARE_MANAGER_ESCALATION",
-              context: {
-                call_purpose: "care_manager_escalation",
-                message: `Athulya attendance alert. ${session.employee?.name || "Assigned staff"} did not answer repeated ${stageLabel} calls for ${patient.name || "the assigned patient"}. Please contact operations.`,
-                care_manager_name: manager.careManagerName || manager.displayName || manager.name || "", organization_id: session.organizationId,
-                expected_staff_name: session.employee?.name || session.employee?.fullName || "",
-                expected_patient_name: patient.name || "",
-                expected_patient_address: session.patient?.address || "",
-                escalation_message: `Repeated ${stageLabel} calls were unanswered. Please contact operations.`,
-                language: session.language || "ta-IN",
-              },
-            });
-            careManagerNotified = true;
-          } catch (error) {
-            console.error(`[attendance-worker] ChiefVoice care-manager escalation failed session=${session.id} stage=${stage}: ${error.message}`);
-            escalationError ||= error;
-          }
-        }
-        if (escalationError) {
-          // Let the durable worker retry this stage-level escalation. The
-          // provider idempotency key prevents duplicate calls if ChiefVoice
-          // accepted a request but the response was lost.
-          throw escalationError;
+        const manager = managers.find((candidate) => normalizeIndianMobile(candidate.careManagerPhone));
+        const managerPhone = normalizeIndianMobile(manager?.careManagerPhone || sessionManagerPhone);
+        if (!managerPhone) {
+          await repository.setStageStatus(sessionId, stage, "unresolved", {
+            reason: "care_manager_phone_unavailable", consecutiveNoAnswer: maxNoAnswer,
+            careManagerAttemptNumber: 0, careManagerMaxAttempts: maxNoAnswer,
+          });
+        } else {
+          const nextNumber = await repository.nextAttemptNumber(sessionId, stage, "care_manager");
+          await repository.setStageStatus(sessionId, stage, "escalated", {
+            reason: "care_manager_call_started", nextCallAt: new Date().toISOString(),
+            careManagerName: manager?.careManagerName || manager?.displayName || manager?.name || session.metadata?.careManagerName || "Care Manager",
+            careManagerId: manager?.id || session.metadata?.careManagerId || null,
+            careManagerAttemptNumber: 0, careManagerMaxAttempts: maxNoAnswer,
+          });
+          await queue.enqueue("place_call", {
+            sessionId, taskId: taskFor(session, stage)?.id, stage, attemptNumber: nextNumber,
+            callTargetRole: "care_manager",
+          }, { idempotencyKey: `call:${sessionId}:${stage}:care_manager:${nextNumber}` });
+          careManagerNotified = true;
         }
       } else if (careManagerNotified) {
         const recipients = notifications.filter((manager) => manager.notificationCreated === true).length;
         console.info(`[attendance-worker] care-manager platform notification created session=${session.id} stage=${stage} recipients=${recipients}`);
       }
-      await repository.setStageStatus(sessionId, stage, "not_answered", {
-        reason: "consecutive_no_answer_limit_reached",
-        consecutiveNoAnswer: maxNoAnswer,
-        careManagerNotified,
-        careManagerEscalationAttempts,
+      if (escalation !== "call_care_manager") await repository.setStageStatus(sessionId, stage, "not_answered", {
+        reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: maxNoAnswer,
+        careManagerNotified, careManagerEscalationAttempts,
       });
-      if (escalation === "call_care_manager" && !careManagerNotified) {
-        console.info(`[attendance-worker] no reachable care manager found; keeping stage not_answered session=${session.id} stage=${stage}`);
-      }
     }
-    const terminal = new Set(["confirmed", "missed", "not_answered", "review"]);
+    const terminal = new Set(["confirmed", "missed", "not_answered", "escalated", "unresolved", "review"]);
     if (terminal.has(session.checkInStatus) && terminal.has(session.checkOutStatus)
       && (session.checkInStatus !== "confirmed" || session.checkOutStatus !== "confirmed")) {
       await repository.markSessionException(sessionId);

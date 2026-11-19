@@ -108,7 +108,17 @@ async function main() {
         if (due.hasRunningJob) continue;
         const noAnswerCount = due.reason === "employee_requested_callback" ? 0
           : due.lastAttemptStatus === "noanswer" ? due.lastNoAnswerBefore + 1 : due.lastNoAnswerBefore;
-        if (due.reason !== "employee_requested_callback" && noAnswerCount >= config.callRetry.maxConsecutiveNoAnswer) {
+        const retryLimit = due.callTargetRole === "care_manager"
+          ? due.careManagerMaxAttempts || config.callRetry.maxConsecutiveNoAnswer
+          : config.callRetry.maxConsecutiveNoAnswer;
+        if (due.callTargetRole === "care_manager" && due.maxCallAttempt >= retryLimit) {
+          await repository.setStageStatus(due.sessionId, due.stage, "unresolved", {
+            reason: "care_manager_retry_limit_reached", careManagerAttemptNumber: due.maxCallAttempt,
+            careManagerMaxAttempts: retryLimit,
+          });
+          continue;
+        }
+        if (due.callTargetRole !== "care_manager" && due.reason !== "employee_requested_callback" && noAnswerCount >= retryLimit) {
           await repository.setStageStatus(due.sessionId, due.stage, "not_answered", {
             reason: "consecutive_no_answer_limit_reached", consecutiveNoAnswer: noAnswerCount,
           });
@@ -128,12 +138,13 @@ async function main() {
           taskId: due.taskId,
           stage: due.stage,
           attemptNumber,
+          callTargetRole: due.callTargetRole,
           consecutiveNoAnswer,
         };
         const recovered = due.queuedJobId
           ? await queue.reschedule(due.queuedJobId, new Date())
           : await queue.enqueue("place_call", payload, {
-            idempotencyKey: `call:${due.sessionId}:${due.stage}:${attemptNumber}`,
+            idempotencyKey: `call:${due.sessionId}:${due.stage}:${due.callTargetRole}:${attemptNumber}`,
             runAt: new Date(),
           });
         if (recovered) {
@@ -175,3 +186,4 @@ main().catch((error) => {
   console.error("[attendance-worker] failed to start", error);
   process.exitCode = 1;
 });
+
