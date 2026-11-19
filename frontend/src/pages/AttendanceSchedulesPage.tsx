@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
@@ -9,11 +9,28 @@ import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
 import { SortByMenu } from "../components/SortByMenu";
 
-type ScheduleSort = "current_upcoming" | "time_ascending" | "time_descending";
+type ScheduleSort =
+  | "current_upcoming"
+  | "check_in_ascending" | "check_in_descending"
+  | "check_out_ascending" | "check_out_descending"
+  | "status_ascending" | "status_descending"
+  | "patient_ascending" | "patient_descending"
+  | "caregivers_ascending" | "caregivers_descending"
+  | "service_ascending" | "service_descending";
 const scheduleSortOptions = [
   { value: "current_upcoming", label: "Current & upcoming first" },
-  { value: "time_ascending", label: "Start time: ascending" },
-  { value: "time_descending", label: "Start time: descending" },
+  { value: "check_in_ascending", label: "Check-in: earliest first" },
+  { value: "check_in_descending", label: "Check-in: latest first" },
+  { value: "check_out_ascending", label: "Check-out: earliest first" },
+  { value: "check_out_descending", label: "Check-out: latest first" },
+  { value: "status_ascending", label: "Status: A to Z" },
+  { value: "status_descending", label: "Status: Z to A" },
+  { value: "patient_ascending", label: "Patient: A to Z" },
+  { value: "patient_descending", label: "Patient: Z to A" },
+  { value: "caregivers_ascending", label: "Care givers: A to Z" },
+  { value: "caregivers_descending", label: "Care givers: Z to A" },
+  { value: "service_ascending", label: "Service: A to Z" },
+  { value: "service_descending", label: "Service: Z to A" },
 ] as const;
 
 function todayInIndia() {
@@ -179,7 +196,6 @@ export function AttendanceSchedulesPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [selectedDate, setSelectedDate] = useState(todayInIndia);
-  const [statusFilter, setStatusFilter] = useState("all");
   const [sortBy, setSortBy] = useState<ScheduleSort>("current_upcoming");
   const [selectedSchedule, setSelectedSchedule] = useState<AthulyaSchedule | null>(null);
   const schedules = useQuery({
@@ -221,19 +237,32 @@ export function AttendanceSchedulesPage() {
     result[status] += 1;
     return result;
   }, { upcoming: 0, in_progress: 0, delayed: 0, retry_scheduled: 0, attention_required: 0, completed: 0, cancelled: 0 });
-  const filteredSchedules = schedulesData.filter((schedule) => statusFilter === "all"
-    || statusesBySchedule.get(schedule.id) === statusFilter);
   const statusPriority: Record<AttendanceStatus, number> = { in_progress: 0, upcoming: 1, retry_scheduled: 2, delayed: 2, attention_required: 3, completed: 4, cancelled: 5 };
-  const sortedSchedules = [...filteredSchedules].sort((a, b) => {
+  const sortedSchedules = [...schedulesData].sort((a, b) => {
     const startA = scheduledInstant(a.date, a.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const startB = scheduledInstant(b.date, b.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const endA = scheduledInstant(a.date, a.endTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const endB = scheduledInstant(b.date, b.endTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     if (sortBy === "current_upcoming") {
       const rank = statusPriority[statusesBySchedule.get(a.id) || "upcoming"] - statusPriority[statusesBySchedule.get(b.id) || "upcoming"];
       return rank || startA - startB;
     }
-    return sortBy === "time_ascending" ? startA - startB : startB - startA;
+    const descending = sortBy.endsWith("descending");
+    let comparison = 0;
+    if (sortBy.startsWith("check_in_")) comparison = startA - startB;
+    else if (sortBy.startsWith("check_out_")) comparison = endA - endB;
+    else {
+      const valueFor = (schedule: AthulyaSchedule) => {
+        if (sortBy.startsWith("status_")) return statusesBySchedule.get(schedule.id) || "upcoming";
+        if (sortBy.startsWith("patient_")) return schedule.patient.name || "";
+        if (sortBy.startsWith("caregivers_")) return schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone || "").join(", ");
+        return schedule.service || "";
+      };
+      comparison = valueFor(a).localeCompare(valueFor(b), undefined, { sensitivity: "base", numeric: true });
+    }
+    return descending ? -comparison : comparison;
   });
-  useEffect(() => setPage(0), [selectedDate, statusFilter, sortBy, schedulesData.length]);
+  useEffect(() => setPage(0), [selectedDate, sortBy, schedulesData.length]);
   const pageRows = sortedSchedules.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const dateLabel = selectedDate
     ? new Date(`${selectedDate}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
@@ -254,21 +283,8 @@ export function AttendanceSchedulesPage() {
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} sx={{ p: 2, borderBottom: "1px solid #e8edf3" }}>
         <TextField type="date" size="small" required label="Schedule date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value || todayInIndia())} InputLabelProps={{ shrink: true }} sx={{ minWidth: { sm: 200 } }} />
         <Button size="small" onClick={() => setSelectedDate(todayInIndia())} disabled={selectedDate === todayInIndia()}>Today</Button>
-        <FormControl size="small" sx={{ minWidth: { sm: 190 } }}>
-          <InputLabel id="schedule-status-label">Schedule status</InputLabel>
-          <Select labelId="schedule-status-label" value={statusFilter} label="Schedule status" onChange={(event) => setStatusFilter(event.target.value)}>
-            <MenuItem value="all">All statuses</MenuItem>
-            <MenuItem value="upcoming">Upcoming</MenuItem>
-            <MenuItem value="in_progress">In Progress</MenuItem>
-            <MenuItem value="delayed">Delayed</MenuItem>
-            <MenuItem value="retry_scheduled">Retry Scheduled</MenuItem>
-            <MenuItem value="attention_required">Attention Required</MenuItem>
-            <MenuItem value="completed">Completed</MenuItem>
-            <MenuItem value="cancelled">Cancelled</MenuItem>
-          </Select>
-        </FormControl>
         <SortByMenu value={sortBy} options={scheduleSortOptions} onChange={setSortBy} />
-        <Chip label={`${filteredSchedules.length} schedules`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
+        <Chip label={`${schedulesData.length} schedules`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
       </Stack>
       <TableContainer sx={{ overflowX: "auto" }}>
         <Table size="small" sx={{ minWidth: 850 }} aria-label="Attendance and schedules">
@@ -295,11 +311,10 @@ export function AttendanceSchedulesPage() {
               </TableRow>;
             })}
             {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No schedules found for {dateLabel}. Choose another date or contact your administrator.</TableCell></TableRow>}
-            {schedules.isSuccess && schedulesData.length > 0 && filteredSchedules.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No {statusFilter} schedules found for {dateLabel}.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </TableContainer>
-      <TablePagination component="div" count={filteredSchedules.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Schedules per page" />
+      <TablePagination component="div" count={sortedSchedules.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Schedules per page" />
     </Card>
 
     <Dialog open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: 3 } }}>
