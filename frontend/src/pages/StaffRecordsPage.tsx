@@ -13,6 +13,7 @@ import { MetricCard, PageHeader, SearchFilterBar } from "../components/Operation
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 import { SortByMenu } from "../components/SortByMenu";
+import { APP_TIME_ZONE, formatAppDateTime } from "../utils/dateTime";
 
 type StaffSort = "name_ascending" | "name_descending" | "id_ascending" | "id_descending";
 const staffSortOptions = [
@@ -30,9 +31,9 @@ function displayCompanyName(value?: string | null) {
 
 function formatDutyDateTime(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, {
+  return Number.isNaN(date.getTime()) ? value : formatAppDateTime(date, {
     weekday: "short", year: "numeric", month: "short", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short", timeZone: APP_TIME_ZONE,
   });
 }
 

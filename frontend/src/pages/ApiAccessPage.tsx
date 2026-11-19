@@ -7,6 +7,7 @@ import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import { AxiosError } from "axios";
 import { createServiceApiKey, fetchServiceApiKeys, revokeServiceApiKey, type ServiceApiKey } from "../api/client";
 import { PageHeader, SectionCard } from "../components/OperationsUI";
+import { formatAppDateTime } from "../utils/dateTime";
 
 const example = [
   "curl -X POST https://calls.elvoryx.in/api/call-service/assignments \\",
@@ -44,7 +45,7 @@ const callbackEnvironment = [
   "ATTENDANCE_BACKEND_TOKEN=replace-with-platform-bearer-token",
   "ATTENDANCE_BACKEND_TIMEOUT_MS=15000",
 ].join("\n");
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => formatAppDateTime(value);
 
 function errorText(error: unknown) {
   return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";

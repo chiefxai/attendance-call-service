@@ -11,6 +11,7 @@ import { fetchAttendance, fetchCareManagerNotifications, fetchOperationsSummary,
 import { AttendanceStatusChart, AttendanceTrendChart, type AttendanceChartStatus } from "../components/BusinessCharts";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
 import { ReportsPage } from "./ReportsPage";
+import { APP_TIME_ZONE, appDateKey, formatAppDate, formatAppDateTime } from "../utils/dateTime";
 
 type DashboardStatus = AttendanceChartStatus;
 const dashboardStatuses: DashboardStatus[] = ["pending", "checkin", "checkout", "processing", "delayed"];
@@ -26,25 +27,22 @@ function getDashboardStatus(row: AttendanceRecord): DashboardStatus {
 }
 
 function buildDashboardCharts(records: AttendanceRecord[]) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const [year, month, day] = appDateKey(new Date()).split("-").map(Number);
   const trend = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() - (6 - index));
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    return { date, key, label: date.toLocaleDateString([], { weekday: "short" }), checkIns: 0, checkOuts: 0 };
+    const date = new Date(Date.UTC(year, month - 1, day - (6 - index), 12));
+    const key = date.toISOString().slice(0, 10);
+    const label = new Intl.DateTimeFormat("en-IN", { weekday: "short", timeZone: APP_TIME_ZONE }).format(date);
+    return { key, label, checkIns: 0, checkOuts: 0 };
   });
   const byDay = new Map(trend.map((day) => [day.key, day]));
   const counts: Record<DashboardStatus, number> = { pending: 0, checkin: 0, checkout: 0, processing: 0, delayed: 0 };
   records.forEach((record) => {
     if (record.checkIn.reportedAt) {
-      const date = new Date(record.checkIn.reportedAt);
-      const point = byDay.get(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+      const point = byDay.get(appDateKey(record.checkIn.reportedAt));
       if (point) point.checkIns += 1;
     }
     if (record.checkOut.reportedAt) {
-      const date = new Date(record.checkOut.reportedAt);
-      const point = byDay.get(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+      const point = byDay.get(appDateKey(record.checkOut.reportedAt));
       if (point) point.checkOuts += 1;
     }
     counts[getDashboardStatus(record)] += 1;
@@ -63,12 +61,9 @@ export function OverviewPage({ userRole = "admin" }: { userRole?: "admin" | "car
   const summary: OperationsSummary | undefined = summaryQuery.data;
   const records = attendanceQuery.data || [];
   const charts = useMemo(() => buildDashboardCharts(records), [records]);
-  const dateKey = (value: string) => {
-    const date = new Date(value);
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  };
+  const dateKey = appDateKey;
   const openRecords = (title: string, predicate: (record: AttendanceRecord) => boolean) => setDrilldown({ title, records: records.filter(predicate) });
-  const todayKey = dateKey(new Date().toISOString());
+  const todayKey = dateKey(new Date());
   const statusLabel = (status: DashboardStatus) => status === "checkin" ? "Check-in" : status === "checkout" ? "Check-out" : status[0].toUpperCase() + status.slice(1);
   const filterStatus = (status: DashboardStatus) => openRecords(`${statusLabel(status)} sessions`, (record) => getDashboardStatus(record) === status);
 
@@ -81,13 +76,13 @@ export function OverviewPage({ userRole = "admin" }: { userRole?: "admin" | "car
 
   return <Stack spacing={2.5}>
     <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Attendance dashboard" description="Live check-in and check-out activity for scheduled workforce attendance."
-      actions={<><Chip label={new Date().toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })} variant="outlined" /><Button component={RouterLink} to="/attendance" variant="contained" endIcon={<ArrowForwardRoundedIcon />}>Open attendance</Button></>} />
+      actions={<><Chip label={formatAppDate(new Date(), { day: "2-digit", month: "short", year: "numeric" })} variant="outlined" /><Button component={RouterLink} to="/attendance" variant="contained" endIcon={<ArrowForwardRoundedIcon />}>Open attendance</Button></>} />
     {userRole === "care_manager" && <SectionCard title="Care manager alerts" subtitle="Attendance calls that reached the unanswered-call limit need follow-up.">
       {careManagerAlerts.isError && <Alert severity="error">Could not load care manager alerts.</Alert>}
       {careManagerAlerts.data?.length === 0 && <Alert severity="success">No new care manager alerts.</Alert>}
       <Stack spacing={1}>{careManagerAlerts.data?.map((alert) => <Box key={alert.id} sx={{ p: 1.5, border: "1px solid", borderColor: alert.readAt ? "divider" : "warning.light", borderRadius: 2 }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ sm: "center" }}>
-          <Box><Typography variant="body2" fontWeight={700}>{alert.title}</Typography><Typography variant="body2" color="text.secondary">{alert.message}</Typography><Typography variant="caption" color="text.secondary">{new Date(alert.createdAt).toLocaleString()}</Typography></Box>
+          <Box><Typography variant="body2" fontWeight={700}>{alert.title}</Typography><Typography variant="body2" color="text.secondary">{alert.message}</Typography><Typography variant="caption" color="text.secondary">{formatAppDateTime(alert.createdAt)}</Typography></Box>
           {!alert.readAt && <Button size="small" onClick={() => markAlertRead.mutate(alert.id)} disabled={markAlertRead.isPending}>Mark reviewed</Button>}
         </Stack>
       </Box>)}</Stack>
@@ -110,7 +105,7 @@ export function OverviewPage({ userRole = "admin" }: { userRole?: "admin" | "car
       <DialogContent dividers>
         {!drilldown?.records.length ? <Typography color="text.secondary" sx={{ py: 2 }}>No sessions match this selection.</Typography> : <Stack divider={<Box sx={{ borderBottom: "1px solid #edf0f4" }} />}>
           {drilldown.records.map((record) => <Stack key={record.sessionId} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ py: 1.2 }}>
-            <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700}>{record.employee.name} · {record.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{record.patient.name} · {new Date(record.scheduledStartAt).toLocaleString()}</Typography></Box>
+            <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700}>{record.employee.name} · {record.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{record.patient.name} · {formatAppDateTime(record.scheduledStartAt)}</Typography></Box>
             <Stack direction="row" spacing={1} alignItems="center"><StatusChip status={getDashboardStatus(record)} /><Button size="small" onClick={() => navigate(`/sessions/${encodeURIComponent(record.sessionId)}`)}>View</Button></Stack>
           </Stack>)}
         </Stack>}

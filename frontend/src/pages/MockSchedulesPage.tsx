@@ -8,6 +8,7 @@ import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import { createMockAthulyaSchedule, deleteMockAthulyaSchedule, fetchAthulyaSyncRuns, fetchMockAthulyaSchedules, startAthulyaSync, updateMockAthulyaSchedule, type MockAthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader } from "../components/OperationsUI";
+import { formatAppDateTime } from "../utils/dateTime";
 
 function todayIndia(value = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(value);
@@ -207,7 +208,7 @@ export function MockSchedulesPage() {
             <Grid container spacing={2} sx={{ mt: 0.5 }}>
               <Grid size={{ xs: 6, sm: 3 }}><Typography variant="caption" color="text.secondary">Received</Typography><Typography variant="h6">{latestRun.recordsReceived}</Typography></Grid>
               <Grid size={{ xs: 6, sm: 3 }}><Typography variant="caption" color="text.secondary">Saved / updated</Typography><Typography variant="h6">{latestRun.recordsUpserted}</Typography></Grid>
-              <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Started</Typography><Typography variant="body2">{new Date(latestRun.startedAt).toLocaleString()}</Typography></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><Typography variant="caption" color="text.secondary">Started</Typography><Typography variant="body2">{formatAppDateTime(latestRun.startedAt)}</Typography></Grid>
             </Grid>
             {latestRun.errorMessage && <Alert severity="error" sx={{ mt: 1 }}>{latestRun.errorMessage}</Alert>}
           </Box>}
@@ -221,7 +222,7 @@ export function MockSchedulesPage() {
             <TableHead><TableRow><TableCell>Started</TableCell><TableCell>Date</TableCell><TableCell>Source</TableCell><TableCell>Status</TableCell><TableCell>Received</TableCell><TableCell>Saved / updated</TableCell><TableCell>Error</TableCell></TableRow></TableHead>
             <TableBody>
               {(runs.data || []).slice(0, 8).map((run) => <TableRow key={run.id}>
-                <TableCell>{new Date(run.startedAt).toLocaleString()}</TableCell><TableCell>{run.fromDate || "—"}</TableCell><TableCell>{run.syncSource || "—"}</TableCell>
+                <TableCell>{formatAppDateTime(run.startedAt)}</TableCell><TableCell>{run.fromDate || "—"}</TableCell><TableCell>{run.syncSource || "—"}</TableCell>
                 <TableCell><Chip size="small" label={run.status} color={run.status === "succeeded" ? "success" : run.status === "failed" ? "error" : "info"} /></TableCell>
                 <TableCell>{run.recordsReceived}</TableCell><TableCell>{run.recordsUpserted}</TableCell><TableCell sx={{ maxWidth: 240, whiteSpace: "normal" }}>{run.errorMessage || "—"}</TableCell>
               </TableRow>)}

@@ -8,8 +8,9 @@ import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import AssignmentLateRoundedIcon from "@mui/icons-material/AssignmentLateRounded";
 import { fetchSupervisionQueue } from "../api/client";
 import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
+import { formatAppDateTime } from "../utils/dateTime";
 
-const timeLabel = (value: string) => new Date(value).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+const timeLabel = (value: string) => formatAppDateTime(value, { dateStyle: "short", timeStyle: "short" });
 
 export function SupervisionQueuePage() {
   const navigate = useNavigate();

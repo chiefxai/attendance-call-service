@@ -6,8 +6,9 @@ import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import { fetchAttendanceLedger, type AttendanceRecord } from "../api/client";
 import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
+import { formatAppDateTime } from "../utils/dateTime";
 
-const dateTime = (value: string | null) => value ? new Date(value).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "—";
+const dateTime = (value: string | null) => formatAppDateTime(value, { dateStyle: "short", timeStyle: "short" });
 function exportLedger(rows: AttendanceRecord[]) {
   const header = ["Session ID", "Assignment", "Staff", "Patient", "Shift start", "Shift end", "Check-in", "Check-out", "Delivery state"];
   const csv = [header, ...rows.map((row) => [row.sessionId, row.assignmentId, row.employee.name, row.patient.name, row.scheduledStartAt, row.scheduledEndAt, row.checkIn.reportedAt || "", row.checkOut.reportedAt || "", row.backendDeliveryStatus])]

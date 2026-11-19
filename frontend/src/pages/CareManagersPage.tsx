@@ -6,6 +6,7 @@ import { AxiosError } from "axios";
 import { fetchCareManagers, provisionCareManagerAccount, resetCareManagerPassword, setCareManagerActive, type CareManager } from "../api/client";
 import { PageHeader } from "../components/OperationsUI";
 import { SortByMenu } from "../components/SortByMenu";
+import { formatAppDate, formatAppDateTime } from "../utils/dateTime";
 
 type ManagerSort = "name_ascending" | "name_descending" | "created_newest" | "created_oldest";
 const managerSortOptions = [
@@ -89,8 +90,8 @@ export function CareManagersPage() {
               <TableCell>{manager.phone || "—"}</TableCell>
               <TableCell>{manager.athulyaCareManagerId}</TableCell>
               <TableCell><Chip size="small" color={active ? "success" : "default"} label={!provisioned ? "Account not provisioned" : active ? "Active" : "Inactive"} /></TableCell>
-              <TableCell>{manager.createdAt ? new Date(manager.createdAt).toLocaleDateString() : "—"}</TableCell>
-              <TableCell>{manager.lastLogin ? new Date(manager.lastLogin).toLocaleString() : "Never"}</TableCell>
+              <TableCell>{manager.createdAt ? formatAppDate(manager.createdAt) : "—"}</TableCell>
+              <TableCell>{manager.lastLogin ? formatAppDateTime(manager.lastLogin) : "Never"}</TableCell>
               <TableCell align="right"><Stack direction="row" spacing={.5} justifyContent="flex-end">
                 {!provisioned && <Button size="small" disabled={!manager.phone || provision.isPending} onClick={() => { setError(""); setAccountTarget(manager); }}>Provide account</Button>}
                 <Tooltip title={provisioned ? "Reset password" : "Provision this login from the server first"}>
