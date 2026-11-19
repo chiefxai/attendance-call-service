@@ -91,16 +91,16 @@ export function PatientRecordsPage() {
     setEditOpen(false);
   };
 
-  return <Stack spacing={2.5}>
+  return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
     <PageHeader eyebrow="HOME HEALTH / ASSIGNMENT DIRECTORY" title="Patient records" description="Manage saved patient profiles, addresses, and assignment details." actions={<Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled>Export</Button>} />
     {query.isError && <Alert severity="error">Could not load patient assignment records from the backend.</Alert>}
     <Grid container spacing={1.75}>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Patient records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned patients" icon={<ElderlyRoundedIcon />} /></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Active assignment" value={query.isLoading ? "—" : String(active)} detail="Sessions currently active" icon={<MedicalServicesRoundedIcon />} tint="#e5f5ee" accent="#178264" /></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Care categories" value={query.isLoading ? "—" : String(categories.length)} detail="Categories supplied in assignments" icon={<MedicalServicesRoundedIcon />} tint="#e9efff" accent="#1557c0" /></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="GPS perimeter" value="Not connected" detail="Location verification is unavailable" icon={<ShareLocationRoundedIcon />} tint="#edf1f8" accent="#69778d" /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Patient records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned patients" icon={<ElderlyRoundedIcon />}  compact/></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Active assignment" value={query.isLoading ? "—" : String(active)} detail="Sessions currently active" icon={<MedicalServicesRoundedIcon />} tint="#e5f5ee" accent="#178264"  compact/></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Care categories" value={query.isLoading ? "—" : String(categories.length)} detail="Categories supplied in assignments" icon={<MedicalServicesRoundedIcon />} tint="#e9efff" accent="#1557c0"  compact/></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="GPS perimeter" value="Not connected" detail="Location verification is unavailable" icon={<ShareLocationRoundedIcon />} tint="#edf1f8" accent="#69778d"  compact/></Grid>
     </Grid>
-    <Card>
+    <Card sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: { xs: 380, md: 0 }, overflow: "hidden" }}>
       <SearchFilterBar
         search={search}
         onSearchChange={(value) => { setSearch(value); setPage(0); }}
@@ -118,7 +118,7 @@ export function PatientRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
+      <TableContainer sx={{ flex: 1, minHeight: { xs: 230, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
         <TableHead><TableRow>{["Patient name", "UHID", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
         <TableBody>{pageRows.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>

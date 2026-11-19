@@ -275,25 +275,25 @@ export function AttendanceSchedulesPage() {
     ? new Date(`${selectedDate}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
     : "Choose a date";
 
-  return <Stack spacing={2.5}>
+  return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
     <PageHeader title="Attendance & schedules" actions={<Chip icon={<EventAvailableRoundedIcon />} label={dateLabel} variant="outlined" />} />
     <Grid container spacing={1.75}>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Schedules" value={schedules.isLoading ? "—" : schedulesData.length.toLocaleString()} detail="For the selected day" icon={<EventAvailableRoundedIcon />} /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Upcoming" value={schedules.isLoading ? "—" : counts.upcoming.toLocaleString()} detail="Waiting for scheduled time" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Delayed" value={schedules.isLoading || attendance.isLoading ? "—" : counts.delayed.toLocaleString()} detail="Missed calls or needs follow-up" icon={<PendingActionsRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Completed" value={schedules.isLoading ? "—" : counts.completed.toLocaleString()} detail="Finished duties" icon={<TaskAltRoundedIcon />} tint="#e5f5ee" accent="#178264" /></Grid>
+      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Schedules" value={schedules.isLoading ? "—" : schedulesData.length.toLocaleString()} detail="For the selected day" icon={<EventAvailableRoundedIcon />}  compact/></Grid>
+      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Upcoming" value={schedules.isLoading ? "—" : counts.upcoming.toLocaleString()} detail="Waiting for scheduled time" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a"  compact/></Grid>
+      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Delayed" value={schedules.isLoading || attendance.isLoading ? "—" : counts.delayed.toLocaleString()} detail="Missed calls or needs follow-up" icon={<PendingActionsRoundedIcon />} tint="#fff0ed" accent="#c44747"  compact/></Grid>
+      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard label="Completed" value={schedules.isLoading ? "—" : counts.completed.toLocaleString()} detail="Finished duties" icon={<TaskAltRoundedIcon />} tint="#e5f5ee" accent="#178264"  compact/></Grid>
     </Grid>
-    <Card>
+    <Card sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: { xs: 400, md: 0 }, overflow: "hidden" }}>
       {schedules.isLoading && <LinearProgress />}
       {schedules.isError && <Alert severity="error" sx={{ m: 2 }}>Scheduled duties could not be loaded.</Alert>}
       {attendance.isError && <Alert severity="warning" sx={{ m: 2 }}>Attendance updates could not be loaded.</Alert>}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} sx={{ p: 2, borderBottom: "1px solid #e8edf3" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} sx={{ p: { xs: 1.25, sm: 2 }, borderBottom: "1px solid #e8edf3", flexShrink: 0 }}>
         <TextField type="date" size="small" required label="Schedule date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value || todayInIndia())} InputLabelProps={{ shrink: true }} sx={{ minWidth: { sm: 200 } }} />
         <Button size="small" onClick={() => setSelectedDate(todayInIndia())} disabled={selectedDate === todayInIndia()}>Today</Button>
         <SortByMenu value={sortBy} options={scheduleSortOptions} onChange={setSortBy} />
         <Chip label={`${schedulesData.length} schedules`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
       </Stack>
-      <TableContainer sx={{ overflowX: "auto" }}>
+      <TableContainer sx={{ flex: 1, minHeight: { xs: 250, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}>
         <Table size="small" sx={{ minWidth: 850 }} aria-label="Attendance and schedules">
           <TableHead><TableRow>{["Patient", "Care givers", "Service", "Check in", "Check out", "Status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>

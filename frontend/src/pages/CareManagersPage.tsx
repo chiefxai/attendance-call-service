@@ -72,15 +72,15 @@ export function CareManagersPage() {
     if (accountTarget) provision.mutate({ id: accountTarget.id, password: accountPassword }, { onError: (reason) => setError(errorMessage(reason)) });
   };
 
-  return <Stack spacing={2.5}>
+  return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
     <PageHeader title="Care Managers" actions={<SortByMenu value={sortBy} options={managerSortOptions} onChange={setSortBy} />} />
     {query.isError && <Alert severity="error">Could not load Care Managers: {errorMessage(query.error)}</Alert>}
     {toggle.isError && <Alert severity="error">Could not update account: {errorMessage(toggle.error)}</Alert>}
     {reset.isSuccess && <Alert severity="success">Password reset. The Care Manager must choose a new password at their next sign-in.</Alert>}
     {provision.isSuccess && <Alert severity="success">Account provided. The Care Manager can sign in with their registered phone number and must change the temporary password.</Alert>}
     {provision.isError && <Alert severity="error">Could not provide account: {errorMessage(provision.error)}</Alert>}
-    <Card><CardContent>
-      {query.isLoading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack> : <TableContainer>
+    <Card sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: { xs: 380, md: 0 }, overflow: "hidden" }}><CardContent sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      {query.isLoading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack> : <TableContainer sx={{ flex: 1, minHeight: { xs: 230, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}>
         <Table size="small"><TableHead><TableRow><TableCell>Name</TableCell><TableCell>Phone</TableCell><TableCell>Athulya ID</TableCell><TableCell>Status</TableCell><TableCell>Created</TableCell><TableCell>Last login</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
           <TableBody>{pageManagers.map((manager) => {
             const active = manager.active && manager.accountActive === true;
