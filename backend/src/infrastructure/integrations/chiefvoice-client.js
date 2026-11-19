@@ -230,6 +230,11 @@ function createChiefVoiceClient({
     const outputSchema = scenario === "CARE_MANAGER_ESCALATION"
       ? undefined
       : stage === "check_out" ? checkOutOutputSchema : checkInOutputSchema;
+    const mandatoryFields = scenario === "CARE_MANAGER_ESCALATION"
+      ? ["escalation_message_delivered"]
+      : stage === "check_out"
+        ? ["checkout_status", "caregiver_confirmation"]
+        : ["caregiver_identity", "patient_identity", "patient_address", "check_in_status", "caregiver_confirmation"];
     const payload = {
       channel: "phone",
       destination: to,
@@ -239,6 +244,7 @@ function createChiefVoiceClient({
         template_id: liveTemplateId,
         context: {
           ...context,
+          mandatory_fields: mandatoryFields,
           current_time_utc: callStartedAt.toISOString(),
           current_local_time: currentLocalTime,
           time_zone: timeZone,
