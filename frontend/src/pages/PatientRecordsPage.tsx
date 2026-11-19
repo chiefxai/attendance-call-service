@@ -11,6 +11,15 @@ import { fetchAttendance, fetchPatients, updatePatient, type AttendanceRecord, t
 import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
+import { SortByMenu } from "../components/SortByMenu";
+
+type PatientSort = "name_ascending" | "name_descending" | "id_ascending" | "id_descending";
+const patientSortOptions = [
+  { value: "name_ascending", label: "Name: A to Z" },
+  { value: "name_descending", label: "Name: Z to A" },
+  { value: "id_ascending", label: "Patient ID: ascending" },
+  { value: "id_descending", label: "Patient ID: descending" },
+] as const;
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 
@@ -20,6 +29,7 @@ export function PatientRecordsPage() {
   const [category, setCategory] = useState("all");
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
+  const [sortBy, setSortBy] = useState<PatientSort>("name_ascending");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [editOpen, setEditOpen] = useState(false);
@@ -45,8 +55,14 @@ export function PatientRecordsPage() {
   const filtered = records.filter((row) => (!search || `${row.id} ${row.name} ${row.phoneNumber || ""} ${row.assignedStaff} ${row.address}`.toLowerCase().includes(search.toLowerCase()))
     && (hub === "all" || row.hub === hub) && (category === "all" || row.careCategory === category)
     && (language === "all" || row.language.toLowerCase().includes(language)) && (status === "all" || row.status === status));
-  useEffect(() => setPage(0), [search, hub, category, language, status]);
-  const pageRows = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const sortedRecords = [...filtered].sort((a, b) => {
+    const left = sortBy.startsWith("name_") ? a.name : a.id;
+    const right = sortBy.startsWith("name_") ? b.name : b.id;
+    const comparison = left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+    return sortBy.endsWith("ascending") ? comparison : -comparison;
+  });
+  useEffect(() => setPage(0), [search, hub, category, language, status, sortBy]);
+  const pageRows = sortedRecords.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const active = records.filter((row) => row.status === "active").length;
   const upcomingForPatient = (upcomingTasks.data || [])
     .filter((task: AttendanceRecord) => task.patient.id === viewPatient?.id
@@ -91,6 +107,7 @@ export function PatientRecordsPage() {
         activeFilters={activeFilters}
         resultCount={filtered.length}
         resultLabel="records"
+        actions={<SortByMenu value={sortBy} options={patientSortOptions} onChange={setSortBy} />}
         onClearFilters={() => { setHub("all"); setCategory("all"); setLanguage("all"); setStatus("all"); }}
         filters={<>
           <FormControl size="small" fullWidth><InputLabel>Hub</InputLabel><Select label="Hub" value={hub} onChange={(event) => setHub(event.target.value)}><MenuItem value="all">All hubs</MenuItem>{hubs.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</Select></FormControl>

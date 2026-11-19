@@ -66,6 +66,7 @@ export function SearchFilterBar({
   onSearchChange,
   searchLabel,
   filters,
+  actions,
   activeFilters = 0,
   onClearFilters,
   resultCount,
@@ -75,6 +76,7 @@ export function SearchFilterBar({
   onSearchChange: (value: string) => void;
   searchLabel: string;
   filters: ReactNode;
+  actions?: ReactNode;
   activeFilters?: number;
   onClearFilters?: () => void;
   resultCount: number;
@@ -93,7 +95,8 @@ export function SearchFilterBar({
         sx={{ flex: 1, minWidth: 0 }}
         InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" color="action" /></InputAdornment> }}
       />
-      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" flexWrap="wrap">
+        {actions}
         <Button
           variant={activeFilters ? "contained" : "outlined"}
           color={activeFilters ? "primary" : "inherit"}

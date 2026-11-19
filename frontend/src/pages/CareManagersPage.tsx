@@ -5,6 +5,15 @@ import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
 import { AxiosError } from "axios";
 import { fetchCareManagers, provisionCareManagerAccount, resetCareManagerPassword, setCareManagerActive, type CareManager } from "../api/client";
 import { PageHeader } from "../components/OperationsUI";
+import { SortByMenu } from "../components/SortByMenu";
+
+type ManagerSort = "name_ascending" | "name_descending" | "created_newest" | "created_oldest";
+const managerSortOptions = [
+  { value: "name_ascending", label: "Name: A to Z" },
+  { value: "name_descending", label: "Name: Z to A" },
+  { value: "created_newest", label: "Created: newest first" },
+  { value: "created_oldest", label: "Created: oldest first" },
+] as const;
 
 const errorMessage = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 
@@ -18,9 +27,19 @@ export function CareManagersPage() {
   const [accountPassword, setAccountPassword] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [sortBy, setSortBy] = useState<ManagerSort>("name_ascending");
   const managers = query.data || [];
-  useEffect(() => setPage(0), [managers.length]);
-  const pageManagers = managers.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const sortedManagers = [...managers].sort((a, b) => {
+    if (sortBy.startsWith("name_")) {
+      const comparison = (a.name || `Care Manager ${a.athulyaCareManagerId}`).localeCompare(b.name || `Care Manager ${b.athulyaCareManagerId}`, undefined, { sensitivity: "base" });
+      return sortBy === "name_ascending" ? comparison : -comparison;
+    }
+    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return sortBy === "created_newest" ? dateB - dateA : dateA - dateB;
+  });
+  useEffect(() => setPage(0), [managers.length, sortBy]);
+  const pageManagers = sortedManagers.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const toggle = useMutation({
     mutationFn: ({ id, active }: { id: string; active: boolean }) => setCareManagerActive(id, active),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["care-managers"] }),
@@ -53,7 +72,7 @@ export function CareManagersPage() {
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader title="Care Managers" />
+    <PageHeader title="Care Managers" actions={<SortByMenu value={sortBy} options={managerSortOptions} onChange={setSortBy} />} />
     {query.isError && <Alert severity="error">Could not load Care Managers: {errorMessage(query.error)}</Alert>}
     {toggle.isError && <Alert severity="error">Could not update account: {errorMessage(toggle.error)}</Alert>}
     {reset.isSuccess && <Alert severity="success">Password reset. The Care Manager must choose a new password at their next sign-in.</Alert>}

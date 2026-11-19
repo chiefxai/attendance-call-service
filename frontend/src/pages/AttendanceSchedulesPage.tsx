@@ -7,6 +7,14 @@ import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import { fetchAttendance, fetchAthulyaSchedules, fetchSessionArtifacts, type AttendanceRecord, type AthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
+import { SortByMenu } from "../components/SortByMenu";
+
+type ScheduleSort = "current_upcoming" | "time_ascending" | "time_descending";
+const scheduleSortOptions = [
+  { value: "current_upcoming", label: "Current & upcoming first" },
+  { value: "time_ascending", label: "Start time: ascending" },
+  { value: "time_descending", label: "Start time: descending" },
+] as const;
 
 function todayInIndia() {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -172,6 +180,7 @@ export function AttendanceSchedulesPage() {
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [selectedDate, setSelectedDate] = useState(todayInIndia);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<ScheduleSort>("current_upcoming");
   const [selectedSchedule, setSelectedSchedule] = useState<AthulyaSchedule | null>(null);
   const schedules = useQuery({
     queryKey: ["athulya-schedules", selectedDate],
@@ -214,8 +223,18 @@ export function AttendanceSchedulesPage() {
   }, { upcoming: 0, in_progress: 0, delayed: 0, retry_scheduled: 0, attention_required: 0, completed: 0, cancelled: 0 });
   const filteredSchedules = schedulesData.filter((schedule) => statusFilter === "all"
     || statusesBySchedule.get(schedule.id) === statusFilter);
-  useEffect(() => setPage(0), [selectedDate, statusFilter, schedulesData.length]);
-  const pageRows = filteredSchedules.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const statusPriority: Record<AttendanceStatus, number> = { in_progress: 0, upcoming: 1, retry_scheduled: 2, delayed: 2, attention_required: 3, completed: 4, cancelled: 5 };
+  const sortedSchedules = [...filteredSchedules].sort((a, b) => {
+    const startA = scheduledInstant(a.date, a.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const startB = scheduledInstant(b.date, b.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    if (sortBy === "current_upcoming") {
+      const rank = statusPriority[statusesBySchedule.get(a.id) || "upcoming"] - statusPriority[statusesBySchedule.get(b.id) || "upcoming"];
+      return rank || startA - startB;
+    }
+    return sortBy === "time_ascending" ? startA - startB : startB - startA;
+  });
+  useEffect(() => setPage(0), [selectedDate, statusFilter, sortBy, schedulesData.length]);
+  const pageRows = sortedSchedules.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const dateLabel = selectedDate
     ? new Date(`${selectedDate}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
     : "Choose a date";
@@ -248,6 +267,7 @@ export function AttendanceSchedulesPage() {
             <MenuItem value="cancelled">Cancelled</MenuItem>
           </Select>
         </FormControl>
+        <SortByMenu value={sortBy} options={scheduleSortOptions} onChange={setSortBy} />
         <Chip label={`${filteredSchedules.length} schedules`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
       </Stack>
       <TableContainer sx={{ overflowX: "auto" }}>

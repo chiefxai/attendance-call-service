@@ -12,6 +12,15 @@ import { fetchAttendance, fetchStaff, updateStaff, type AttendanceRecord, type C
 import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
+import { SortByMenu } from "../components/SortByMenu";
+
+type StaffSort = "name_ascending" | "name_descending" | "id_ascending" | "id_descending";
+const staffSortOptions = [
+  { value: "name_ascending", label: "Name: A to Z" },
+  { value: "name_descending", label: "Name: Z to A" },
+  { value: "id_ascending", label: "Care giver ID: ascending" },
+  { value: "id_descending", label: "Care giver ID: descending" },
+] as const;
 
 function errorMessage(error: unknown) { return error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed"; }
 function displayCompanyName(value?: string | null) {
@@ -36,6 +45,7 @@ export function StaffRecordsPage() {
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("all");
   const [status, setStatus] = useState("all");
+  const [sortBy, setSortBy] = useState<StaffSort>("name_ascending");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [selected, setSelected] = useState<StaffRecord | null>(null);
@@ -61,8 +71,14 @@ export function StaffRecordsPage() {
   const filtered = records.filter((row) => (!search || `${row.name} ${displayCompanyName(row.companyName)} ${row.id} ${row.phoneNumber || ""} ${row.patientName} ${row.address}`.toLowerCase().includes(search.toLowerCase()))
     && (language === "all" || row.language.toLowerCase() === language)
     && (status === "all" || row.dutyStatus === status));
-  useEffect(() => setPage(0), [search, language, status]);
-  const pageRows = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const sortedStaff = [...filtered].sort((a, b) => {
+    const left = sortBy.startsWith("name_") ? a.name : a.id;
+    const right = sortBy.startsWith("name_") ? b.name : b.id;
+    const comparison = left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+    return sortBy.endsWith("ascending") ? comparison : -comparison;
+  });
+  useEffect(() => setPage(0), [search, language, status, sortBy]);
+  const pageRows = sortedStaff.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const languages = [...new Set(records.map((row) => row.language.toLowerCase()))];
   const active = records.filter((row) => row.dutyStatus === "on duty").length;
   const upcomingForSelected = (upcomingTasks.data || [])
@@ -106,6 +122,7 @@ export function StaffRecordsPage() {
         activeFilters={activeFilters}
         resultCount={filtered.length}
         resultLabel="employees"
+        actions={<SortByMenu value={sortBy} options={staffSortOptions} onChange={setSortBy} />}
         onClearFilters={() => { setLanguage("all"); setStatus("all"); }}
         filters={<>
           <FormControl size="small" fullWidth><InputLabel>Language</InputLabel><Select label="Language" value={language} onChange={(event) => setLanguage(event.target.value)}><MenuItem value="all">All languages</MenuItem>{languages.map((value) => <MenuItem key={value} value={value}>{value.toUpperCase()}</MenuItem>)}</Select></FormControl>
