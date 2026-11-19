@@ -9,8 +9,8 @@ import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import { createMockAthulyaSchedule, deleteMockAthulyaSchedule, fetchAthulyaSyncRuns, fetchMockAthulyaSchedules, startAthulyaSync, updateMockAthulyaSchedule, type MockAthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader } from "../components/OperationsUI";
 
-function todayIndia() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+function todayIndia(value = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(value);
 }
 
 function defaultScheduleTimes() {
@@ -21,18 +21,20 @@ function defaultScheduleTimes() {
   const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
   const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
   const nowMinutes = hour * 60 + minute;
-  const startMinutes = nowMinutes + 60;
-  const endMinutes = nowMinutes + 5 * 60;
-  // If there is not enough time left today for the requested offsets, use a short future window.
-  const start = new Date(Date.UTC(2000, 0, 1, 0, startMinutes < 1440 && endMinutes < 1440 ? startMinutes : nowMinutes + 1));
-  const end = new Date(Date.UTC(2000, 0, 1, 0, startMinutes < 1440 && endMinutes < 1440 ? endMinutes : nowMinutes + 5));
+  const crossesMidnight = nowMinutes + 5 >= 1440;
+  // The mock API stores one shared schedule date for both times. Roll to
+  // tomorrow near midnight so the default window stays valid and in the future.
+  const start = new Date(Date.UTC(2000, 0, 1, 0, crossesMidnight ? 1 : nowMinutes + 1));
+  const end = new Date(Date.UTC(2000, 0, 1, 0, crossesMidnight ? 5 : nowMinutes + 5));
   const format = (value: Date) => `${String(value.getUTCHours()).padStart(2, "0")}:${String(value.getUTCMinutes()).padStart(2, "0")}:00`;
-  // Keep the default date on today; late-evening schedules can be adjusted to tomorrow.
-  return { start_time: format(start), end_time: format(end) };
+  const scheduleDate = todayIndia(now);
+  const [year, month, day] = scheduleDate.split("-").map(Number);
+  const nextDate = new Date(Date.UTC(year, month - 1, day + (crossesMidnight ? 1 : 0))).toISOString().slice(0, 10);
+  return { schedule_date: nextDate, start_time: format(start), end_time: format(end) };
 }
 
 const emptySchedule = (): Partial<MockAthulyaSchedule> => ({
-  schedule_date: todayIndia(), ...defaultScheduleTimes(),
+  ...defaultScheduleTimes(),
   client_name: "Mock Patient", patient_id: "MOCK-PATIENT-001", patient_uhid: "MOCK-UHID-001",
   patient_address: "1 Test Street, Chennai, Tamil Nadu, India",
   care_manager_id: "MOCK-CM-001", care_manager_name: "Mock Care Manager", care_manager_phone: "+919999900001",
