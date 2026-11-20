@@ -85,7 +85,7 @@ export function OverviewPage({ userRole = "admin" }: { userRole?: "admin" | "car
   ];
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Attendance dashboard" description="Live check-in and check-out activity for scheduled workforce attendance."
+    <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Attendance dashboard"
       actions={<><Chip label={formatAppDate(new Date(), { day: "2-digit", month: "short", year: "numeric" })} variant="outlined" /><Button component={RouterLink} to="/attendance" variant="contained" endIcon={<ArrowForwardRoundedIcon />}>Open attendance</Button></>} />
     {userRole === "care_manager" && <SectionCard title="Care manager alerts" subtitle="Attendance calls that reached the unanswered-call limit need follow-up.">
       {careManagerAlerts.isError && <Alert severity="error">Could not load care manager alerts.</Alert>}

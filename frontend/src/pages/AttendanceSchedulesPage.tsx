@@ -377,7 +377,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const latestSelectedDateRun = syncRunRows.find((run) => run.fromDate === selectedDate);
 
   return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
-    <PageHeader eyebrow="ATHULYA / DUTY OPERATIONS" title="Schedule & Attendance" description="Review imported duties, attendance calls, and Athulya submission status in one place." />
+    <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Schedule & Attendance" />
     <Card variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderColor: "#e2e9e6", boxShadow: "none" }}>
       <Stack spacing={1.5}>
         <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ xs: "stretch", lg: "center" }} justifyContent="space-between">
@@ -491,11 +491,10 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         <DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 2.5, bgcolor: "#fbfcfb" }}>
           <Stack spacing={2}>
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none", borderColor: "#dfe8e3", bgcolor: "#f4f8f6" }}>
-              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Duty timing</Typography>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1.2fr 1fr 1fr" }, gap: 2 }}>
-                <Detail label="Scheduled date" value={scheduleDateLabel(selectedSchedule.date)} />
-                <Detail label="Check-in time" value={scheduleClock(selectedSchedule.startTime)} />
-                <Detail label="Check-out time" value={scheduleClock(selectedSchedule.endTime)} />
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Scheduled duty</Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+                <Detail label="Scheduled check-in" value={dateTimeLabel(scheduledInstant(selectedSchedule.date, selectedSchedule.startTime)?.toISOString())} />
+                <Detail label="Scheduled check-out" value={dateTimeLabel(scheduledInstant(selectedSchedule.date, selectedSchedule.endTime)?.toISOString())} />
               </Box>
             </Card>
 
@@ -515,7 +514,30 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
-              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Attendance and Athulya submission</Typography>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={0.5} sx={{ mb: 1.5 }}>
+                <Typography variant="subtitle2" fontWeight={750}>Actual attendance times</Typography>
+                <Typography variant="caption" color="text.secondary">Times are shown in Asia/Kolkata</Typography>
+              </Stack>
+              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 1.5 }} />}
+              {scheduleAttendance.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load actual attendance times.</Alert>}
+              {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Alert severity="info">No actual check-in or check-out times have been recorded yet.</Alert>}
+              <Stack spacing={1}>
+                {scheduleSessions.map((record) => <Card key={record.sessionId} variant="outlined" sx={{ p: 1.5, boxShadow: "none", bgcolor: "#fff" }}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ md: "center" }} justifyContent="space-between">
+                    <Box sx={{ minWidth: { md: 150 } }}><Typography variant="body2" fontWeight={700}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Attendance times</Typography></Box>
+                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, minmax(110px, 1fr))" }, gap: 1.5, flex: 1 }}>
+                      <Detail label="Scheduled check-in" value={dateTimeLabel(record.scheduledStartAt)} />
+                      <Detail label="Actual check-in" value={record.checkIn.reportedAt ? dateTimeLabel(record.checkIn.reportedAt) : "Not recorded"} />
+                      <Detail label="Scheduled check-out" value={dateTimeLabel(record.scheduledEndAt)} />
+                      <Detail label="Actual check-out" value={record.checkOut.reportedAt ? dateTimeLabel(record.checkOut.reportedAt) : "Not recorded"} />
+                    </Box>
+                  </Stack>
+                </Card>)}
+              </Stack>
+            </Card>
+
+            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Athulya attendance submissions</Typography>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
                 {([
                   { title: "Check-in", event: selectedCheckInSubmission, localTime: scheduleSessions.find((record) => record.checkIn.status === "confirmed")?.checkIn.reportedAt },
@@ -545,7 +567,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
-              <Box sx={{ mb: 1.5 }}><Typography variant="subtitle2" fontWeight={750}>Call recordings and transcripts</Typography><Typography variant="caption" color="text.secondary">Every check-in and check-out attempt linked to this schedule.</Typography></Box>
+              <Box sx={{ mb: 1.5 }}><Typography variant="subtitle2" fontWeight={750}>Call and retry history</Typography><Typography variant="caption" color="text.secondary">Each check-in and check-out call is listed separately, in attempt order.</Typography></Box>
               {scheduleAttendance.isLoading && <LinearProgress />}
               {scheduleAttendance.isError && <Alert severity="error">Could not find attendance call sessions for this schedule.</Alert>}
               {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Alert severity="info">No attendance call sessions are linked to this schedule yet.</Alert>}
@@ -564,7 +586,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                       const attempts = artifacts.callAttempts.filter((attempt) => attempt.stage === stage);
                       return <Box key={stage}>
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: .75 }}>
-                          <Typography variant="body2" fontWeight={700}>{stage === "check_in" ? "Check-in" : "Check-out"}</Typography>
+                          <Typography variant="body2" fontWeight={700}>{stage === "check_in" ? "Check-in calls" : "Check-out calls"}</Typography>
                           <Chip size="small" variant="outlined" label={`${attempts.length} ${attempts.length === 1 ? "call" : "calls"}`} />
                         </Stack>
                         {attempts.length === 0 ? <Typography variant="caption" color="text.secondary">No calls placed for this stage.</Typography> : <Stack spacing={1}>
@@ -577,7 +599,10 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                                 : null;
                             return <Card key={attempt.id} variant="outlined" sx={{ p: 1.5, boxShadow: "none", bgcolor: "#fff" }}>
                               <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={.75}>
-                                <Typography variant="body2" fontWeight={700}>{attempt.callTargetRole === "care_manager" ? "Care manager" : "Caregiver"} · attempt {attempt.attemptNumber}</Typography>
+                                <Stack direction="row" spacing={0.75} alignItems="center">
+                                  <Chip size="small" label={attempt.attemptNumber === 1 ? "Initial call" : `Retry ${attempt.attemptNumber - 1}`} color={attempt.attemptNumber === 1 ? "default" : "warning"} variant={attempt.attemptNumber === 1 ? "outlined" : "filled"} />
+                                  <Typography variant="body2" fontWeight={700}>{attempt.callTargetRole === "care_manager" ? "Care manager" : "Caregiver"}</Typography>
+                                </Stack>
                                 <Stack direction="row" spacing={1} alignItems="center"><StatusChip status={attempt.status} />{attempt.durationSeconds != null && <Typography variant="caption" color="text.secondary">{attempt.durationSeconds}s</Typography>}</Stack>
                               </Stack>
                               <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: .5 }}>
