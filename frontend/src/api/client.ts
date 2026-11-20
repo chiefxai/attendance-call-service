@@ -591,9 +591,14 @@ export async function fetchOperationsSummary() {
   return response.data;
 }
 
-export async function fetchAttendance(params: { search?: string; status?: string; limit?: number } = {}) {
+export async function fetchAttendance(params: { search?: string; status?: string; limit?: number; offset?: number; fromDate?: string; toDate?: string } = {}) {
   const response = await api.get<AttendanceRecord[]>("/assignments", { params });
   return response.data;
+}
+
+export async function fetchAttendanceCount(params: { fromDate?: string; toDate?: string } = {}) {
+  const response = await api.get<{ total: number }>("/assignments/count", { params });
+  return response.data.total;
 }
 
 export async function createStaff(payload: CreateStaffPayload) {

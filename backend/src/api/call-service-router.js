@@ -458,10 +458,30 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
 
   router.get("/assignments", async (req, res) => {
     try {
+      const fromDate = req.query.fromDate ? String(req.query.fromDate) : null;
+      const toDate = req.query.toDate ? String(req.query.toDate) : null;
+      const validDate = (value) => !value || (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value);
+      if (!validDate(fromDate) || !validDate(toDate) || (fromDate && toDate && fromDate > toDate)) {
+        return res.status(400).json({ error: "fromDate and toDate must be valid YYYY-MM-DD dates, with fromDate no later than toDate." });
+      }
       res.json(await repository.listAttendanceSessions(org(req), {
         search: req.query.search || "", status: req.query.status || "all",
-        limit: req.query.limit || 100, offset: req.query.offset || 0, careManagerExternalId: careManagerScope(req),
+        limit: req.query.limit || 100, offset: req.query.offset || 0, fromDate, toDate,
+        careManagerExternalId: careManagerScope(req),
       }));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/assignments/count", async (req, res) => {
+    try {
+      const fromDate = req.query.fromDate ? String(req.query.fromDate) : null;
+      const toDate = req.query.toDate ? String(req.query.toDate) : null;
+      const validDate = (value) => !value || (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value);
+      if (!validDate(fromDate) || !validDate(toDate) || (fromDate && toDate && fromDate > toDate)) {
+        return res.status(400).json({ error: "fromDate and toDate must be valid YYYY-MM-DD dates, with fromDate no later than toDate." });
+      }
+      const total = await repository.countAttendanceSessions(org(req), { fromDate, toDate, careManagerExternalId: careManagerScope(req) });
+      res.json({ total });
     } catch (error) { fail(res, error); }
   });
 
