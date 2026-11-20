@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
@@ -8,7 +8,7 @@ import ShareLocationRoundedIcon from "@mui/icons-material/ShareLocationRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
 import { fetchAttendance, fetchPatients, updatePatient, type AttendanceRecord, type CreatePatientPayload, type PatientRecord } from "../api/client";
-import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
+import { MetricCard, PageHeader, SearchFilterBar, OperationsTable } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 import { SortByMenu } from "../components/SortByMenu";
@@ -118,7 +118,7 @@ export function PatientRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer sx={{ flex: 1, minHeight: { xs: 230, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
+      <OperationsTable sx={{ flex: 1, minHeight: { xs: 230, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}><Table size="small" aria-label="Patient records" sx={{ minWidth: 820 }}>
         <TableHead><TableRow>{["Patient name", "UHID", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
         <TableBody>{pageRows.map((row) => <TableRow key={`${row.id}:${row.assignedStaff}`} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
@@ -129,7 +129,7 @@ export function PatientRecordsPage() {
           <TableCell>{row.language.toUpperCase()}</TableCell>
           <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setViewPatient(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell>
         </TableRow>)}</TableBody>
-      </Table></TableContainer>
+      </Table></OperationsTable>
       <TablePagination component="div" count={filtered.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Patients per page" />
       {query.isSuccess && filtered.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>No patient records match these filters.</Typography>}
     </Card>
@@ -169,13 +169,13 @@ export function PatientRecordsPage() {
         {upcomingTasks.isLoading && <LinearProgress />}
         {upcomingTasks.isError && <Alert severity="error">Could not load this patient’s upcoming tasks.</Alert>}
         {upcomingTasks.isSuccess && upcomingForPatient.length === 0 && <Alert severity="info">No upcoming assigned tasks for this patient.</Alert>}
-        {upcomingForPatient.length > 0 && <TableContainer component={Card} variant="outlined"><Table size="small" aria-label="Upcoming patient tasks"><TableHead><TableRow><TableCell>Duty interval · local time</TableCell><TableCell>Assigned staff</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForPatient.map((task) => <TableRow key={task.sessionId}>
+        {upcomingForPatient.length > 0 && <OperationsTable component={Card} variant="outlined"><Table size="small" aria-label="Upcoming patient tasks"><TableHead><TableRow><TableCell>Duty interval · local time</TableCell><TableCell>Assigned staff</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForPatient.map((task) => <TableRow key={task.sessionId}>
           <TableCell>{formatTaskInterval(task.scheduledStartAt, task.scheduledEndAt)}</TableCell>
           <TableCell><Typography variant="body2">{task.employee.name}</Typography><Typography variant="caption" color="text.secondary">{task.employee.id || "Employee ID unavailable"}</Typography></TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkIn.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkOut.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.sessionStatus.replaceAll("_", " ")}</TableCell>
-        </TableRow>)}</TableBody></Table></TableContainer>}
+        </TableRow>)}</TableBody></Table></OperationsTable>}
       </Stack>
     </Stack></DialogContent><DialogActions><Button onClick={() => setViewPatient(null)}>Close profile</Button></DialogActions></>}</Dialog>
   </Stack>;

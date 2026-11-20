@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, Chip, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, Chip, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import VerifiedUserRoundedIcon from "@mui/icons-material/VerifiedUserRounded";
 import SmartToyRoundedIcon from "@mui/icons-material/SmartToyRounded";
 import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import { fetchAttendanceLedger, type AttendanceRecord } from "../api/client";
-import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
+import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { formatAppDateTime } from "../utils/dateTime";
 
 const dateTime = (value: string | null) => formatAppDateTime(value, { dateStyle: "short", timeStyle: "short" });
@@ -39,7 +39,7 @@ export function ApprovedLedgerPage() {
     </Card>
     <Card>
       {query.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Approved attendance ledger"><TableHead><TableRow>{["Session / assignment", "Employee", "Patient", "Scheduled shift", "Check-in", "Check-out", "Backend delivery"].map((label) => <TableCell key={label} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{entries.map((row) => <TableRow key={row.sessionId} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.sessionId.slice(0, 8)}</Typography><Typography variant="caption" color="text.secondary">{row.assignmentId}</Typography></TableCell><TableCell>{row.employee.name}</TableCell><TableCell>{row.patient.name}</TableCell><TableCell>{dateTime(row.scheduledStartAt)}<Typography variant="caption" display="block" color="text.secondary">to {dateTime(row.scheduledEndAt)}</Typography></TableCell><TableCell>{dateTime(row.checkIn.reportedAt)}</TableCell><TableCell>{dateTime(row.checkOut.reportedAt)}</TableCell><TableCell><StatusChip status={row.backendDeliveryStatus} /></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+      <OperationsTable><Table size="small" aria-label="Approved attendance ledger"><TableHead><TableRow>{["Session / assignment", "Employee", "Patient", "Scheduled shift", "Check-in", "Check-out", "Backend delivery"].map((label) => <TableCell key={label} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{entries.map((row) => <TableRow key={row.sessionId} hover><TableCell><Typography variant="body2" fontWeight={700}>{row.sessionId.slice(0, 8)}</Typography><Typography variant="caption" color="text.secondary">{row.assignmentId}</Typography></TableCell><TableCell>{row.employee.name}</TableCell><TableCell>{row.patient.name}</TableCell><TableCell>{dateTime(row.scheduledStartAt)}<Typography variant="caption" display="block" color="text.secondary">to {dateTime(row.scheduledEndAt)}</Typography></TableCell><TableCell>{dateTime(row.checkIn.reportedAt)}</TableCell><TableCell>{dateTime(row.checkOut.reportedAt)}</TableCell><TableCell><StatusChip status={row.backendDeliveryStatus} /></TableCell></TableRow>)}</TableBody></Table></OperationsTable>
       {query.isSuccess && entries.length === 0 && <Box sx={{ py: 5, textAlign: "center" }}><Typography fontWeight={700}>No completed attendance sessions yet</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>A session appears here after both check-in and check-out are confirmed.</Typography></Box>}
     </Card>
   </Stack>;

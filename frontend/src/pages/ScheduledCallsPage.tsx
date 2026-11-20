@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import EventNoteRoundedIcon from "@mui/icons-material/EventNoteRounded";
 import PhoneInTalkRoundedIcon from "@mui/icons-material/PhoneInTalkRounded";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import { fetchAthulyaSchedules, fetchScheduledAthulyaCalls, fetchSessionArtifacts, type AthulyaSchedule, type ScheduledAthulyaCallItem } from "../api/client";
 import { CallRecording } from "../components/CallRecording";
-import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
+import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 
 const ZONE = "Asia/Kolkata";
 
@@ -135,7 +135,7 @@ export function ScheduledCallsPage() {
   const dateText = dateLabel(selectedDate);
 
   return <Stack spacing={2.5}>
-    <PageHeader title="Scheduled calls" actions={<Chip icon={<EventNoteRoundedIcon />} label={dateText} variant="outlined" />} />
+    <PageHeader eyebrow="ATTENDANCE / CALL OPERATIONS" title="Scheduled calls" description="Review the check-in and check-out call jobs planned for the selected day." actions={<Chip icon={<EventNoteRoundedIcon />} label={dateText} variant="outlined" />} />
     <Grid container spacing={1.75}>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Athulya schedules" value={schedulesQuery.isLoading ? "—" : schedules.length.toLocaleString()} detail="Imported for this date" icon={<EventNoteRoundedIcon />} /></Grid>
       <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Queued in our system" value={systemCallsQuery.isLoading ? "—" : queueCount.toLocaleString()} detail="Upcoming check-in and check-out jobs" icon={<PhoneInTalkRoundedIcon />} tint="#e9efff" accent="#1557c0" /></Grid>
@@ -152,7 +152,7 @@ export function ScheduledCallsPage() {
         <FormControl size="small" sx={{ minWidth: 190 }}><InputLabel id="scheduled-status-label">System queue status</InputLabel><Select labelId="scheduled-status-label" value={statusFilter} label="System queue status" onChange={(event) => { setStatusFilter(event.target.value); setPage(0); }}><MenuItem value="all">All statuses</MenuItem>{["queued", "processing", "calling", "completed", "not queued", "needs attention", "cancelled"].map((status) => <MenuItem key={status} value={status} sx={{ textTransform: "capitalize" }}>{status}</MenuItem>)}</Select></FormControl>
         <Chip label={`${filtered.length} call items`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", md: "center" } }} />
       </Stack>
-      <TableContainer sx={{ overflowX: "auto" }}>
+      <OperationsTable sx={{ overflowX: "auto" }}>
         <Table size="small" sx={{ minWidth: 1120 }} aria-label="Athulya schedules and system call jobs">
           <TableHead><TableRow>{["Schedule ID", "Patient", "Caregiver", "Service", "Call stage", "Duty time", "System queue", "Next system call", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>
@@ -171,7 +171,7 @@ export function ScheduledCallsPage() {
             {schedulesQuery.isSuccess && schedules.length > 0 && filtered.length === 0 && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5 }}>No call items match these filters.</TableCell></TableRow>}
           </TableBody>
         </Table>
-      </TableContainer>
+      </OperationsTable>
       <TablePagination component="div" count={filtered.length} page={page} onPageChange={(_, next) => setPage(next)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Call items per page" />
     </Card>
 

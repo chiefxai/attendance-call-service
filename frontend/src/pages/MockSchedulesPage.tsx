@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, IconButton, MenuItem, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, IconButton, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import { createMockAthulyaSchedule, deleteMockAthulyaSchedule, fetchAthulyaSyncRuns, fetchMockAthulyaSchedules, startAthulyaSync, updateMockAthulyaSchedule, type MockAthulyaSchedule } from "../api/client";
-import { MetricCard, PageHeader } from "../components/OperationsUI";
+import { MetricCard, PageHeader, OperationsTable } from "../components/OperationsUI";
 import { formatAppDateTime } from "../utils/dateTime";
 
 function todayIndia(value = new Date()) {
@@ -147,7 +147,7 @@ export function MockSchedulesPage() {
 
   return (
     <Stack spacing={3}>
-      <PageHeader title="Mock Athulya schedules" />
+      <PageHeader eyebrow="DEVELOPMENT / TEST DATA" title="Mock Athulya schedules" description="Manage isolated schedule fixtures and verify integration behavior without changing live data." />
       <Alert severity="info">
         Mock schedules are isolated test data. New schedules default to <b>Scheduled</b> so you can test call scheduling. Use <b>Completed</b> when you want to import the schedule without placing outbound calls.
       </Alert>
@@ -166,7 +166,7 @@ export function MockSchedulesPage() {
               <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={openCreate}>Add schedule</Button>
             </Stack>
           </Stack>
-          <TableContainer sx={{ mt: 2 }}>
+          <OperationsTable sx={{ mt: 2 }}>
             <Table size="small">
               <TableHead><TableRow>
                 <TableCell>Date / time</TableCell><TableCell>Patient</TableCell><TableCell>Caregiver</TableCell><TableCell>Phone</TableCell><TableCell>Status</TableCell><TableCell align="right">Actions</TableCell>
@@ -186,7 +186,7 @@ export function MockSchedulesPage() {
                 {!rows.length && <TableRow><TableCell colSpan={6}><Typography color="text.secondary" textAlign="center" py={3}>{schedules.isLoading ? "Loading mock schedules…" : "No mock schedules yet. Add one to get started."}</Typography></TableCell></TableRow>}
               </TableBody>
             </Table>
-          </TableContainer>
+          </OperationsTable>
         </CardContent>
       </Card>
       <Card variant="outlined">
@@ -218,7 +218,7 @@ export function MockSchedulesPage() {
         <CardContent>
           <Typography variant="h6" fontWeight={750}>Sync activity</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Automatically refreshes every few seconds while you work.</Typography>
-          <Table size="small">
+          <OperationsTable sx={{ mt: 1.5 }}><Table size="small">
             <TableHead><TableRow><TableCell>Started</TableCell><TableCell>Date</TableCell><TableCell>Source</TableCell><TableCell>Status</TableCell><TableCell>Received</TableCell><TableCell>Saved / updated</TableCell><TableCell>Error</TableCell></TableRow></TableHead>
             <TableBody>
               {(runs.data || []).slice(0, 8).map((run) => <TableRow key={run.id}>
@@ -228,7 +228,7 @@ export function MockSchedulesPage() {
               </TableRow>)}
               {!runs.data?.length && <TableRow><TableCell colSpan={7}><Typography color="text.secondary" textAlign="center" py={2}>No sync activity yet.</Typography></TableCell></TableRow>}
             </TableBody>
-          </Table>
+          </Table></OperationsTable>
         </CardContent>
       </Card>
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">

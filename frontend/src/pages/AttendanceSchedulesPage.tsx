@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
@@ -9,7 +9,7 @@ import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaIntegration, fetchAthulyaSchedules, fetchAthulyaSyncRuns, fetchMockPlatformServerSettings, fetchSessionArtifacts, startAthulyaSync, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
-import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
+import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
 import { SortByMenu } from "../components/SortByMenu";
 
@@ -159,12 +159,42 @@ function SubmissionStatusCell({ event }: { event?: AthulyaAttendanceSubmission }
   </Stack>;
 }
 
-function ScheduleAttendanceCell({ event, localRecords, stage, scheduledTime }: { event?: AthulyaAttendanceSubmission; localRecords: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduledTime: string | null | undefined }) {
+function compactScheduleTime(value: string, scheduleDate: string | null | undefined) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const dateKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  if (dateKey === scheduleDate) return scheduleClock(value);
+  return new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOut", scheduleDate: string | null | undefined) {
+  const candidates = records.map((record) => ({ record, value: record[stage], reason: record.stageReasons[stage] }));
+  const priority = (status: string) => status === "calling" || status === "processing" ? 4 : ["retry", "follow_up"].includes(status) ? 3 : status === "escalated" ? 2 : status === "unresolved" ? 1 : 0;
+  const current = candidates.sort((left, right) => priority(right.value.status) - priority(left.value.status))[0];
+  if (!current) return null;
+  if (current.value.status === "calling") return "Calling now";
+  if (current.value.status === "processing") return "Processing call";
+  if (current.value.status === "retry" || (current.value.status === "follow_up" && current.reason !== "employee_requested_callback")) {
+    return current.value.nextCallAt ? `Retry · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Retry scheduled";
+  }
+  if (current.value.status === "follow_up") {
+    return current.value.nextCallAt ? `Callback · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Callback requested";
+  }
+  if (current.value.status === "escalated") {
+    return current.value.nextCallAt ? `Care manager · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Care manager follow-up";
+  }
+  if (current.value.status === "unresolved") return "Manual follow-up needed";
+  return null;
+}
+
+function ScheduleAttendanceCell({ event, localRecords, stage, scheduledTime, scheduleDate }: { event?: AthulyaAttendanceSubmission; localRecords: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduledTime: string | null | undefined; scheduleDate: string | null | undefined }) {
   const localTimestamp = localRecords.find((record) => record[stage].status === "confirmed")?.[stage].reportedAt;
+  const callHint = localStageHint(localRecords, stage, scheduleDate);
   return <Stack spacing={0.45} alignItems="flex-start">
     <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
       {event ? dateTimeLabel(event.eventAt) : localTimestamp ? dateTimeLabel(localTimestamp) : `Scheduled ${scheduleClock(scheduledTime)}`}
     </Typography>
+    {callHint && <Typography variant="caption" color={callHint.startsWith("Follow-up") ? "error.main" : "text.secondary"} sx={{ lineHeight: 1.2, whiteSpace: "nowrap" }}>{callHint}</Typography>}
     <SubmissionStatusCell event={event} />
   </Stack>;
 }
@@ -248,11 +278,11 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
           </Typography>
           <StatusChip compact status={displayStatus} />
         </Stack>
-        {(["follow_up", "retry", "escalated"].includes(stageStatus.status)) && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary">
-          {stageStatus.status === "escalated" ? `Care manager call scheduled:` : employeeRequestedDelay ? `Follow-up #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:` : `Retry #${Math.max(1, attemptCount)} · call ${attemptCount + 1} scheduled:`} {dateTimeLabel(stageStatus.nextCallAt)}
+        {(["follow_up", "retry", "escalated"].includes(stageStatus.status)) && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.2 }}>
+          {stageStatus.status === "escalated" ? "Care manager" : employeeRequestedDelay ? "Callback" : "Retry"} · {compactScheduleTime(stageStatus.nextCallAt, scheduleDate)}
         </Typography>}
-        {stageStatus.status === "unresolved" && <Typography variant="caption" color="text.secondary">Care manager retry limit reached</Typography>}
-        {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary">Caregiver retry limit reached</Typography>}
+        {stageStatus.status === "unresolved" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Follow-up needed</Typography>}
+        {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Retry limit reached</Typography>}
       </Stack>;
     })}
   </Stack>;
@@ -402,7 +432,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const latestSelectedDateRun = syncRunRows.find((run) => run.fromDate === selectedDate);
 
   return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
-    <PageHeader title="Schedule & Attendance" description="Review imported duties, attendance calls, and Athulya submission status in one place." showOutboundOnly={false} />
+    <PageHeader eyebrow="ATHULYA / DUTY OPERATIONS" title="Schedule & Attendance" description="Review imported duties, attendance calls, and Athulya submission status in one place." />
     <Card variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderColor: "#e2e9e6", boxShadow: "none" }}>
       <Stack spacing={1.5}>
         <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ xs: "stretch", lg: "center" }} justifyContent="space-between">
@@ -451,7 +481,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         <FormControl size="small" sx={{ minWidth: 160 }}><InputLabel>Caregiver</InputLabel><Select label="Caregiver" value={caregiverFilter} onChange={(event) => setCaregiverFilter(event.target.value)}><MenuItem value="all">All caregivers</MenuItem>{caregiverOptions.map((caregiver) => <MenuItem key={caregiver.id || caregiver.name} value={caregiver.id || caregiver.name}>{caregiver.name || caregiver.id}</MenuItem>)}</Select></FormControl>
         <SortByMenu value={sortBy} options={scheduleSortOptions} onChange={setSortBy} />
       </Stack>
-      <TableContainer sx={{ flex: 1, minHeight: { xs: 250, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}>
+      <OperationsTable sx={{ flex: 1, minHeight: { xs: 250, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}>
         <Table size="small" sx={{ minWidth: 1220 }} aria-label="Schedule and attendance management">
           <TableHead><TableRow>{["Schedule ID", "Patient", "Caregiver", "Branch", "Schedule time", "Check-in", "Check-out", "Attendance status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap", bgcolor: "#f7f9fc" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>
@@ -461,15 +491,15 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
               <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.id).join(", ") || "—"}</TableCell>
               <TableCell>{schedule.branch || "—"}</TableCell>
               <TableCell sx={{ whiteSpace: "nowrap" }}>{scheduleClock(schedule.startTime)} – {scheduleClock(schedule.endTime)}<Typography variant="caption" display="block" color="text.secondary">{scheduleDateLabel(schedule.date)}</Typography></TableCell>
-              <TableCell><ScheduleAttendanceCell event={latestStageSubmission(events, "check_in")} localRecords={localTasks} stage="checkIn" scheduledTime={schedule.startTime} /></TableCell>
-              <TableCell><ScheduleAttendanceCell event={latestStageSubmission(events, "check_out")} localRecords={localTasks} stage="checkOut" scheduledTime={schedule.endTime} /></TableCell>
+              <TableCell><ScheduleAttendanceCell event={latestStageSubmission(events, "check_in")} localRecords={localTasks} stage="checkIn" scheduledTime={schedule.startTime} scheduleDate={schedule.date} /></TableCell>
+              <TableCell><ScheduleAttendanceCell event={latestStageSubmission(events, "check_out")} localRecords={localTasks} stage="checkOut" scheduledTime={schedule.endTime} scheduleDate={schedule.date} /></TableCell>
               <TableCell><StatusChip compact status={status} /></TableCell>
               <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>View details</Button></TableCell>
             </TableRow>)}
             {schedules.isSuccess && pageRows.length === 0 && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 5 }}>{schedulesData.length === 0 ? `No schedules found for ${dateLabel}. Choose another date or sync this service date.` : "No schedules match the current search and filters."}</TableCell></TableRow>}
           </TableBody>
         </Table>
-      </TableContainer>
+      </OperationsTable>
       <TablePagination component="div" count={sortedSchedules.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Schedules per page" />
     </Card>
 
@@ -477,10 +507,10 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
       <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}><Box><Typography fontWeight={700}>Schedule Sync History</Typography><Typography variant="caption" color="text.secondary">Recent manual and automatic imports for the organization.</Typography></Box></AccordionSummary>
       <AccordionDetails sx={{ pt: 0 }}>
         {syncRuns.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load schedule sync history.</Alert>}
-        {syncRuns.isLoading ? <LinearProgress /> : <TableContainer sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Started", "Type", "Scope", "Schedule date", "Status", "Received", "Saved", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
+        {syncRuns.isLoading ? <LinearProgress /> : <OperationsTable sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Started", "Type", "Scope", "Schedule date", "Status", "Received", "Saved", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
           {syncRunRows.map((run) => <TableRow key={run.id}><TableCell>{formatAppDateTime(run.startedAt)}</TableCell><TableCell>{run.syncSource === "automatic" ? "Automatic" : "Manual"}</TableCell><TableCell>{run.syncScope === "branch" ? `Branch ${run.syncScopeId}` : run.syncScope === "care_manager" ? `Care Manager ${run.syncScopeId}` : "Everyone"}</TableCell><TableCell>{run.fromDate && run.fromDate === run.toDate ? run.fromDate : `${run.fromDate || "—"} – ${run.toDate || "—"}`}</TableCell><TableCell><StatusChip compact status={run.status} /></TableCell><TableCell>{run.recordsReceived}</TableCell><TableCell>{run.recordsUpserted}</TableCell><TableCell>{run.errorMessage || "—"}</TableCell></TableRow>)}
           {syncRuns.isSuccess && syncRunRows.length === 0 && <TableRow><TableCell colSpan={8} align="center">No schedule sync history yet.</TableCell></TableRow>}
-        </TableBody></Table></TableContainer>}
+        </TableBody></Table></OperationsTable>}
       </AccordionDetails>
     </Accordion>}
 
@@ -493,10 +523,10 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
           <TextField size="small" label="Schedule ID" value={submissionFilters.scheduleId} onChange={(event) => setSubmissionFilters((current) => ({ ...current, scheduleId: event.target.value }))} />
         </Stack>
         {submissionQuery.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load attendance submission history.</Alert>}
-        {submissionQuery.isLoading ? <LinearProgress /> : <TableContainer sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Event time", "Event", "Patient", "Caregiver", "Schedule ID", "Status", "Attempts", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
+        {submissionQuery.isLoading ? <LinearProgress /> : <OperationsTable sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Event time", "Event", "Patient", "Caregiver", "Schedule ID", "Status", "Attempts", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
           {filteredSubmissionEvents.map((event) => <TableRow key={event.id}><TableCell>{formatAppDateTime(event.eventAt)}</TableCell><TableCell>{event.eventType === "check_in" ? "Check-in" : "Check-out"}</TableCell><TableCell>{event.patientName || event.patientId || "—"}</TableCell><TableCell>{event.caregiverName || "—"}</TableCell><TableCell>{event.scheduleId || "—"}</TableCell><TableCell><StatusChip compact status={event.status === "awaiting_api_specification" ? "pending" : event.status} /></TableCell><TableCell>{event.retryCount}</TableCell><TableCell sx={{ maxWidth: 300, whiteSpace: "normal", overflowWrap: "anywhere" }}>{event.errorMessage || "—"}</TableCell></TableRow>)}
           {submissionQuery.isSuccess && filteredSubmissionEvents.length === 0 && <TableRow><TableCell colSpan={8} align="center">No attendance submissions match these filters.</TableCell></TableRow>}
-        </TableBody></Table></TableContainer>}
+        </TableBody></Table></OperationsTable>}
         {submissionEvents.length >= 500 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Showing the latest 500 events returned for the selected service date.</Typography>}
       </AccordionDetails>
     </Accordion>}

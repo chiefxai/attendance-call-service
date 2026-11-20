@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, Card, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import MedicalServicesRoundedIcon from "@mui/icons-material/MedicalServicesRounded";
@@ -9,7 +9,7 @@ import PhoneIphoneRoundedIcon from "@mui/icons-material/PhoneIphoneRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import { AxiosError } from "axios";
 import { fetchAttendance, fetchStaff, updateStaff, type AttendanceRecord, type CreateStaffPayload, type StaffRecord } from "../api/client";
-import { MetricCard, PageHeader, SearchFilterBar } from "../components/OperationsUI";
+import { MetricCard, PageHeader, SearchFilterBar, OperationsTable } from "../components/OperationsUI";
 import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from "../utils/phone";
 import { AddressFields } from "../components/AddressFields";
 import { SortByMenu } from "../components/SortByMenu";
@@ -131,7 +131,7 @@ export function StaffRecordsPage() {
         </>}
       />
       {query.isLoading && <LinearProgress />}
-      <TableContainer sx={{ flex: 1, minHeight: { xs: 230, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}><Table size="small" aria-label="Care giver directory" sx={{ minWidth: 900 }}>
+      <OperationsTable sx={{ flex: 1, minHeight: { xs: 230, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}><Table size="small" aria-label="Care giver directory" sx={{ minWidth: 900 }}>
         <TableHead><TableRow>{["Staff name", "Company / vendor", "Branch", "Mobile number", "Address", "Language", "Actions"].map((item) => <TableCell key={item} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{item}</TableCell>)}</TableRow></TableHead>
         <TableBody>{pageRows.map((row) => <TableRow key={`${row.id}:${row.assignmentId}`} hover>
           <TableCell><Typography variant="body2" fontWeight={700}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.id}</Typography></TableCell>
@@ -142,7 +142,7 @@ export function StaffRecordsPage() {
           <TableCell>{row.language.toUpperCase()}</TableCell>
           <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => setSelected(row)}>View</Button><Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEdit(row)}>Edit</Button></Stack></TableCell>
         </TableRow>)}</TableBody>
-      </Table></TableContainer>
+      </Table></OperationsTable>
       <TablePagination component="div" count={filtered.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Staff per page" />
       {query.isSuccess && filtered.length === 0 && <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No care givers match these filters.</Typography>}
     </Card>
@@ -181,13 +181,13 @@ export function StaffRecordsPage() {
         {upcomingTasks.isLoading && <LinearProgress />}
         {upcomingTasks.isError && <Alert severity="error">Could not load this staff member’s upcoming tasks.</Alert>}
         {upcomingTasks.isSuccess && upcomingForSelected.length === 0 && <Alert severity="info">No upcoming assigned tasks for this staff member.</Alert>}
-        {upcomingForSelected.length > 0 && <TableContainer component={Card} variant="outlined"><Table size="small" aria-label="Upcoming staff tasks"><TableHead><TableRow><TableCell>Patient</TableCell><TableCell>Duty interval · local time</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForSelected.map((task) => <TableRow key={task.sessionId}>
+        {upcomingForSelected.length > 0 && <OperationsTable component={Card} variant="outlined"><Table size="small" aria-label="Upcoming staff tasks"><TableHead><TableRow><TableCell>Patient</TableCell><TableCell>Duty interval · local time</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForSelected.map((task) => <TableRow key={task.sessionId}>
           <TableCell><Typography variant="body2" fontWeight={650}>{task.patient.name || "Patient"}</Typography><Typography variant="caption" color="text.secondary">{task.assignmentId}</Typography></TableCell>
           <TableCell>{formatDutyInterval(task.scheduledStartAt, task.scheduledEndAt)}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkIn.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkOut.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.sessionStatus.replaceAll("_", " ")}</TableCell>
-        </TableRow>)}</TableBody></Table></TableContainer>}
+        </TableRow>)}</TableBody></Table></OperationsTable>}
       </Stack>
       <Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert>
     </Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>

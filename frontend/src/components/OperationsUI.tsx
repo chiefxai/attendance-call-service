@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Alert, Box, Button, Card, CardContent, Chip, InputAdornment, Popover, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, InputAdornment, Popover, Stack, TableContainer, TextField, Typography } from "@mui/material";
+import type { TableContainerProps } from "@mui/material/TableContainer";
 import FilterListRoundedIcon from "@mui/icons-material/FilterListRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 
@@ -10,12 +11,13 @@ export function DemoDataNotice({ children = "Illustrative preview data — live 
 
 export const PageHeaderTargetContext = createContext<HTMLElement | null>(null);
 
-export function PageHeader({ title, description, actions, showOutboundOnly = true }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode; showOutboundOnly?: boolean }) {
+export function PageHeader({ eyebrow, title, description, actions, showOutboundOnly = false }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode; showOutboundOnly?: boolean }) {
   const target = useContext(PageHeaderTargetContext);
   if (!target) return null;
   return createPortal(
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} spacing={{ xs: 1, sm: 2 }} sx={{ width: "100%", minWidth: 0 }}>
       <Box sx={{ minWidth: 0, flex: 1 }}>
+        {eyebrow && <Typography variant="overline" color="text.secondary" sx={{ display: "block", fontSize: 10, lineHeight: 1.4, letterSpacing: ".11em", fontWeight: 700 }}>{eyebrow}</Typography>}
         <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, flexWrap: "wrap" }}>
           <Typography variant="h5" sx={{ fontWeight: 750 }} noWrap>{title}</Typography>
           {showOutboundOnly && <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650 }} />}
@@ -26,6 +28,25 @@ export function PageHeader({ title, description, actions, showOutboundOnly = tru
     </Stack>,
     target,
   );
+}
+
+export function OperationsTable({ children, sx, ...props }: TableContainerProps) {
+  return <TableContainer
+    {...props}
+    sx={[
+      {
+        width: "100%",
+        overflowX: "auto",
+        "& .MuiTableHead-root .MuiTableCell-root": {
+          bgcolor: "#f7f9fc",
+          fontWeight: 750,
+          whiteSpace: "nowrap",
+        },
+        "& .MuiTableBody-root .MuiTableRow-root:hover": { bgcolor: "action.hover" },
+      },
+      ...(Array.isArray(sx) ? sx : sx ? [sx] : []),
+    ]}
+  >{children}</TableContainer>;
 }
 
 export function MetricCard({ label, value, detail, icon, tint = "#e9efff", accent = "#1557c0", tag, onClick, compact = false }: { label: string; value: string; detail?: string; icon: ReactNode; tint?: string; accent?: string; tag?: string; onClick?: () => void; compact?: boolean }) {
@@ -51,7 +72,7 @@ export function StatusChip({ status, compact = false }: { status: string; compac
     "retry scheduled": "Retry",
     retry: "Retry",
     escalated: "Escalated",
-    unresolved: "Unresolved",
+    unresolved: "Follow-up",
     delayed: "Callback",
     completed: "Done",
     confirmed: "Done",
@@ -62,7 +83,7 @@ export function StatusChip({ status, compact = false }: { status: string; compac
     "pending check in": "Pending check-in",
     "missing check out": "Missing check-out",
   };
-  const label = compact ? compactLabels[normalized] || normalized : ["not placed", "call not placed"].includes(normalized) ? "Call Not Placed" : normalized === "not answered" ? "Not Answered" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
+  const label = compact ? compactLabels[normalized] || normalized : ["not placed", "call not placed"].includes(normalized) ? "Call Not Placed" : normalized === "not answered" ? "Not Answered" : normalized === "unresolved" ? "Needs manual follow-up" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
   const color = ["verified", "confirmed", "completed", "checked in", "active", "synced", "delivered", "check in", "check out"].includes(normalized) ? "success"
     : ["not placed", "not answered", "no answer", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable", "retry", "retry scheduled", "unresolved", "missing check out"].includes(normalized) ? "error"
       : ["delayed", "late", "retrying", "retry scheduled", "escalated", "pending", "pending check in", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";

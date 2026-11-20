@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
+import { OperationsTable } from "../components/OperationsUI";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Card, Chip, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Button, Card, Chip, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import FileDownloadRoundedIcon from "@mui/icons-material/FileDownloadRounded";
 import { fetchAttendance, type AttendanceRecord } from "../api/client";
 import { formatAppDateTime, appDateKey, APP_TIME_ZONE } from "../utils/dateTime";
@@ -34,9 +35,9 @@ export function ReportsPage() {
     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Times shown in {APP_TIME_ZONE}. CSV timestamps are UTC.</Typography>
     {query.isLoading && <LinearProgress sx={{ mt: 2 }} />}
     {query.isError && <Typography color="error" sx={{ mt: 2 }}>Unable to load attendance records.</Typography>}
-    <TableContainer sx={{ mt: 2 }}><Table size="small"><TableHead><TableRow>{["Patient", "Caregiver", "Scheduled interval", "Actual check-in", "Actual check-out", "Status", "Athulya export"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
+    <OperationsTable sx={{ mt: 2 }}><Table size="small"><TableHead><TableRow>{["Patient", "Caregiver", "Scheduled interval", "Actual check-in", "Actual check-out", "Status", "Athulya export"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
       {rows.map((row) => <TableRow key={row.sessionId} hover><TableCell><Typography fontWeight={650}>{row.patient.name}</Typography><Typography variant="caption" color="text.secondary">{row.patient.id || "ID unavailable"}</Typography></TableCell><TableCell><Typography fontWeight={650}>{row.employee.name}</Typography><Typography variant="caption" color="text.secondary">{row.employee.companyName || "ATHULYA"}</Typography></TableCell><TableCell>{formatAppDateTime(row.scheduledStartAt)}<Typography variant="caption" display="block" color="text.secondary">to {formatAppDateTime(row.scheduledEndAt)}</Typography></TableCell><TableCell>{formatAppDateTime(row.checkIn.reportedAt)}</TableCell><TableCell>{formatAppDateTime(row.checkOut.reportedAt)}</TableCell><TableCell>{row.checkIn.status} / {row.checkOut.status}</TableCell><TableCell>Awaiting API specification</TableCell></TableRow>)}
       {rows.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No attendance sessions match this date range.</TableCell></TableRow>}
-    </TableBody></Table></TableContainer>
+    </TableBody></Table></OperationsTable>
   </Card>;
 }

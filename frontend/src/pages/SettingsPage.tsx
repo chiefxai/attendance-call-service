@@ -64,7 +64,7 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader title={sectionTitle} />
+    <PageHeader eyebrow="WORKSPACE CONFIGURATION" title={sectionTitle} description="Manage calling behavior, API access, and Athulya integration settings." />
     {section === "calling" ? <Stack spacing={2.5}>
       <Alert severity="info">
         Environment values in .env are the defaults. Saving here stores workspace overrides in PostgreSQL. Reset removes the overrides and returns to the environment defaults. Retry changes apply as calls finish; retries already queued keep their current scheduled time.

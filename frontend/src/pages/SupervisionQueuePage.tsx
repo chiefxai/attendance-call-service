@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Chip, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, Card, Chip, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import CallMadeRoundedIcon from "@mui/icons-material/CallMadeRounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import AssignmentLateRoundedIcon from "@mui/icons-material/AssignmentLateRounded";
 import { fetchSupervisionQueue } from "../api/client";
-import { MetricCard, PageHeader, StatusChip } from "../components/OperationsUI";
+import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { formatAppDateTime } from "../utils/dateTime";
 
 const timeLabel = (value: string) => formatAppDateTime(value, { dateStyle: "short", timeStyle: "short" });
@@ -34,7 +34,7 @@ export function SupervisionQueuePage() {
     <Card>
       <Stack direction={{ xs: "column", lg: "row" }} spacing={1.2} sx={{ p: 2, borderBottom: "1px solid #e8edf3" }}><TextField size="small" label="Search assignment, employee, patient" value={search} onChange={(event) => setSearch(event.target.value)} sx={{ flex: 1 }} /><FormControl size="small" sx={{ minWidth: 150 }}><InputLabel>Severity</InputLabel><Select label="Severity" value={severity} onChange={(event) => setSeverity(event.target.value)}><MenuItem value="all">All severities</MenuItem><MenuItem value="critical">Critical</MenuItem><MenuItem value="high">High</MenuItem></Select></FormControl><Chip label={`${items.length} items`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", lg: "center" } }} /></Stack>
       {queue.isLoading && <LinearProgress />}
-      <TableContainer><Table size="small" aria-label="Attendance supervision queue"><TableHead><TableRow>{["Queue / severity", "Assignment / stage", "Employee & patient", "Reason", "Call attempts", "Scheduled time", "Status", "Session"].map((label) => <TableCell key={label} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{items.map((item) => <TableRow key={item.id} hover><TableCell><Typography variant="body2" fontWeight={700}>{item.id.slice(0, 8)}</Typography><StatusChip status={item.severity} /></TableCell><TableCell><Typography variant="body2" fontWeight={650}>{item.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{item.stage.replaceAll("_", " ")}</Typography></TableCell><TableCell><Typography variant="body2" fontWeight={650}>{item.employee.name}</Typography><Typography variant="caption" color="text.secondary">{item.patient.name}</Typography></TableCell><TableCell>{item.reason}</TableCell><TableCell>{item.callAttemptCount}</TableCell><TableCell>{timeLabel(item.scheduledAt)}</TableCell><TableCell><StatusChip status={item.status} /></TableCell><TableCell><Button size="small" onClick={() => navigate(`/sessions/${item.sessionId}`)}>Open</Button></TableCell></TableRow>)}</TableBody></Table></TableContainer>
+      <OperationsTable><Table size="small" aria-label="Attendance supervision queue"><TableHead><TableRow>{["Queue / severity", "Assignment / stage", "Employee & patient", "Reason", "Call attempts", "Scheduled time", "Status", "Session"].map((label) => <TableCell key={label} sx={{ bgcolor: "#f7f9fc", fontWeight: 750, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{items.map((item) => <TableRow key={item.id} hover><TableCell><Typography variant="body2" fontWeight={700}>{item.id.slice(0, 8)}</Typography><StatusChip status={item.severity} /></TableCell><TableCell><Typography variant="body2" fontWeight={650}>{item.assignmentId}</Typography><Typography variant="caption" color="text.secondary">{item.stage.replaceAll("_", " ")}</Typography></TableCell><TableCell><Typography variant="body2" fontWeight={650}>{item.employee.name}</Typography><Typography variant="caption" color="text.secondary">{item.patient.name}</Typography></TableCell><TableCell>{item.reason}</TableCell><TableCell>{item.callAttemptCount}</TableCell><TableCell>{timeLabel(item.scheduledAt)}</TableCell><TableCell><StatusChip status={item.status} /></TableCell><TableCell><Button size="small" onClick={() => navigate(`/sessions/${item.sessionId}`)}>Open</Button></TableCell></TableRow>)}</TableBody></Table></OperationsTable>
       {queue.isSuccess && items.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 5 }}>The attendance supervision queue is clear.</Typography>}
     </Card>
   </Stack>;
