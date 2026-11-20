@@ -244,7 +244,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [selectedDate, setSelectedDate] = useState(todayInIndia);
-  const [sortBy, setSortBy] = useState<ScheduleSort>("current_upcoming");
+  const [sortBy, setSortBy] = useState<ScheduleSort>("check_in_descending");
   const [selectedSchedule, setSelectedSchedule] = useState<AthulyaSchedule | null>(null);
   const isAdmin = userRole === "admin";
   const schedules = useQuery({
