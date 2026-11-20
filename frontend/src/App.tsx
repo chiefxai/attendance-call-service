@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
@@ -44,7 +44,6 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
 
 function App() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -84,24 +83,11 @@ function App() {
             <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
           </ListItemButton>
         ))}
-        {user?.role === "admin" && <>
-          <ListItemButton selected={settingsSectionOpen} onClick={() => { navigate("/settings/calling"); setMobileOpen(false); }}
-            sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: settingsSectionOpen ? "primary.dark" : "text.secondary", "&.Mui-selected": { bgcolor: "#eaf3ef", "&:hover": { bgcolor: "#eaf3ef" } } }}>
-            <ListItemIcon sx={{ minWidth: 38, color: settingsSectionOpen ? "primary.main" : "inherit" }}><SettingsRoundedIcon /></ListItemIcon>
-            <ListItemText primary="Settings" primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
-          </ListItemButton>
-          {settingsSectionOpen && <Box sx={{ ml: 2.25, pl: 1.25, borderLeft: "1px solid #dce7e2" }}>
-            {[
-              { label: "Calling settings", path: "/settings/calling", icon: <HeadsetMicRoundedIcon fontSize="small" /> },
-              { label: "API configuration", path: "/settings/api", icon: <MenuBookRoundedIcon fontSize="small" /> },
-              { label: "Athulya integration", path: "/settings/athulya", icon: <FactCheckRoundedIcon fontSize="small" /> },
-            ].map((item) => <ListItemButton key={item.path} component={NavLink} to={item.path} end onClick={() => setMobileOpen(false)}
-              sx={{ borderRadius: 2, mb: 0.35, py: 0.85, px: 1.25, color: "text.secondary", "&.active": { color: "primary.dark", bgcolor: "#eaf3ef", "& .MuiListItemIcon-root": { color: "primary.main" } } }}>
-              <ListItemIcon sx={{ minWidth: 32, color: "inherit" }}>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 12.5, fontWeight: 600 }} />
-            </ListItemButton>)}
-          </Box>}
-        </>}
+        {user?.role === "admin" && <ListItemButton component={NavLink} to="/settings/calling" selected={settingsSectionOpen} onClick={() => setMobileOpen(false)}
+          sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: settingsSectionOpen ? "primary.dark" : "text.secondary", "&.Mui-selected": { bgcolor: "#eaf3ef", "&:hover": { bgcolor: "#eaf3ef" } } }}>
+          <ListItemIcon sx={{ minWidth: 38, color: settingsSectionOpen ? "primary.main" : "inherit" }}><SettingsRoundedIcon /></ListItemIcon>
+          <ListItemText primary="Settings" primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
+        </ListItemButton>}
         <ListItemButton component={NavLink} to="/api-access" onClick={() => setMobileOpen(false)}
           sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: "text.secondary", "&.active": { color: "primary.dark", bgcolor: "#eaf3ef", "& .MuiListItemIcon-root": { color: "primary.main" } } }}>
           <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}><MenuBookRoundedIcon /></ListItemIcon>
