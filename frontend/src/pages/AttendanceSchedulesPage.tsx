@@ -316,7 +316,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const enrichedSchedules = schedulesData.map((schedule) => {
     const localTasks = matchingAttendance(schedule, attendanceData);
     const events = scheduleSubmissionEvents(schedule, submissionEvents);
-    return { schedule, localTasks, events, status: unifiedAttendanceStatus(schedule, localTasks) };
+    return { schedule, localTasks, events, status: scheduleStatus(schedule, localTasks) };
   });
   const filteredSchedules = enrichedSchedules.filter(({ schedule, status }) => {
     const query = search.trim().toLowerCase();
@@ -421,7 +421,11 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
       {attendance.isError && <Alert severity="warning" sx={{ m: 1.5 }}>Local attendance call status could not be loaded.</Alert>}
       <Stack direction={{ xs: "column", lg: "row" }} spacing={1} alignItems={{ xs: "stretch", lg: "center" }} sx={{ p: { xs: 1.25, sm: 1.75 }, borderBottom: "1px solid #e8edf3", flexShrink: 0 }}>
         <TextField size="small" placeholder="Search patient, UHID, caregiver, schedule ID" value={search} onChange={(event) => setSearch(event.target.value)} InputProps={{ startAdornment: <SearchRoundedIcon fontSize="small" color="action" sx={{ mr: 1 }} /> }} sx={{ flex: 1, minWidth: 220 }} />
-        <FormControl size="small" sx={{ minWidth: 140 }}><InputLabel>Attendance</InputLabel><Select label="Attendance" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><MenuItem value="all">All statuses</MenuItem>{["upcoming", "pending check-in", "checked in", "missing check-out", "completed", "cancelled"].map((value) => <MenuItem key={value} value={value} sx={{ textTransform: "capitalize" }}>{value}</MenuItem>)}</Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 140 }}><InputLabel>Attendance</InputLabel><Select label="Attendance" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><MenuItem value="all">All statuses</MenuItem>{[
+          ["upcoming", "Upcoming"], ["in_progress", "In progress"], ["retry", "Retry"], ["retry_scheduled", "Retry scheduled"],
+          ["delayed", "Callback"], ["escalated", "Escalated"], ["attention_required", "Review"], ["unresolved", "Follow-up"],
+          ["completed", "Done"], ["cancelled", "Cancelled"],
+        ].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</Select></FormControl>
         <FormControl size="small" sx={{ minWidth: 140 }}><InputLabel>Branch</InputLabel><Select label="Branch" value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}><MenuItem value="all">All branches</MenuItem>{branchOptions.map((branch) => <MenuItem key={branch} value={branch}>{branch}</MenuItem>)}</Select></FormControl>
         <FormControl size="small" sx={{ minWidth: 160 }}><InputLabel>Caregiver</InputLabel><Select label="Caregiver" value={caregiverFilter} onChange={(event) => setCaregiverFilter(event.target.value)}><MenuItem value="all">All caregivers</MenuItem>{caregiverOptions.map((caregiver) => <MenuItem key={caregiver.id || caregiver.name} value={caregiver.id || caregiver.name}>{caregiver.name || caregiver.id}</MenuItem>)}</Select></FormControl>
         <SortByMenu value={sortBy} options={scheduleSortOptions} onChange={setSortBy} />
