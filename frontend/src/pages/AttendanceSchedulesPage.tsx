@@ -12,6 +12,7 @@ import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaIntegra
 import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
 import { SortByMenu } from "../components/SortByMenu";
+import { formatAppDateTime } from "../utils/dateTime";
 
 type ScheduleSort =
   | "current_upcoming"
@@ -230,62 +231,6 @@ function dateTimeLabel(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-IN", {
     day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata",
   }).format(date);
-}
-
-function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLabel, canAssessCall }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduleDate: string | null; scheduledTime: string | null | undefined; emptyLabel: string; canAssessCall: boolean }) {
-  const dueAt = scheduledInstant(scheduleDate, scheduledTime);
-  const overdue = Boolean(dueAt && dueAt.getTime() <= Date.now());
-  const stageName = stage === "checkIn" ? "Checked In" : "Completed";
-
-  if (!records.length) return <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
-    <Typography variant="body2" color={scheduleClock(scheduledTime) === "—" ? "text.disabled" : "text.secondary"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
-      {scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}
-    </Typography>
-    {canAssessCall && <StatusChip compact status={overdue ? "call not placed" : "upcoming"} />}
-  </Stack>;
-
-  return <Stack spacing={0.75}>
-    {records.map((record) => {
-      const stageStatus = record[stage];
-      const attemptCount = stage === "checkIn" ? record.checkInAttemptCount : record.checkOutAttemptCount;
-      const reason = stage === "checkIn" ? record.stageReasons.checkIn : record.stageReasons.checkOut;
-      const employeeRequestedDelay = stageStatus.status === "follow_up" && reason === "employee_requested_callback";
-      const retryScheduled = stageStatus.status === "retry" || (stageStatus.status === "follow_up" && !employeeRequestedDelay);
-      const wasNotPlaced = overdue && attemptCount === 0 && stageStatus.status === "scheduled";
-
-      let displayStatus = stageStatus.status;
-      if (stageStatus.status === "confirmed") displayStatus = stageName;
-      else if (stageStatus.status === "scheduled") displayStatus = wasNotPlaced ? "call not placed" : "upcoming";
-      else if (employeeRequestedDelay) displayStatus = "delayed";
-      else if (stageStatus.status === "retry") displayStatus = "retry";
-      else if (stageStatus.status === "escalated") displayStatus = "escalated";
-      else if (stageStatus.status === "unresolved") displayStatus = "unresolved";
-      else if (retryScheduled && reason === "not_answered") displayStatus = "not answered";
-      else if (retryScheduled) displayStatus = "retry scheduled";
-      else if (stageStatus.status === "review") displayStatus = "needs review";
-
-      const displayTime = stageStatus.status === "confirmed"
-        ? stageStatus.reportedAt || scheduledTime
-        : ["follow_up", "retry", "escalated"].includes(stageStatus.status) && stageStatus.nextCallAt
-          ? stageStatus.nextCallAt
-          : scheduledTime;
-
-      return <Stack key={record.sessionId} spacing={0.35} alignItems="flex-start">
-        {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}</Typography>}
-        <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="nowrap">
-          <Typography variant="body2" color={stageStatus.status === "confirmed" ? "text.primary" : displayTime ? "text.secondary" : "text.disabled"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
-            {displayTime ? scheduleClock(displayTime) : emptyLabel}
-          </Typography>
-          <StatusChip compact status={displayStatus} />
-        </Stack>
-        {(["follow_up", "retry", "escalated"].includes(stageStatus.status)) && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.2 }}>
-          {stageStatus.status === "escalated" ? "Care manager" : employeeRequestedDelay ? "Callback" : "Retry"} · {compactScheduleTime(stageStatus.nextCallAt, scheduleDate)}
-        </Typography>}
-        {stageStatus.status === "unresolved" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Follow-up needed</Typography>}
-        {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Retry limit reached</Typography>}
-      </Stack>;
-    })}
-  </Stack>;
 }
 
 export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "admin" | "care_manager" }) {
