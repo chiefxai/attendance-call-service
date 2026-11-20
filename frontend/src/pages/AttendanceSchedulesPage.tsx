@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TableSortLabel, TextField, Typography } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TableSortLabel, TextField, Typography } from "@mui/material";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
+import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
 import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaSchedules, fetchSessionArtifacts, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
@@ -371,12 +372,36 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         </DialogTitle>
         <DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 2.5, bgcolor: "#fbfcfb" }}>
           <Stack spacing={2}>
-            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none", borderColor: "#dfe8e3", bgcolor: "#f4f8f6" }}>
-              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Scheduled duty</Typography>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
-                <Detail label="Scheduled check-in" value={dateTimeLabel(scheduledInstant(selectedSchedule.date, selectedSchedule.startTime)?.toISOString())} />
-                <Detail label="Scheduled check-out" value={dateTimeLabel(scheduledInstant(selectedSchedule.date, selectedSchedule.endTime)?.toISOString())} />
+            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none", borderColor: "#d8e6df", bgcolor: "#f6faf8" }}>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={0.5} sx={{ mb: 1.5 }}>
+                <Box><Typography variant="subtitle1" fontWeight={800}>Attendance timeline</Typography><Typography variant="caption" color="text.secondary">Scheduled and reported times</Typography></Box>
+                <Chip size="small" label="Asia/Kolkata" variant="outlined" />
+              </Stack>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr" }, gap: 1.25 }}>
+                {[{ label: "Scheduled check-in", time: scheduledInstant(selectedSchedule.date, selectedSchedule.startTime) }, { label: "Scheduled check-out", time: scheduledInstant(selectedSchedule.date, selectedSchedule.endTime) }].map(({ label, time }) => <Box key={label} sx={{ p: 1.5, bgcolor: "#fff", border: "1px solid #e7ece9", borderRadius: 2 }}>
+                  <Typography variant="overline" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.4, fontWeight: 700 }}>{label}</Typography>
+                  <Typography variant="body1" fontWeight={650} color="text.secondary" sx={{ mt: 0.35 }}>{time ? dateTimeLabel(time.toISOString()) : "Schedule time unavailable"}</Typography>
+                </Box>)}
               </Box>
+              <Box sx={{ borderTop: "1px solid #dce7e1", my: 1.5 }} />
+              <Stack direction="row" alignItems="baseline" justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" fontWeight={750}>Actual attendance</Typography>
+                <Typography variant="caption" color="text.secondary">Recorded by caregiver</Typography>
+              </Stack>
+              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 1.5 }} />}
+              {scheduleAttendance.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load actual attendance times.</Alert>}
+              {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Alert severity="info">No actual check-in or check-out times have been recorded yet.</Alert>}
+              <Stack spacing={1}>
+                {scheduleSessions.map((record) => <Box key={record.sessionId} sx={{ p: 1.5, border: "1px solid #e2e9e5", borderRadius: 2, bgcolor: "#fff" }}>
+                  <Typography variant="body2" fontWeight={750} sx={{ mb: 1 }}>{record.employee.name || "Caregiver"}</Typography>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr" }, gap: 1.25 }}>
+                    {[{ label: "Actual check-in", time: record.checkIn.reportedAt }, { label: "Actual check-out", time: record.checkOut.reportedAt }].map(({ label, time }) => <Box key={label} sx={{ p: 1.25, bgcolor: time ? "#eaf6ef" : "#f5f7f6", border: "1px solid", borderColor: time ? "#c9e8d4" : "#e8edeb", borderRadius: 1.75 }}>
+                      <Typography variant="overline" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.4, fontWeight: 700 }}>{label}</Typography>
+                      <Typography variant="h6" fontWeight={800} color={time ? "success.dark" : "text.disabled"} sx={{ mt: 0.25, fontSize: { xs: 15, sm: 17 }, lineHeight: 1.25 }}>{time ? dateTimeLabel(time) : "Not recorded"}</Typography>
+                    </Box>)}
+                  </Box>
+                </Box>)}
+              </Stack>
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
@@ -392,29 +417,6 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                 <Detail label="Care Manager" value={selectedSchedule.careManager.name} />
                 <Detail label="Schedule imported" value={selectedSchedule.lastSyncedAt ? dateTimeLabel(selectedSchedule.lastSyncedAt) : "Timestamp unavailable"} />
               </Box>
-            </Card>
-
-            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
-              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={0.5} sx={{ mb: 1.5 }}>
-                <Typography variant="subtitle2" fontWeight={750}>Actual attendance times</Typography>
-                <Typography variant="caption" color="text.secondary">Times are shown in Asia/Kolkata</Typography>
-              </Stack>
-              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 1.5 }} />}
-              {scheduleAttendance.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load actual attendance times.</Alert>}
-              {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Alert severity="info">No actual check-in or check-out times have been recorded yet.</Alert>}
-              <Stack spacing={1}>
-                {scheduleSessions.map((record) => <Card key={record.sessionId} variant="outlined" sx={{ p: 1.5, boxShadow: "none", bgcolor: "#fff" }}>
-                  <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ md: "center" }} justifyContent="space-between">
-                    <Box sx={{ minWidth: { md: 150 } }}><Typography variant="body2" fontWeight={700}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Attendance times</Typography></Box>
-                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, minmax(110px, 1fr))" }, gap: 1.5, flex: 1 }}>
-                      <Detail label="Scheduled check-in" value={dateTimeLabel(record.scheduledStartAt)} />
-                      <Detail label="Actual check-in" value={record.checkIn.reportedAt ? dateTimeLabel(record.checkIn.reportedAt) : "Not recorded"} />
-                      <Detail label="Scheduled check-out" value={dateTimeLabel(record.scheduledEndAt)} />
-                      <Detail label="Actual check-out" value={record.checkOut.reportedAt ? dateTimeLabel(record.checkOut.reportedAt) : "Not recorded"} />
-                    </Box>
-                  </Stack>
-                </Card>)}
-              </Stack>
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
@@ -448,67 +450,92 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
-              <Box sx={{ mb: 1.5 }}><Typography variant="subtitle2" fontWeight={750}>Call and retry history</Typography><Typography variant="caption" color="text.secondary">Each check-in and check-out call is listed separately, in attempt order.</Typography></Box>
-              {scheduleAttendance.isLoading && <LinearProgress />}
-              {scheduleAttendance.isError && <Alert severity="error">Could not find attendance call sessions for this schedule.</Alert>}
+              <Box sx={{ mb: 1.5 }}>
+                <Typography variant="subtitle1" fontWeight={800}>Call and retry history</Typography>
+                <Typography variant="caption" color="text.secondary">Expand a stage, then open a call to review its transcript and recording.</Typography>
+              </Box>
+              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 1.5 }} />}
+              {scheduleAttendance.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load this schedule’s call history.</Alert>}
               {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Alert severity="info">No attendance call sessions are linked to this schedule yet.</Alert>}
               {scheduleSessions.map((record, index) => {
                 const query = conversationQueries[index];
                 const artifacts = query?.data;
                 return <Box key={record.sessionId} sx={{ mt: index ? 2 : 0, pt: index ? 2 : 0, borderTop: index ? "1px solid" : undefined, borderColor: "divider" }}>
-                  <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={.5} sx={{ mb: 1.25 }}>
-                    <Box><Typography variant="body2" fontWeight={700}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Attendance calls</Typography></Box>
-                    <StatusChip status={record.sessionStatus} />
+                  <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={0.5} sx={{ mb: 1 }}>
+                    <Box><Typography variant="body2" fontWeight={750}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Call session</Typography></Box>
+                    <StatusChip compact status={record.sessionStatus} />
                   </Stack>
                   {query?.isLoading && <LinearProgress sx={{ mb: 1.25 }} />}
                   {query?.isError && <Alert severity="error" sx={{ mb: 1.25 }}>Could not load this session’s call details.</Alert>}
-                  {artifacts && <Stack spacing={1.5}>
+                  {artifacts && <Stack spacing={1}>
                     {(["check_in", "check_out"] as const).map((stage) => {
-                      const attempts = artifacts.callAttempts.filter((attempt) => attempt.stage === stage);
-                      return <Box key={stage}>
-                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: .75 }}>
-                          <Typography variant="body2" fontWeight={700}>{stage === "check_in" ? "Check-in calls" : "Check-out calls"}</Typography>
-                          <Chip size="small" variant="outlined" label={`${attempts.length} ${attempts.length === 1 ? "call" : "calls"}`} />
-                        </Stack>
-                        {attempts.length === 0 ? <Typography variant="caption" color="text.secondary">No calls placed for this stage.</Typography> : <Stack spacing={1}>
-                          {attempts.map((attempt) => {
-                            const transcript = artifacts.transcripts.find((item) => item.callAttemptId === attempt.id);
-                            const transcriptSummary = typeof attempt.outcome?.transcript_summary === "string"
-                              ? attempt.outcome.transcript_summary
-                              : typeof attempt.outcome?.transcriptSummary === "string"
-                                ? attempt.outcome.transcriptSummary
-                                : null;
-                            return <Card key={attempt.id} variant="outlined" sx={{ p: 1.5, boxShadow: "none", bgcolor: "#fff" }}>
-                              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={.75}>
-                                <Stack direction="row" spacing={0.75} alignItems="center">
-                                  <Chip size="small" label={attempt.attemptNumber === 1 ? "Initial call" : `Retry ${attempt.attemptNumber - 1}`} color={attempt.attemptNumber === 1 ? "default" : "warning"} variant={attempt.attemptNumber === 1 ? "outlined" : "filled"} />
-                                  <Typography variant="body2" fontWeight={700}>{attempt.callTargetRole === "care_manager" ? "Care manager" : "Caregiver"}</Typography>
-                                </Stack>
-                                <Stack direction="row" spacing={1} alignItems="center"><StatusChip status={attempt.status} />{attempt.durationSeconds != null && <Typography variant="caption" color="text.secondary">{attempt.durationSeconds}s</Typography>}</Stack>
-                              </Stack>
-                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: .5 }}>
-                                {attempt.scheduledAt ? dateTimeLabel(attempt.scheduledAt) : "Call time unavailable"}
-                                {attempt.answeredAt ? ` · answered ${dateTimeLabel(attempt.answeredAt)}` : ""}
-                                {attempt.endedAt ? ` · ended ${dateTimeLabel(attempt.endedAt)}` : ""}
-                              </Typography>
-                              {attempt.failure && <Alert severity={attempt.failure.retryable ? "warning" : "error"} variant="outlined" sx={{ mt: 1 }}>
-                                Chiefvoice {attempt.failure.stage === "post_call" ? "post-call processing" : "call"} failed: {attempt.failure.code.replace(/[_.-]+/g, " ")}. {attempt.failure.retryable ? "A retry is allowed." : "This failure is not retryable."}
-                              </Alert>}
-                              {transcriptSummary && <Box sx={{ mt: 1.25 }}>
-                                <Typography variant="caption" color="text.secondary" fontWeight={700}>CALL SUMMARY</Typography>
-                                <Typography variant="body2" sx={{ mt: .5, overflowWrap: "anywhere" }}>{transcriptSummary}</Typography>
-                              </Box>}
-                              <Box sx={{ mt: 1.25, pt: 1.25, borderTop: "1px solid", borderColor: "divider" }}>
-                                <Typography variant="caption" color="text.secondary" fontWeight={700}>TRANSCRIPT{transcript?.language ? ` · ${transcript.language.toUpperCase()}` : ""}</Typography>
-                                {transcript?.text ? <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{transcript.text}</Typography> : <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: .5 }}>Transcript not available yet.</Typography>}
-                              </Box>
-                              <Box sx={{ mt: 1.25 }}>
-                                {attempt.recordingAvailable ? <CallRecording sessionId={record.sessionId} attemptId={attempt.id} /> : <Typography variant="caption" color="text.secondary">Recording not available yet.</Typography>}
-                              </Box>
-                            </Card>;
-                          })}
-                        </Stack>}
-                      </Box>;
+                      const attempts = artifacts.callAttempts.filter((attempt) => attempt.stage === stage).sort((a, b) => a.attemptNumber - b.attemptNumber);
+                      const latestAttempt = attempts.at(-1);
+                      const stageAttendance = stage === "check_in" ? record.checkIn : record.checkOut;
+                      const stageLabel = stage === "check_in" ? "Check-in" : "Check-out";
+                      return <Accordion key={stage} disableGutters elevation={0} sx={{ border: "1px solid #e3e9e6", borderRadius: "12px !important", boxShadow: "none", "&:before": { display: "none" }, "&.Mui-expanded": { my: 0 } }}>
+                        <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: 1.5, minHeight: 58, "&.Mui-expanded": { minHeight: 58 }, "& .MuiAccordionSummary-content": { my: 1, minWidth: 0 }, "& .MuiAccordionSummary-content.Mui-expanded": { my: 1 } }}>
+                          <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.5, sm: 1.25 }} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ width: "100%", minWidth: 0, pr: 1 }}>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography variant="body2" fontWeight={750}>{stageLabel} calls</Typography>
+                              <Typography variant="caption" color="text.secondary">{attempts.length} {attempts.length === 1 ? "attempt" : "attempts"}{latestAttempt?.scheduledAt ? ` · Latest ${dateTimeLabel(latestAttempt.scheduledAt)}` : ""}</Typography>
+                            </Box>
+                            <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
+                              <StatusChip compact status={latestAttempt?.status || stageAttendance.status} />
+                              {stageAttendance.nextCallAt && <Chip size="small" variant="outlined" color="warning" label={`${stageAttendance.status === "escalated" ? "Care manager" : "Next retry"} · ${compactScheduleTime(stageAttendance.nextCallAt, selectedSchedule.date)}`} />}
+                            </Stack>
+                          </Stack>
+                        </AccordionSummary>
+                        <AccordionDetails sx={{ px: 1.5, pt: 0, pb: 1.5 }}>
+                          {attempts.length === 0 ? <Typography variant="body2" color="text.secondary">No calls have been placed for this stage.</Typography> : <Stack spacing={1}>
+                            {attempts.map((attempt) => {
+                              const transcript = artifacts.transcripts.find((item) => item.callAttemptId === attempt.id);
+                              const transcriptSummary = typeof attempt.outcome?.transcript_summary === "string"
+                                ? attempt.outcome.transcript_summary
+                                : typeof attempt.outcome?.transcriptSummary === "string"
+                                  ? attempt.outcome.transcriptSummary
+                                  : null;
+                              return <Accordion key={attempt.id} disableGutters elevation={0} sx={{ border: "1px solid #e8edeb", borderRadius: "10px !important", boxShadow: "none", bgcolor: "#fff", "&:before": { display: "none" }, "&.Mui-expanded": { my: 0 } }}>
+                                <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: 1.25, minHeight: 54, "&.Mui-expanded": { minHeight: 54 }, "& .MuiAccordionSummary-content": { my: 0.75, minWidth: 0 }, "& .MuiAccordionSummary-content.Mui-expanded": { my: 0.75 } }}>
+                                  <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.5, sm: 1 }} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ width: "100%", minWidth: 0, pr: 1 }}>
+                                    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0, flexWrap: "wrap" }}>
+                                      <Chip size="small" label={attempt.attemptNumber === 1 ? "Initial call" : `Retry ${attempt.attemptNumber - 1}`} color={attempt.attemptNumber === 1 ? "default" : "warning"} variant={attempt.attemptNumber === 1 ? "outlined" : "filled"} />
+                                      <Typography variant="body2" fontWeight={700}>{attempt.callTargetRole === "care_manager" ? "Care manager" : "Caregiver"}</Typography>
+                                      <Typography variant="caption" color="text.secondary">{attempt.scheduledAt ? dateTimeLabel(attempt.scheduledAt) : "Call time unavailable"}</Typography>
+                                    </Stack>
+                                    <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}><StatusChip compact status={attempt.status} />{attempt.durationSeconds != null && <Typography variant="caption" color="text.secondary" fontWeight={650}>{attempt.durationSeconds}s</Typography>}</Stack>
+                                  </Stack>
+                                </AccordionSummary>
+                                <AccordionDetails sx={{ px: 1.25, pt: 0, pb: 1.5 }}>
+                                  <Stack spacing={1.25}>
+                                    <Typography variant="caption" color="text.secondary">
+                                      {attempt.answeredAt ? `Answered ${dateTimeLabel(attempt.answeredAt)}` : "Not answered"}{attempt.endedAt ? ` · ended ${dateTimeLabel(attempt.endedAt)}` : ""}
+                                    </Typography>
+                                    {attempt.failure && <Alert severity={attempt.failure.retryable ? "warning" : "error"} variant="outlined">
+                                      Chiefvoice {attempt.failure.stage === "post_call" ? "post-call processing" : "call"} failed: {attempt.failure.code.replace(/[_.-]+/g, " ")}. {attempt.failure.retryable ? "A retry is allowed." : "This failure is not retryable."}
+                                    </Alert>}
+                                    {transcriptSummary && <Box sx={{ p: 1.25, borderRadius: 1.5, bgcolor: "#f6f8f7" }}>
+                                      <Typography variant="overline" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.4, fontWeight: 750 }}>CALL SUMMARY</Typography>
+                                      <Typography variant="body2" fontWeight={550} sx={{ mt: 0.35, overflowWrap: "anywhere" }}>{transcriptSummary}</Typography>
+                                    </Box>}
+                                    <Accordion disableGutters elevation={0} sx={{ border: "1px solid #e5ebe8", borderRadius: "10px !important", boxShadow: "none", "&:before": { display: "none" }, "&.Mui-expanded": { my: 0 } }}>
+                                      <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: 1.25, minHeight: 46, "&.Mui-expanded": { minHeight: 46 }, "& .MuiAccordionSummary-content": { my: 0.75 }, "& .MuiAccordionSummary-content.Mui-expanded": { my: 0.75 } }}>
+                                        <Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" fontWeight={700}>Transcript</Typography>{transcript?.language && <Chip size="small" label={transcript.language.toUpperCase()} variant="outlined" />}</Stack>
+                                      </AccordionSummary>
+                                      <AccordionDetails sx={{ px: 1.5, pt: 0, pb: 1.5 }}>
+                                        {transcript?.text ? <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: 1.6 }}>{transcript.text}</Typography> : <Typography variant="body2" color="text.secondary">Transcript not available yet.</Typography>}
+                                      </AccordionDetails>
+                                    </Accordion>
+                                    <Box sx={{ pt: 0.5 }}>
+                                      {attempt.recordingAvailable ? <CallRecording sessionId={record.sessionId} attemptId={attempt.id} /> : <Typography variant="caption" color="text.secondary">Recording not available yet.</Typography>}
+                                    </Box>
+                                  </Stack>
+                                </AccordionDetails>
+                              </Accordion>;
+                            })}
+                          </Stack>}
+                        </AccordionDetails>
+                      </Accordion>;
                     })}
                   </Stack>}
                 </Box>;
