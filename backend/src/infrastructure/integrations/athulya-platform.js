@@ -312,7 +312,7 @@ function createAthulyaScheduleSyncHandler({ repository, queue }) {
           }
           for (const stage of ["check_in", "check_out"]) {
             const stageTask = stage === "check_in" ? result.session.checkInTask : result.session.checkOutTask;
-            if (!stageTask || ["confirmed", "missed", "not_answered", "review"].includes(stageTask.status)) continue;
+            if (!stageTask || stageTask.status !== "scheduled") continue;
             const runAt = new Date(stage === "check_in" ? result.session.scheduledStartAt : result.session.scheduledEndAt);
             const now = new Date();
             const lateByMs = now.getTime() - runAt.getTime();

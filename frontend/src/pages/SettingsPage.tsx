@@ -1,11 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, FormControlLabel, Grid, InputLabel, MenuItem, Select, Stack, Switch, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, FormControlLabel, Grid, InputLabel, MenuItem, Select, Stack, Switch, TextField, Typography } from "@mui/material";
 import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
-import SettingsPhoneRoundedIcon from "@mui/icons-material/SettingsPhoneRounded";
 import { AxiosError } from "axios";
-import { fetchAthulyaAttendanceSubmissions, fetchAthulyaIntegration, fetchAthulyaSchedules, fetchAthulyaSyncRuns, fetchCallingSettings, fetchMockPlatformServerSettings, resetCallingSettings, saveAthulyaIntegration, saveCallingSettings, setMockPlatformServerEnabled, startAthulyaSync, testAthulyaIntegration, type CallingSettings, type AthulyaIntegrationSettings } from "../api/client";
+import { fetchAthulyaIntegration, fetchCallingSettings, fetchMockPlatformServerSettings, resetCallingSettings, saveAthulyaIntegration, saveCallingSettings, setMockPlatformServerEnabled, testAthulyaIntegration, type CallingSettings, type AthulyaIntegrationSettings } from "../api/client";
 import { ApiAccessPage } from "./ApiAccessPage";
 import { PageHeader } from "../components/OperationsUI";
 import { formatAppDateTime } from "../utils/dateTime";
@@ -23,26 +22,15 @@ const emptySettings: CallingForm = {
   clearChiefVoiceWebhookSecret: false,
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
-const dateInTimeZone = (timeZone: string) => {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
-};
-
-export function SettingsPage() {
-  const [tab, setTab] = useState<"calling" | "api" | "athulya">("calling");
+export function SettingsPage({ section }: { section: "calling" | "api" | "athulya" }) {
+  const sectionTitle = section === "calling" ? "Calling settings" : section === "api" ? "API configuration" : "Athulya integration";
   const [form, setForm] = useState<CallingForm>(emptySettings);
   const [integrationForm, setIntegrationForm] = useState<IntegrationForm>({ integrationName: "Athulya Platform", apiBaseUrl: "https://homecare.athulyaliving.net/api", enabled: false, autoSyncEnabled: false, autoSyncScope: "all", autoSyncScopeId: "", apiKey: "" });
-  const [syncFilters, setSyncFilters] = useState({ scheduleDate: "", scope: "all" as SyncScope, scopeId: "" });
-  const [submissionFilters, setSubmissionFilters] = useState({ eventType: "all", status: "all", fromDate: "", toDate: "", caregiverId: "", patientId: "" });
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: ["calling-settings"], queryFn: fetchCallingSettings, retry: false });
-  const integration = useQuery({ queryKey: ["athulya-integration"], queryFn: fetchAthulyaIntegration, enabled: tab === "athulya", retry: false });
-  const mockPlatform = useQuery({ queryKey: ["mock-platform-server"], queryFn: fetchMockPlatformServerSettings, enabled: tab === "api" || tab === "athulya", retry: false });
-  const syncRuns = useQuery({ queryKey: ["athulya-sync-runs"], queryFn: fetchAthulyaSyncRuns, enabled: tab === "athulya", refetchInterval: 5000, retry: false });
-  const attendanceSubmissions = useQuery({ queryKey: ["athulya-attendance-submissions", submissionFilters], queryFn: () => fetchAthulyaAttendanceSubmissions({ ...submissionFilters, eventType: submissionFilters.eventType === "all" ? undefined : submissionFilters.eventType, status: submissionFilters.status === "all" ? undefined : submissionFilters.status, fromDate: submissionFilters.fromDate || undefined, toDate: submissionFilters.toDate || undefined, caregiverId: submissionFilters.caregiverId || undefined, patientId: submissionFilters.patientId || undefined }), enabled: tab === "athulya", refetchInterval: 5000, retry: false });
-  const schedules = useQuery({ queryKey: ["athulya-schedules", syncFilters.scheduleDate], queryFn: () => fetchAthulyaSchedules({ fromDate: syncFilters.scheduleDate || undefined, toDate: syncFilters.scheduleDate || undefined }), enabled: tab === "athulya", retry: false });
+  const integration = useQuery({ queryKey: ["athulya-integration"], queryFn: fetchAthulyaIntegration, enabled: section === "athulya", retry: false });
+  const mockPlatform = useQuery({ queryKey: ["mock-platform-server"], queryFn: fetchMockPlatformServerSettings, enabled: section === "api" || section === "athulya", retry: false });
+
   useEffect(() => {
     if (!settings.data) return;
     setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, lateScheduleGraceMinutes: settings.data.lateScheduleGraceMinutes, retry: settings.data.retry, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: false });
@@ -50,11 +38,7 @@ export function SettingsPage() {
   useEffect(() => {
     if (integration.data) setIntegrationForm({ integrationName: integration.data.integrationName, apiBaseUrl: integration.data.apiBaseUrl, enabled: integration.data.enabled, autoSyncEnabled: integration.data.autoSyncEnabled, autoSyncScope: integration.data.autoSyncScope, autoSyncScopeId: integration.data.autoSyncScopeId, apiKey: "" });
   }, [integration.data]);
-  useEffect(() => {
-    const timeZone = integration.data?.autoSyncTimeZone;
-    if (!timeZone) return;
-    setSyncFilters((current) => current.scheduleDate ? current : { ...current, scheduleDate: dateInTimeZone(timeZone) });
-  }, [integration.data?.autoSyncTimeZone]);
+
 
   const save = useMutation({
     mutationFn: saveCallingSettings,
@@ -70,7 +54,6 @@ export function SettingsPage() {
   const saveIntegration = useMutation({ mutationFn: saveAthulyaIntegration, onSuccess: (data) => { queryClient.setQueryData(["athulya-integration"], data); setIntegrationForm((current) => ({ ...current, apiKey: "" })); } });
   const updateMockPlatform = useMutation({ mutationFn: setMockPlatformServerEnabled, onSuccess: (data) => queryClient.setQueryData(["mock-platform-server"], data) });
   const testIntegration = useMutation({ mutationFn: testAthulyaIntegration });
-  const syncIntegration = useMutation({ mutationFn: startAthulyaSync, onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["athulya-sync-runs"] }); } });
   const updateRetry = (key: keyof CallingForm["retry"], value: string) => {
     const number = Number(value);
     setForm((current) => ({ ...current, retry: { ...current.retry, [key]: Number.isFinite(number) ? number : 0 } }));
@@ -81,13 +64,8 @@ export function SettingsPage() {
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader title="Settings" />
-    <Tabs value={tab} onChange={(_event, value: "calling" | "api" | "athulya") => setTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ borderBottom: 1, borderColor: "divider" }}>
-      <Tab value="calling" label="Calling settings" icon={<SettingsPhoneRoundedIcon />} iconPosition="start" />
-      <Tab value="api" label="API configuration" />
-      <Tab value="athulya" label="Athulya integration" />
-    </Tabs>
-    {tab === "calling" ? <Stack spacing={2.5}>
+    <PageHeader title={sectionTitle} />
+    {section === "calling" ? <Stack spacing={2.5}>
       <Alert severity="info">
         Environment values in .env are the defaults. Saving here stores workspace overrides in PostgreSQL. Reset removes the overrides and returns to the environment defaults. Retry changes apply as calls finish; retries already queued keep their current scheduled time.
       </Alert>
@@ -149,7 +127,7 @@ export function SettingsPage() {
           </Stack>
         </Stack>
       </CardContent></Card>}
-    </Stack> : tab === "api" ? <Stack spacing={2.5}>
+    </Stack> : section === "api" ? <Stack spacing={2.5}>
       <ApiAccessPage section="settings" />
       <Card><CardContent><Stack spacing={2}>
         <Typography variant="h6">Test platform server</Typography>
@@ -197,34 +175,6 @@ export function SettingsPage() {
         {testIntegration.isError && <Alert severity="error">Connection test failed: {settingError(testIntegration.error)}</Alert>}
         {testIntegration.isSuccess && <Alert severity="success">Connected. Athulya returned {testIntegration.data.recordsReceived} schedule record(s) for {testIntegration.data.scheduleDate}.</Alert>}
       </Stack></CardContent></Card>}
-      <Card><CardContent><Stack spacing={2}>
-        <Typography variant="h6">Synchronise schedules</Typography>
-        <Typography variant="body2" color="text.secondary">Each sync imports schedules for one selected service date only. That date covers midnight to the following midnight in {integration.data?.autoSyncTimeZone || "Asia/Kolkata"}.</Typography>
-        <Grid container spacing={1.5}>
-          <Grid size={{ xs: 12, sm: 6, md: 4 }}><TextField fullWidth required type="date" label="Schedule date" InputLabelProps={{ shrink: true }} value={syncFilters.scheduleDate} onChange={(e) => setSyncFilters({ ...syncFilters, scheduleDate: e.target.value })} /></Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 4 }}><FormControl fullWidth><InputLabel>Manual sync scope</InputLabel><Select label="Manual sync scope" value={syncFilters.scope} onChange={(event) => setSyncFilters({ ...syncFilters, scope: event.target.value as SyncScope, scopeId: "" })}><MenuItem value="all">Everyone · all branches and care managers</MenuItem><MenuItem value="branch">One branch only</MenuItem><MenuItem value="care_manager">One care manager only</MenuItem></Select></FormControl></Grid>
-          {syncFilters.scope !== "all" && <Grid size={{ xs: 12, sm: 6, md: 4 }}><TextField fullWidth label={syncFilters.scope === "branch" ? "Branch ID" : "Care Manager ID"} value={syncFilters.scopeId} onChange={(e) => setSyncFilters({ ...syncFilters, scopeId: e.target.value })} helperText="Only this selection is included" /></Grid>}
-        </Grid>
-        <Button variant="contained" disabled={!integration.data?.enabled || !syncFilters.scheduleDate || syncIntegration.isPending || (syncFilters.scope !== "all" && !syncFilters.scopeId.trim())} onClick={() => syncIntegration.mutate({ scheduleDate: syncFilters.scheduleDate, careManagerId: syncFilters.scope === "care_manager" ? syncFilters.scopeId.trim() : undefined, branchId: syncFilters.scope === "branch" ? syncFilters.scopeId.trim() : undefined })}>{syncIntegration.isPending ? "Starting…" : "Sync schedules now"}</Button>
-        {syncIntegration.isError && <Alert severity="error">Could not start sync: {settingError(syncIntegration.error)}</Alert>}
-        {syncIntegration.isSuccess && <Alert severity="success">Schedule sync started. The activity log refreshes automatically.</Alert>}
-        {syncRuns.isError && <Alert severity="error">Could not load sync history: {settingError(syncRuns.error)}</Alert>}
-        <TableContainer><Table size="small"><TableHead><TableRow><TableCell>Started</TableCell><TableCell>Type</TableCell><TableCell>Scope</TableCell><TableCell>Schedule date</TableCell><TableCell>Status</TableCell><TableCell>Received</TableCell><TableCell>Saved</TableCell><TableCell>Error</TableCell></TableRow></TableHead><TableBody>
-          {syncRuns.data?.map((run) => <TableRow key={run.id}><TableCell>{formatAppDateTime(run.startedAt)}</TableCell><TableCell>{run.syncSource === "automatic" ? "Automatic" : "Manual"}</TableCell><TableCell>{run.syncScope === "branch" ? `Branch ${run.syncScopeId}` : run.syncScope === "care_manager" ? `Care Manager ${run.syncScopeId}` : "Everyone"}</TableCell><TableCell>{run.fromDate && run.fromDate === run.toDate ? run.fromDate : `${run.fromDate || "—"} – ${run.toDate || "—"}`}</TableCell><TableCell>{run.status}</TableCell><TableCell>{run.recordsReceived}</TableCell><TableCell>{run.recordsUpserted}</TableCell><TableCell>{run.errorMessage || "—"}</TableCell></TableRow>)}
-          {syncRuns.data?.length === 0 && <TableRow><TableCell colSpan={8} align="center">No sync history yet.</TableCell></TableRow>}
-        </TableBody></Table></TableContainer>
-      </Stack></CardContent></Card>
-      <Card><CardContent><Stack spacing={1.5}><Typography variant="h6">Attendance submission status</Typography><Typography variant="body2" color="text.secondary">Confirmed check-in and check-out events for imported schedules are sent to Athulya separately. Failed requests retry automatically; unmatched schedules remain available in local history.</Typography>
-        <Grid container spacing={1.25}>
-          <Grid size={{ xs: 12, sm: 6, md: 2 }}><FormControl fullWidth size="small"><InputLabel>Event</InputLabel><Select label="Event" value={submissionFilters.eventType} onChange={(e) => setSubmissionFilters({ ...submissionFilters, eventType: e.target.value })}><MenuItem value="all">All events</MenuItem><MenuItem value="check_in">Check-in</MenuItem><MenuItem value="check_out">Check-out</MenuItem></Select></FormControl></Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}><FormControl fullWidth size="small"><InputLabel>Status</InputLabel><Select label="Status" value={submissionFilters.status} onChange={(e) => setSubmissionFilters({ ...submissionFilters, status: e.target.value })}><MenuItem value="all">All statuses</MenuItem><MenuItem value="pending">Pending</MenuItem><MenuItem value="processing">Processing</MenuItem><MenuItem value="retry_scheduled">Retry scheduled</MenuItem><MenuItem value="failed">Failed</MenuItem><MenuItem value="synced">Synced</MenuItem><MenuItem value="awaiting_api_specification">Legacy awaiting status</MenuItem></Select></FormControl></Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth type="date" label="From" InputLabelProps={{ shrink: true }} value={submissionFilters.fromDate} onChange={(e) => setSubmissionFilters({ ...submissionFilters, fromDate: e.target.value })} /></Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth type="date" label="To" InputLabelProps={{ shrink: true }} value={submissionFilters.toDate} onChange={(e) => setSubmissionFilters({ ...submissionFilters, toDate: e.target.value })} /></Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}><TextField fullWidth label="Caregiver ID" value={submissionFilters.caregiverId} onChange={(e) => setSubmissionFilters({ ...submissionFilters, caregiverId: e.target.value })} /></Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}><TextField fullWidth label="Patient ID" value={submissionFilters.patientId} onChange={(e) => setSubmissionFilters({ ...submissionFilters, patientId: e.target.value })} /></Grid>
-        </Grid>
-        {attendanceSubmissions.isError && <Alert severity="error">Could not load attendance event history: {settingError(attendanceSubmissions.error)}</Alert>}<TableContainer><Table size="small"><TableHead><TableRow><TableCell>Event time</TableCell><TableCell>Event</TableCell><TableCell>Patient</TableCell><TableCell>Caregiver</TableCell><TableCell>Schedule</TableCell><TableCell>Status</TableCell><TableCell>Attempts</TableCell></TableRow></TableHead><TableBody>{attendanceSubmissions.data?.map((event) => <TableRow key={event.id}><TableCell>{formatAppDateTime(event.eventAt)}</TableCell><TableCell>{event.eventType === "check_in" ? "Check-in" : "Check-out"}</TableCell><TableCell>{event.patientName || "—"}</TableCell><TableCell>{event.caregiverName || "—"}</TableCell><TableCell>{event.scheduleId || "—"}</TableCell><TableCell>{event.status === "awaiting_api_specification" ? "Awaiting API specification" : event.status}</TableCell><TableCell>{event.retryCount}</TableCell></TableRow>)}{attendanceSubmissions.data?.length === 0 && <TableRow><TableCell colSpan={7} align="center">No linked attendance events yet.</TableCell></TableRow>}</TableBody></Table></TableContainer></Stack></CardContent></Card>
-      <Card><CardContent><Stack spacing={1.5}><Typography variant="h6">Imported schedules</Typography>{schedules.isError && <Alert severity="error">Could not load imported schedules: {settingError(schedules.error)}</Alert>}<TableContainer><Table size="small"><TableHead><TableRow><TableCell>Date</TableCell><TableCell>Patient</TableCell><TableCell>Patient ID / UHID</TableCell><TableCell>Caregivers</TableCell><TableCell>Time</TableCell><TableCell>Branch</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{schedules.data?.map((schedule) => <TableRow key={schedule.id}><TableCell>{schedule.date || "—"}</TableCell><TableCell>{schedule.patient.name || "—"}</TableCell><TableCell>{schedule.patient.id || "—"} / {schedule.patient.uhid || "—"}</TableCell><TableCell>{schedule.caregivers.map((person) => person.name || person.phone).join(", ") || "—"}</TableCell><TableCell>{schedule.startTime || "—"} – {schedule.endTime || "—"}</TableCell><TableCell>{schedule.branch || "—"}</TableCell><TableCell>{schedule.status || "—"}</TableCell></TableRow>)}{schedules.data?.length === 0 && <TableRow><TableCell colSpan={7} align="center">No imported schedules in this range.</TableCell></TableRow>}</TableBody></Table></TableContainer></Stack></CardContent></Card>
     </Stack>}
   </Stack>;
 }

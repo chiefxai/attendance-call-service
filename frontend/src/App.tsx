@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Typography } from "@mui/material";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
@@ -38,20 +38,21 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Care Managers", path: "/care-managers", icon: <SupervisorAccountRoundedIcon />, adminOnly: true },
   { label: "Care Givers", path: "/staff", icon: <PersonSearchRoundedIcon /> },
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
-  { label: "Attendance & schedules", path: "/attendance", icon: <FactCheckRoundedIcon /> },
+  { label: "Schedule & Attendance", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "Mock schedules", path: "/mock-schedules", icon: <ScienceRoundedIcon />, adminOnly: true, mockOnly: true },
   { label: "Attendance calls", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
-  { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, adminOnly: true },
-  { label: "API documentation", path: "/api-access", icon: <MenuBookRoundedIcon /> },
 ];
 
 function App() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState<WebUser | null>(null);
   const mockPlatform = useQuery({ queryKey: ["mock-platform-server"], queryFn: fetchMockPlatformServerSettings, enabled: user?.role === "admin", retry: false, refetchOnWindowFocus: true });
   const mockSchedulesEnabled = mockPlatform.data?.enabled === true;
+  const settingsSectionOpen = location.pathname.startsWith("/settings");
   useEffect(() => {
     const onUnauthorized = () => {
       setUser(null);
@@ -84,6 +85,29 @@ function App() {
             <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
           </ListItemButton>
         ))}
+        {user?.role === "admin" && <>
+          <ListItemButton selected={settingsSectionOpen} onClick={() => { navigate("/settings/calling"); setMobileOpen(false); }}
+            sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: settingsSectionOpen ? "primary.dark" : "text.secondary", "&.Mui-selected": { bgcolor: "#eaf3ef", "&:hover": { bgcolor: "#eaf3ef" } } }}>
+            <ListItemIcon sx={{ minWidth: 38, color: settingsSectionOpen ? "primary.main" : "inherit" }}><SettingsRoundedIcon /></ListItemIcon>
+            <ListItemText primary="Settings" primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
+          </ListItemButton>
+          {settingsSectionOpen && <Box sx={{ ml: 2.25, pl: 1.25, borderLeft: "1px solid #dce7e2" }}>
+            {[
+              { label: "Calling settings", path: "/settings/calling", icon: <HeadsetMicRoundedIcon fontSize="small" /> },
+              { label: "API configuration", path: "/settings/api", icon: <MenuBookRoundedIcon fontSize="small" /> },
+              { label: "Athulya integration", path: "/settings/athulya", icon: <FactCheckRoundedIcon fontSize="small" /> },
+            ].map((item) => <ListItemButton key={item.path} component={NavLink} to={item.path} end onClick={() => setMobileOpen(false)}
+              sx={{ borderRadius: 2, mb: 0.35, py: 0.85, px: 1.25, color: "text.secondary", "&.active": { color: "primary.dark", bgcolor: "#eaf3ef", "& .MuiListItemIcon-root": { color: "primary.main" } } }}>
+              <ListItemIcon sx={{ minWidth: 32, color: "inherit" }}>{item.icon}</ListItemIcon>
+              <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 12.5, fontWeight: 600 }} />
+            </ListItemButton>)}
+          </Box>}
+        </>}
+        <ListItemButton component={NavLink} to="/api-access" onClick={() => setMobileOpen(false)}
+          sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: "text.secondary", "&.active": { color: "primary.dark", bgcolor: "#eaf3ef", "& .MuiListItemIcon-root": { color: "primary.main" } } }}>
+          <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}><MenuBookRoundedIcon /></ListItemIcon>
+          <ListItemText primary="API documentation" primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
+        </ListItemButton>
       </List>
       <Box sx={{ flexGrow: 1 }} />
       <Divider sx={{ my: 2 }} />
@@ -116,17 +140,20 @@ function App() {
         <PageHeaderTargetContext.Provider value={headerTarget}>
         <Routes>
           <Route path="/" element={<OperationsPage userRole={user.role} />} />
-          <Route path="/attendance" element={<AttendanceSchedulesPage />} />
+          <Route path="/attendance" element={<AttendanceSchedulesPage userRole={user.role} />} />
           <Route path="/mock-schedules" element={user.role === "admin" && mockSchedulesEnabled ? <MockSchedulesPage /> : <Navigate to="/settings" replace />} />
           <Route path="/scheduled-calls" element={user.role === "admin" ? <ScheduledCallsPage /> : <Navigate to="/" replace />} />
-          <Route path="/schedules" element={<AttendanceSchedulesPage />} />
+          <Route path="/schedules" element={<AttendanceSchedulesPage userRole={user.role} />} />
           <Route path="/call-center" element={<CallCenterPage />} />
           <Route path="/reports" element={<Navigate to="/" replace />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />
           <Route path="/care-managers" element={user.role === "admin" ? <CareManagersPage /> : <Navigate to="/" replace />} />
           <Route path="/assignments/new" element={<Navigate to="/attendance" replace />} />
-          <Route path="/settings" element={user.role === "admin" ? <SettingsPage /> : <Navigate to="/" replace />} />
+          <Route path="/settings" element={user.role === "admin" ? <Navigate to="/settings/calling" replace /> : <Navigate to="/" replace />} />
+          <Route path="/settings/calling" element={user.role === "admin" ? <SettingsPage section="calling" /> : <Navigate to="/" replace />} />
+          <Route path="/settings/api" element={user.role === "admin" ? <SettingsPage section="api" /> : <Navigate to="/" replace />} />
+          <Route path="/settings/athulya" element={user.role === "admin" ? <SettingsPage section="athulya" /> : <Navigate to="/" replace />} />
           <Route path="/api-access" element={<ApiAccessPage section="docs" />} />
           <Route path="/sessions/:sessionId" element={<AssignmentStatusPage />} />
           <Route path="*" element={<OverviewPage />} />

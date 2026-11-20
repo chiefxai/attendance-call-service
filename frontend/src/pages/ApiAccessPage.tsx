@@ -4,6 +4,9 @@ import { Alert, Box, Button, Card, Chip, CircularProgress, Grid, IconButton, Pap
 import KeyRoundedIcon from "@mui/icons-material/KeyRounded";
 import ContentCopyRoundedIcon from "@mui/icons-material/ContentCopyRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import ApiRoundedIcon from "@mui/icons-material/ApiRounded";
+import ShieldRoundedIcon from "@mui/icons-material/ShieldRounded";
+import SyncAltRoundedIcon from "@mui/icons-material/SyncAltRounded";
 import { AxiosError } from "axios";
 import { createServiceApiKey, fetchServiceApiKeys, revokeServiceApiKey, type ServiceApiKey } from "../api/client";
 import { PageHeader, SectionCard } from "../components/OperationsUI";
@@ -81,6 +84,26 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
 
   return <Stack spacing={2.5}>
     {section === "docs" && <PageHeader eyebrow="PLATFORM INTEGRATION" title="API documentation" description="Integrate assignment scheduling, session results, recordings, transcripts, and completion callbacks." />}
+    {section === "docs" && <Card variant="outlined" sx={{ overflow: "hidden", borderColor: "#dce7e3", background: "linear-gradient(115deg, #102d35 0%, #174b4e 58%, #23645e 100%)", color: "#fff" }}>
+      <Grid container alignItems="stretch">
+        <Grid size={{ xs: 12, lg: 7 }} sx={{ p: { xs: 2.25, sm: 3.25 } }}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25 }}><ApiRoundedIcon sx={{ color: "#93d8bd" }} /><Typography variant="overline" sx={{ letterSpacing: ".12em", color: "#b8d8ce", fontWeight: 700 }}>Developer quick start</Typography></Stack>
+          <Typography variant="h5" fontWeight={750}>Connect your platform to attendance operations</Typography>
+          <Typography variant="body2" sx={{ color: "rgba(255,255,255,.76)", mt: .75, maxWidth: 610 }}>Create assignments from your backend, track check-in and check-out independently, then receive confirmed events through a retry-safe callback.</Typography>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} sx={{ mt: 2.25 }}>
+            <Paper variant="outlined" sx={{ px: 1.5, py: .85, flex: 1, minWidth: 0, bgcolor: "rgba(7,25,30,.42)", color: "#e5fff3", borderColor: "rgba(255,255,255,.18)" }}><Typography variant="caption" sx={{ color: "#b8d8ce", display: "block" }}>BASE URL</Typography><Box component="code" sx={{ fontSize: 13, overflowWrap: "anywhere" }}>https://calls.elvoryx.in/api/call-service</Box></Paper>
+            <Button variant="contained" onClick={() => copy("https://calls.elvoryx.in/api/call-service")} startIcon={<ContentCopyRoundedIcon />} sx={{ bgcolor: "#bcebd5", color: "#153b36", whiteSpace: "nowrap", "&:hover": { bgcolor: "#d0f4e2" } }}>Copy base URL</Button>
+          </Stack>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 5 }} sx={{ p: { xs: 2.25, sm: 3.25 }, bgcolor: "rgba(255,255,255,.055)", borderLeft: { lg: "1px solid rgba(255,255,255,.14)" } }}>
+          <Stack spacing={1.35} sx={{ height: "100%", justifyContent: "center" }}>
+            <Stack direction="row" spacing={1.25} alignItems="center"><ShieldRoundedIcon sx={{ color: "#93d8bd" }} /><Box><Typography variant="body2" fontWeight={700}>Server-side bearer key</Typography><Typography variant="caption" sx={{ color: "rgba(255,255,255,.72)" }}>Keep credentials out of browser and mobile code.</Typography></Box></Stack>
+            <Stack direction="row" spacing={1.25} alignItems="center"><SyncAltRoundedIcon sx={{ color: "#93d8bd" }} /><Box><Typography variant="body2" fontWeight={700}>Independent attendance stages</Typography><Typography variant="caption" sx={{ color: "rgba(255,255,255,.72)" }}>Check-in and check-out each track their own status and retries.</Typography></Box></Stack>
+            <Stack direction="row" spacing={1.25} alignItems="center"><KeyRoundedIcon sx={{ color: "#93d8bd" }} /><Box><Typography variant="body2" fontWeight={700}>Idempotent callbacks</Typography><Typography variant="caption" sx={{ color: "rgba(255,255,255,.72)" }}>Use the callback key to safely deduplicate delivery.</Typography></Box></Stack>
+          </Stack>
+        </Grid>
+      </Grid>
+    </Card>}
     {section === "settings" && <>
     <Alert severity="info">Web access uses your signed-in account. To add or disable accounts, an administrator runs the server-side account provisioning command. Service API keys below are for your platform backend; they are shown only once and should never be stored in browser code.</Alert>
 
@@ -115,13 +138,13 @@ export function ApiAccessPage({ section = "docs" }: { section?: "settings" | "do
     </>}
 
     {section === "docs" && <>
-    <SectionCard title="Documentation sections" subtitle="Choose a topic, then follow the endpoint examples below.">
+    <SectionCard title="Browse the guide" subtitle="Jump to a topic. Examples include request paths, authentication, and workflow notes.">
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
         {[
           ["#auth", "Authentication"], ["#directory", "Staff & patients"],
           ["#assignments", "Assignments"], ["#session-data", "Session data"],
           ["#callbacks", "Completion callback"], ["#errors", "Errors & retries"],
-        ].map(([href, label]) => <Button key={href} size="small" variant="outlined" href={href}>{label}</Button>)}
+        ].map(([href, label], index) => <Button key={href} size="small" variant="outlined" href={href} sx={{ borderRadius: 2, bgcolor: index === 0 ? "#f1f7f4" : "transparent", borderColor: "#dce7e3", color: "text.primary", "&:hover": { bgcolor: "#f1f7f4", borderColor: "#b9d4c8" } }}>{String(index + 1).padStart(2, "0")} · {label}</Button>)}
       </Stack>
     </SectionCard>
 

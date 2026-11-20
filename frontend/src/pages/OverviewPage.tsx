@@ -7,6 +7,10 @@ import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import HowToRegRoundedIcon from "@mui/icons-material/HowToRegRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import CrisisAlertRoundedIcon from "@mui/icons-material/CrisisAlertRounded";
+import PhoneInTalkRoundedIcon from "@mui/icons-material/PhoneInTalkRounded";
+import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
+import DonutLargeRoundedIcon from "@mui/icons-material/DonutLargeRounded";
 import { fetchAttendance, fetchCareManagerNotifications, fetchOperationsSummary, markCareManagerNotificationRead, type AttendanceRecord, type OperationsSummary } from "../api/client";
 import { AttendanceStatusChart, AttendanceTrendChart, type AttendanceChartStatus } from "../components/BusinessCharts";
 import { MetricCard, PageHeader, SectionCard, StatusChip } from "../components/OperationsUI";
@@ -64,6 +68,12 @@ export function OverviewPage({ userRole = "admin" }: { userRole?: "admin" | "car
   const dateKey = appDateKey;
   const openRecords = (title: string, predicate: (record: AttendanceRecord) => boolean) => setDrilldown({ title, records: records.filter(predicate) });
   const todayKey = dateKey(new Date());
+  const todayRecords = records.filter((record) => dateKey(record.scheduledStartAt) === todayKey);
+  const activeCalls = todayRecords.filter((record) => [record.checkIn.status, record.checkOut.status].some((status) => status === "calling" || status === "processing"));
+  const pendingCheckouts = todayRecords.filter((record) => record.checkIn.status === "confirmed" && record.checkOut.status !== "confirmed");
+  const overdueCheckins = todayRecords.filter((record) => record.checkIn.status !== "confirmed" && new Date(record.scheduledStartAt).getTime() < Date.now());
+  const completedToday = todayRecords.filter((record) => record.checkIn.status === "confirmed" && record.checkOut.status === "confirmed").length;
+  const completionRate = todayRecords.length ? `${Math.round(completedToday / todayRecords.length * 100)}%` : "—";
   const statusLabel = (status: DashboardStatus) => status === "checkin" ? "Check-in" : status === "checkout" ? "Check-out" : status[0].toUpperCase() + status.slice(1);
   const filterStatus = (status: DashboardStatus) => openRecords(`${statusLabel(status)} sessions`, (record) => getDashboardStatus(record) === status);
 
@@ -91,6 +101,15 @@ export function OverviewPage({ userRole = "admin" }: { userRole?: "admin" | "car
     <Grid container spacing={1.75}>
       {metrics.map((metric) => <Grid key={metric.label} size={{ xs: 12, sm: 6, md: 3 }}><MetricCard {...metric} /></Grid>)}
     </Grid>
+    <SectionCard title="Today's operational pulse" subtitle="Live insights from attendance sessions scheduled for today.">
+      <Grid container spacing={1.5}>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard compact label="Calls in progress" value={attendanceQuery.isLoading || attendanceQuery.isError ? "—" : metricValue(activeCalls.length)} detail="Check-in or check-out call underway" icon={<PhoneInTalkRoundedIcon />} tint="#edf2ff" accent="#4267b2" onClick={() => setDrilldown({ title: "Calls in progress", records: activeCalls })} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard compact label="Check-outs pending" value={attendanceQuery.isLoading || attendanceQuery.isError ? "—" : metricValue(pendingCheckouts.length)} detail="Checked in; duty completion not confirmed" icon={<LogoutRoundedIcon />} tint="#e5f5ee" accent="#178264" onClick={() => setDrilldown({ title: "Check-outs pending", records: pendingCheckouts })} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard compact label="Overdue check-ins" value={attendanceQuery.isLoading || attendanceQuery.isError ? "—" : metricValue(overdueCheckins.length)} detail="Scheduled start passed without confirmation" icon={<ScheduleRoundedIcon />} tint="#fff3df" accent="#b8751a" onClick={() => setDrilldown({ title: "Overdue check-ins", records: overdueCheckins })} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard compact label="Session completion" value={attendanceQuery.isLoading || attendanceQuery.isError ? "—" : completionRate} detail={attendanceQuery.isLoading || attendanceQuery.isError ? "Waiting for live attendance data" : `${completedToday.toLocaleString()} of ${todayRecords.length.toLocaleString()} loaded sessions complete`} icon={<DonutLargeRoundedIcon />} tint="#f1eefe" accent="#7356a8" onClick={() => setDrilldown({ title: "Completed sessions today", records: todayRecords.filter((record) => record.checkIn.status === "confirmed" && record.checkOut.status === "confirmed") })} /></Grid>
+      </Grid>
+      {todayRecords.length >= 500 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Insights use the latest 500 attendance sessions returned by the live endpoint.</Typography>}
+    </SectionCard>
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, xl: 7 }}><SectionCard title="Check-in and check-out trend" subtitle="Last seven days. Select a day to view its attendance records.">
         <AttendanceTrendChart points={charts.trend} onSelectDay={(key) => openRecords(`Attendance on ${key}`, (record) => [record.checkIn.reportedAt, record.checkOut.reportedAt].some((time) => time && dateKey(time) === key))} />

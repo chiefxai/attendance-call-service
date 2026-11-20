@@ -252,7 +252,7 @@ export async function fetchAthulyaSchedules(params: { fromDate?: string; toDate?
   return response.data;
 }
 
-export async function fetchAthulyaAttendanceSubmissions(params: { eventType?: string; status?: string; fromDate?: string; toDate?: string; caregiverId?: string; patientId?: string } = {}) {
+export async function fetchAthulyaAttendanceSubmissions(params: { eventType?: string; status?: string; fromDate?: string; toDate?: string; caregiverId?: string; patientId?: string; limit?: number } = {}) {
   const response = await api.get<AthulyaAttendanceSubmission[]>("/integrations/athulya/attendance-submissions", { params });
   return response.data;
 }

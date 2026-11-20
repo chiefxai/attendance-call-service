@@ -95,10 +95,10 @@ export function PatientRecordsPage() {
     <PageHeader eyebrow="HOME HEALTH / ASSIGNMENT DIRECTORY" title="Patient records" description="Manage saved patient profiles, addresses, and assignment details." actions={<Button variant="outlined" startIcon={<DownloadRoundedIcon />} disabled>Export</Button>} />
     {query.isError && <Alert severity="error">Could not load patient assignment records from the backend.</Alert>}
     <Grid container spacing={1.75}>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Patient records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned patients" icon={<ElderlyRoundedIcon />}  compact/></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Active assignment" value={query.isLoading ? "—" : String(active)} detail="Sessions currently active" icon={<MedicalServicesRoundedIcon />} tint="#e5f5ee" accent="#178264"  compact/></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Care categories" value={query.isLoading ? "—" : String(categories.length)} detail="Categories supplied in assignments" icon={<MedicalServicesRoundedIcon />} tint="#e9efff" accent="#1557c0"  compact/></Grid>
-      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="GPS perimeter" value="Not connected" detail="Location verification is unavailable" icon={<ShareLocationRoundedIcon />} tint="#edf1f8" accent="#69778d"  compact/></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Patient records" value={query.isLoading ? "—" : String(records.length)} detail="Saved and assigned patients" icon={<ElderlyRoundedIcon />} compact /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Active assignment" value={query.isLoading ? "—" : String(active)} detail="Sessions currently active" icon={<MedicalServicesRoundedIcon />} tint="#e5f5ee" accent="#178264" compact /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="Care categories" value={query.isLoading ? "—" : String(categories.length)} detail="Categories supplied in assignments" icon={<MedicalServicesRoundedIcon />} tint="#e9efff" accent="#1557c0" compact /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard label="GPS perimeter" value="Not connected" detail="Location verification is unavailable" icon={<ShareLocationRoundedIcon />} tint="#edf1f8" accent="#69778d" compact /></Grid>
     </Grid>
     <Card sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: { xs: 380, md: 0 }, overflow: "hidden" }}>
       <SearchFilterBar

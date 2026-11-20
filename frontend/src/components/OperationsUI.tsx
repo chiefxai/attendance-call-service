@@ -10,7 +10,7 @@ export function DemoDataNotice({ children = "Illustrative preview data — live 
 
 export const PageHeaderTargetContext = createContext<HTMLElement | null>(null);
 
-export function PageHeader({ title, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
+export function PageHeader({ title, description, actions, showOutboundOnly = true }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode; showOutboundOnly?: boolean }) {
   const target = useContext(PageHeaderTargetContext);
   if (!target) return null;
   return createPortal(
@@ -18,8 +18,9 @@ export function PageHeader({ title, actions }: { eyebrow?: string; title: string
       <Box sx={{ minWidth: 0, flex: 1 }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, flexWrap: "wrap" }}>
           <Typography variant="h5" sx={{ fontWeight: 750 }} noWrap>{title}</Typography>
-          <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650 }} />
+          {showOutboundOnly && <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650 }} />}
         </Stack>
+        {description && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>{description}</Typography>}
       </Box>
       {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "flex-start", sm: "flex-end" }, flexShrink: 0 }}>{actions}</Stack>}
     </Stack>,
@@ -58,11 +59,13 @@ export function StatusChip({ status, compact = false }: { status: string; compac
     "check in": "Check-in",
     "check out": "Check-out",
     "in progress": "In progress",
+    "pending check in": "Pending check-in",
+    "missing check out": "Missing check-out",
   };
   const label = compact ? compactLabels[normalized] || normalized : ["not placed", "call not placed"].includes(normalized) ? "Call Not Placed" : normalized === "not answered" ? "Not Answered" : normalized === "check in" ? "Check-in" : normalized === "check out" ? "Check-out" : normalized;
   const color = ["verified", "confirmed", "completed", "checked in", "active", "synced", "delivered", "check in", "check out"].includes(normalized) ? "success"
-    : ["not placed", "not answered", "no answer", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable", "retry", "retry scheduled", "unresolved"].includes(normalized) ? "error"
-      : ["delayed", "late", "retrying", "retry scheduled", "escalated", "pending", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";
+    : ["not placed", "not answered", "no answer", "call not placed", "missed", "needs review", "attention required", "critical", "failed", "exception", "unreachable", "retry", "retry scheduled", "unresolved", "missing check out"].includes(normalized) ? "error"
+      : ["delayed", "late", "retrying", "retry scheduled", "escalated", "pending", "pending check in", "queued", "in progress", "calling", "processing", "high"].includes(normalized) ? "warning" : "default";
   const escalationColors = normalized === "retry" || normalized === "retry scheduled" || normalized === "unresolved"
     ? { bgcolor: "#DC2626", color: "#fff", "&.MuiChip-filled": { bgcolor: "#DC2626" } }
     : normalized === "escalated" ? { bgcolor: "#F59E0B", color: "#1f2937", "&.MuiChip-filled": { bgcolor: "#F59E0B" } } : {};
@@ -143,4 +146,3 @@ export function SearchFilterBar({
     </Popover>
   </>;
 }
-
