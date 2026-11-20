@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, IconButton, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Grid, IconButton, MenuItem, Radio, RadioGroup, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
+import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
@@ -15,23 +16,24 @@ function todayIndia(value = new Date()) {
 }
 
 function defaultScheduleTimes() {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).formatToParts(now);
-  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
-  const nowMinutes = hour * 60 + minute;
-  const crossesMidnight = nowMinutes + 5 >= 1440;
-  // The mock API stores one shared schedule date for both times. Roll to
-  // tomorrow near midnight so the default window stays valid and in the future.
-  const start = new Date(Date.UTC(2000, 0, 1, 0, crossesMidnight ? 1 : nowMinutes + 1));
-  const end = new Date(Date.UTC(2000, 0, 1, 0, crossesMidnight ? 5 : nowMinutes + 5));
-  const format = (value: Date) => `${String(value.getUTCHours()).padStart(2, "0")}:${String(value.getUTCMinutes()).padStart(2, "0")}:00`;
-  const scheduleDate = todayIndia(now);
-  const [year, month, day] = scheduleDate.split("-").map(Number);
-  const nextDate = new Date(Date.UTC(year, month - 1, day + (crossesMidnight ? 1 : 0))).toISOString().slice(0, 10);
-  return { schedule_date: nextDate, start_time: format(start), end_time: format(end) };
+  const start = new Date(Date.now() + 60_000);
+  const end = new Date(Date.now() + 5 * 60_000);
+  const dateInIndia = (value: Date) => {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
+    const part = (type: string) => parts.find((entry) => entry.type === type)?.value || "";
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  };
+  const timeInIndia = (value: Date) => {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(value);
+    const part = (type: string) => parts.find((entry) => entry.type === type)?.value || "00";
+    return `${part("hour")}:${part("minute")}:00`;
+  };
+  const startDate = dateInIndia(start);
+  const endDate = dateInIndia(end);
+  // The mock API uses one date for both times. If the quick window crosses
+  // midnight, move it to the next day's first few minutes.
+  if (startDate !== endDate) return { schedule_date: endDate, start_time: "00:01:00", end_time: timeInIndia(end) };
+  return { schedule_date: startDate, start_time: timeInIndia(start), end_time: timeInIndia(end) };
 }
 
 const emptySchedule = (): Partial<MockAthulyaSchedule> => ({
@@ -41,9 +43,15 @@ const emptySchedule = (): Partial<MockAthulyaSchedule> => ({
   care_manager_id: "MOCK-CM-001", care_manager_name: "Mock Care Manager", care_manager_phone: "+919999900001",
   service_name: "Mock Home Care Visit", branch: "Mock Chennai Branch",
   schedule_status: "Scheduled", caregiver_schedule_status: "Assigned",
-  caregiver_ids: "MOCK-CAREGIVER-001", caregiver_names: "Mock Caregiver",
-  caregiver_phones: "+916384670687", vendor_company: "ATHULYA",
+  caregiver_ids: "MOCK-CAREGIVER-SAM-JOSE", caregiver_names: "Sam Jose",
+  caregiver_phones: "+918939479296", vendor_company: "ATHULYA",
 });
+
+type CaregiverTemplate = "sam_jose" | "mock" | "manual";
+const caregiverTemplates: Record<Exclude<CaregiverTemplate, "manual">, Pick<MockAthulyaSchedule, "caregiver_ids" | "caregiver_names" | "caregiver_phones">> = {
+  sam_jose: { caregiver_ids: "MOCK-CAREGIVER-SAM-JOSE", caregiver_names: "Sam Jose", caregiver_phones: "+918939479296" },
+  mock: { caregiver_ids: "MOCK-CAREGIVER-001", caregiver_names: "Mock Caregiver", caregiver_phones: "+916384670687" },
+};
 
 const fields: Array<{ key: keyof MockAthulyaSchedule; label: string; type?: string }> = [
   { key: "schedule_date", label: "Schedule date", type: "date" },
@@ -86,7 +94,9 @@ export function MockSchedulesPage() {
   const [editing, setEditing] = useState<Partial<MockAthulyaSchedule> | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<Partial<MockAthulyaSchedule>>(emptySchedule());
+  const [caregiverTemplate, setCaregiverTemplate] = useState<CaregiverTemplate>("sam_jose");
   const [error, setError] = useState("");
+  const [quickScheduleCreated, setQuickScheduleCreated] = useState(false);
   const phoneErrors = {
     care_manager_phone: form.care_manager_phone && !normalizeIndianMobile(form.care_manager_phone) ? "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." : "",
     caregiver_phones: form.caregiver_phones && normalizeMobileList(form.caregiver_phones) === null ? "Enter valid Indian mobile numbers separated by commas." : "",
@@ -122,6 +132,11 @@ export function MockSchedulesPage() {
     onSuccess: async () => { setEditing(null); setDialogOpen(false); await refresh(); },
     onError: (e: any) => setError(e?.response?.data?.message || e?.response?.data?.error || e.message || "Unable to save schedule"),
   });
+  const quickScheduleMutation = useMutation({
+    mutationFn: () => createMockAthulyaSchedule({ ...emptySchedule(), ...defaultScheduleTimes(), schedule_status: "Scheduled" }),
+    onSuccess: async () => { setError(""); setQuickScheduleCreated(true); await refresh(); },
+    onError: (e: any) => setError(e?.response?.data?.message || e?.response?.data?.error || e.message || "Unable to create quick test schedule"),
+  });
   const deleteMutation = useMutation({
     mutationFn: deleteMockAthulyaSchedule,
     onSuccess: refresh,
@@ -141,9 +156,21 @@ export function MockSchedulesPage() {
     completed: rows.filter((row) => row.schedule_status.toLowerCase() === "completed").length,
   }), [rows]);
 
-  const openCreate = () => { setEditing(null); setForm(emptySchedule()); setDialogOpen(true); setError(""); };
-  const openEdit = (row: MockAthulyaSchedule) => { setEditing(row); setForm({ ...row }); setDialogOpen(true); setError(""); };
-  const setField = (key: keyof MockAthulyaSchedule, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const openCreate = () => { setEditing(null); setCaregiverTemplate("sam_jose"); setForm(emptySchedule()); setDialogOpen(true); setError(""); };
+  const openEdit = (row: MockAthulyaSchedule) => { setEditing(row); setCaregiverTemplate("manual"); setForm({ ...row }); setDialogOpen(true); setError(""); };
+  const setField = (key: keyof MockAthulyaSchedule, value: string) => {
+    if (key === "caregiver_ids" || key === "caregiver_names" || key === "caregiver_phones") setCaregiverTemplate("manual");
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+  const chooseCaregiverTemplate = (value: string) => {
+    if (value !== "sam_jose" && value !== "mock" && value !== "manual") return;
+    setCaregiverTemplate(value);
+    if (value === "manual" && caregiverTemplate !== "manual") {
+      setForm((current) => ({ ...current, caregiver_ids: "", caregiver_names: "", caregiver_phones: "" }));
+    } else if (value !== "manual") {
+      setForm((current) => ({ ...current, ...caregiverTemplates[value] }));
+    }
+  };
 
   return (
     <Stack spacing={3}>
@@ -152,6 +179,7 @@ export function MockSchedulesPage() {
         Mock schedules are isolated test data. New schedules default to <b>Scheduled</b> so you can test call scheduling. Use <b>Completed</b> when you want to import the schedule without placing outbound calls.
       </Alert>
       {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
+      {quickScheduleCreated && <Alert severity="success" onClose={() => setQuickScheduleCreated(false)}>Sam Jose test schedule created. Check-in is set for about 1 minute from now and check-out for about 5 minutes from now.</Alert>}
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, sm: 4 }}><MetricCard label="Mock schedules" value={String(metrics.total)} icon={<AddRoundedIcon />} /></Grid>
         <Grid size={{ xs: 12, sm: 4 }}><MetricCard label="With caregiver" value={String(metrics.assigned)} icon={<EditRoundedIcon />} /></Grid>
@@ -163,6 +191,7 @@ export function MockSchedulesPage() {
             <Box><Typography variant="h6" fontWeight={750}>Schedule fixtures</Typography><Typography variant="body2" color="text.secondary">Create, edit or remove the records returned by the mock Athulya API.</Typography></Box>
             <Stack direction="row" spacing={1}>
               <Button variant="outlined" startIcon={<RefreshRoundedIcon />} onClick={() => void refresh()}>Refresh</Button>
+              <Button variant="outlined" color="secondary" startIcon={<BoltRoundedIcon />} disabled={quickScheduleMutation.isPending} onClick={() => { setError(""); setQuickScheduleCreated(false); quickScheduleMutation.mutate(); }}>{quickScheduleMutation.isPending ? "Scheduling…" : "Quick test schedule"}</Button>
               <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={openCreate}>Add schedule</Button>
             </Stack>
           </Stack>
@@ -235,6 +264,23 @@ export function MockSchedulesPage() {
         <DialogTitle>{editing ? "Edit mock schedule" : "Add mock schedule"}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ pt: 1 }}>
+            {!editing && <Grid size={12}>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>Choose a caregiver template</Typography>
+              <RadioGroup row value={caregiverTemplate} onChange={(event) => chooseCaregiverTemplate(event.target.value)}>
+                <Grid container spacing={1.25} sx={{ width: "100%" }}>
+                  <Grid size={{ xs: 12, md: 4 }}><Card variant="outlined" sx={{ p: 1.25, height: "100%", borderColor: caregiverTemplate === "sam_jose" ? "primary.main" : "divider", bgcolor: caregiverTemplate === "sam_jose" ? "action.selected" : "background.paper" }}>
+                    <FormControlLabel value="sam_jose" control={<Radio size="small" />} sx={{ m: 0, width: "100%", alignItems: "flex-start" }} label={<Box sx={{ pt: 0.5 }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" fontWeight={700}>Sam Jose</Typography><Chip size="small" color="primary" label="Default" /></Stack><Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>Caregiver · +91 89394 79296</Typography></Box>} />
+                  </Card></Grid>
+                  <Grid size={{ xs: 12, md: 4 }}><Card variant="outlined" sx={{ p: 1.25, height: "100%", borderColor: caregiverTemplate === "mock" ? "primary.main" : "divider", bgcolor: caregiverTemplate === "mock" ? "action.selected" : "background.paper" }}>
+                    <FormControlLabel value="mock" control={<Radio size="small" />} sx={{ m: 0, width: "100%", alignItems: "flex-start" }} label={<Box sx={{ pt: 0.5 }}><Typography variant="body2" fontWeight={700}>Mock Caregiver</Typography><Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>Caregiver · +91 63846 70687</Typography></Box>} />
+                  </Card></Grid>
+                  <Grid size={{ xs: 12, md: 4 }}><Card variant="outlined" sx={{ p: 1.25, height: "100%", borderColor: caregiverTemplate === "manual" ? "primary.main" : "divider", bgcolor: caregiverTemplate === "manual" ? "action.selected" : "background.paper" }}>
+                    <FormControlLabel value="manual" control={<Radio size="small" />} sx={{ m: 0, width: "100%", alignItems: "flex-start" }} label={<Box sx={{ pt: 0.5 }}><Typography variant="body2" fontWeight={700}>Manual entry</Typography><Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>Enter your own caregiver details below.</Typography></Box>} />
+                  </Card></Grid>
+                </Grid>
+              </RadioGroup>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Template selection fills the caregiver ID, name, and phone. You can change any field before saving.</Typography>
+            </Grid>}
             {fields.map((field) => <Grid size={{ xs: 12, sm: 6 }} key={field.key}>
               <TextField fullWidth size="small" type={field.type || "text"} label={field.label} value={String(form[field.key] ?? "")}
                 onChange={(e) => setField(field.key, e.target.value)} InputLabelProps={field.type === "date" || field.type === "time" ? { shrink: true } : undefined}
