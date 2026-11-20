@@ -377,7 +377,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const latestSelectedDateRun = syncRunRows.find((run) => run.fromDate === selectedDate);
 
   return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
-    <PageHeader eyebrow="WORKFORCE INTELLIGENCE / ATTENDANCE OPERATIONS" title="Schedule & Attendance" />
+    <PageHeader eyebrow="ATHULYA / DUTY OPERATIONS" title="Schedule & Attendance" description="Review imported duties, attendance calls, and Athulya submission status in one place." />
     <Card variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderColor: "#e2e9e6", boxShadow: "none" }}>
       <Stack spacing={1.5}>
         <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ xs: "stretch", lg: "center" }} justifyContent="space-between">
