@@ -527,7 +527,6 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
               })}
             </Card>
 
-     </Card>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.75 }}><Button onClick={() => setSelectedSchedule(null)} variant="contained">Close</Button></DialogActions>
