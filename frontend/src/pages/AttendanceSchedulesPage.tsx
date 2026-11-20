@@ -232,62 +232,6 @@ function dateTimeLabel(value: string | null | undefined) {
   }).format(date);
 }
 
-function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLabel, canAssessCall }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduleDate: string | null; scheduledTime: string | null | undefined; emptyLabel: string; canAssessCall: boolean }) {
-  const dueAt = scheduledInstant(scheduleDate, scheduledTime);
-  const overdue = Boolean(dueAt && dueAt.getTime() <= Date.now());
-  const stageName = stage === "checkIn" ? "Checked In" : "Completed";
-
-  if (!records.length) return <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
-    <Typography variant="body2" color={scheduleClock(scheduledTime) === "—" ? "text.disabled" : "text.secondary"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
-      {scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}
-    </Typography>
-    {canAssessCall && <StatusChip compact status={overdue ? "call not placed" : "upcoming"} />}
-  </Stack>;
-
-  return <Stack spacing={0.75}>
-    {records.map((record) => {
-      const stageStatus = record[stage];
-      const attemptCount = stage === "checkIn" ? record.checkInAttemptCount : record.checkOutAttemptCount;
-      const reason = stage === "checkIn" ? record.stageReasons.checkIn : record.stageReasons.checkOut;
-      const employeeRequestedDelay = stageStatus.status === "follow_up" && reason === "employee_requested_callback";
-      const retryScheduled = stageStatus.status === "retry" || (stageStatus.status === "follow_up" && !employeeRequestedDelay);
-      const wasNotPlaced = overdue && attemptCount === 0 && stageStatus.status === "scheduled";
-
-      let displayStatus = stageStatus.status;
-      if (stageStatus.status === "confirmed") displayStatus = stageName;
-      else if (stageStatus.status === "scheduled") displayStatus = wasNotPlaced ? "call not placed" : "upcoming";
-      else if (employeeRequestedDelay) displayStatus = "delayed";
-      else if (stageStatus.status === "retry") displayStatus = "retry";
-      else if (stageStatus.status === "escalated") displayStatus = "escalated";
-      else if (stageStatus.status === "unresolved") displayStatus = "unresolved";
-      else if (retryScheduled && reason === "not_answered") displayStatus = "not answered";
-      else if (retryScheduled) displayStatus = "retry scheduled";
-      else if (stageStatus.status === "review") displayStatus = "needs review";
-
-      const displayTime = stageStatus.status === "confirmed"
-        ? stageStatus.reportedAt || scheduledTime
-        : ["follow_up", "retry", "escalated"].includes(stageStatus.status) && stageStatus.nextCallAt
-          ? stageStatus.nextCallAt
-          : scheduledTime;
-
-      return <Stack key={record.sessionId} spacing={0.35} alignItems="flex-start">
-        {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}</Typography>}
-        <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="nowrap">
-          <Typography variant="body2" color={stageStatus.status === "confirmed" ? "text.primary" : displayTime ? "text.secondary" : "text.disabled"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
-            {displayTime ? scheduleClock(displayTime) : emptyLabel}
-          </Typography>
-          <StatusChip compact status={displayStatus} />
-        </Stack>
-        {(["follow_up", "retry", "escalated"].includes(stageStatus.status)) && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.2 }}>
-          {stageStatus.status === "escalated" ? "Care manager" : employeeRequestedDelay ? "Callback" : "Retry"} · {compactScheduleTime(stageStatus.nextCallAt, scheduleDate)}
-        </Typography>}
-        {stageStatus.status === "unresolved" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Follow-up needed</Typography>}
-        {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Retry limit reached</Typography>}
-      </Stack>;
-    })}
-  </Stack>;
-}
-
 export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "admin" | "care_manager" }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -426,9 +370,6 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
     ? new Date(`${selectedDate}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
     : "Choose a date";
 
-  const selectedScheduleEvents = selectedSchedule ? scheduleSubmissionEvents(selectedSchedule, submissionEvents) : [];
-  const selectedCheckInSubmission = latestStageSubmission(selectedScheduleEvents, "check_in");
-  const selectedCheckOutSubmission = latestStageSubmission(selectedScheduleEvents, "check_out");
   const latestSelectedDateRun = syncRunRows.find((run) => run.fromDate === selectedDate);
 
   return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
@@ -453,7 +394,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="caption" color="text.secondary">Sync status</Typography>
             {isAdmin ? <StatusChip compact status={selectedDateRun?.status || latestSelectedDateRun?.status || "not synced"} /> : <Typography variant="caption" color="text.secondary">Admin sync controls</Typography>}
-            {isAdmin && <Typography variant="caption" color="text.secondary">Last successful sync: {lastSuccessfulRun?.completedAt ? formatAppDateTime(lastSuccessfulRun.completedAt) : "No successful sync recorded"}</Typography>}
+            {isAdmin && <Typography variant="caption" color="text.secondary">Last successful sync: {lastSuccessfulRun?.completedAt ? dateTimeLabel(lastSuccessfulRun.completedAt) : "No successful sync recorded"}</Typography>}
           </Stack>
           {isAdmin && !syncAvailable && !integration.isLoading && !mockPlatform.isLoading && <Button size="small" component={RouterLink} to="/settings/athulya">Configure Athulya integration</Button>}
         </Stack>
@@ -508,7 +449,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
       <AccordionDetails sx={{ pt: 0 }}>
         {syncRuns.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load schedule sync history.</Alert>}
         {syncRuns.isLoading ? <LinearProgress /> : <OperationsTable sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Started", "Type", "Scope", "Schedule date", "Status", "Received", "Saved", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
-          {syncRunRows.map((run) => <TableRow key={run.id}><TableCell>{formatAppDateTime(run.startedAt)}</TableCell><TableCell>{run.syncSource === "automatic" ? "Automatic" : "Manual"}</TableCell><TableCell>{run.syncScope === "branch" ? `Branch ${run.syncScopeId}` : run.syncScope === "care_manager" ? `Care Manager ${run.syncScopeId}` : "Everyone"}</TableCell><TableCell>{run.fromDate && run.fromDate === run.toDate ? run.fromDate : `${run.fromDate || "—"} – ${run.toDate || "—"}`}</TableCell><TableCell><StatusChip compact status={run.status} /></TableCell><TableCell>{run.recordsReceived}</TableCell><TableCell>{run.recordsUpserted}</TableCell><TableCell>{run.errorMessage || "—"}</TableCell></TableRow>)}
+          {syncRunRows.map((run) => <TableRow key={run.id}><TableCell>{dateTimeLabel(run.startedAt)}</TableCell><TableCell>{run.syncSource === "automatic" ? "Automatic" : "Manual"}</TableCell><TableCell>{run.syncScope === "branch" ? `Branch ${run.syncScopeId}` : run.syncScope === "care_manager" ? `Care Manager ${run.syncScopeId}` : "Everyone"}</TableCell><TableCell>{run.fromDate && run.fromDate === run.toDate ? run.fromDate : `${run.fromDate || "—"} – ${run.toDate || "—"}`}</TableCell><TableCell><StatusChip compact status={run.status} /></TableCell><TableCell>{run.recordsReceived}</TableCell><TableCell>{run.recordsUpserted}</TableCell><TableCell>{run.errorMessage || "—"}</TableCell></TableRow>)}
           {syncRuns.isSuccess && syncRunRows.length === 0 && <TableRow><TableCell colSpan={8} align="center">No schedule sync history yet.</TableCell></TableRow>}
         </TableBody></Table></OperationsTable>}
       </AccordionDetails>
@@ -524,7 +465,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         </Stack>
         {submissionQuery.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load attendance submission history.</Alert>}
         {submissionQuery.isLoading ? <LinearProgress /> : <OperationsTable sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Event time", "Event", "Patient", "Caregiver", "Schedule ID", "Status", "Attempts", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
-          {filteredSubmissionEvents.map((event) => <TableRow key={event.id}><TableCell>{formatAppDateTime(event.eventAt)}</TableCell><TableCell>{event.eventType === "check_in" ? "Check-in" : "Check-out"}</TableCell><TableCell>{event.patientName || event.patientId || "—"}</TableCell><TableCell>{event.caregiverName || "—"}</TableCell><TableCell>{event.scheduleId || "—"}</TableCell><TableCell><StatusChip compact status={event.status === "awaiting_api_specification" ? "pending" : event.status} /></TableCell><TableCell>{event.retryCount}</TableCell><TableCell sx={{ maxWidth: 300, whiteSpace: "normal", overflowWrap: "anywhere" }}>{event.errorMessage || "—"}</TableCell></TableRow>)}
+          {filteredSubmissionEvents.map((event) => <TableRow key={event.id}><TableCell>{dateTimeLabel(event.eventAt)}</TableCell><TableCell>{event.eventType === "check_in" ? "Check-in" : "Check-out"}</TableCell><TableCell>{event.patientName || event.patientId || "—"}</TableCell><TableCell>{event.caregiverName || "—"}</TableCell><TableCell>{event.scheduleId || "—"}</TableCell><TableCell><StatusChip compact status={event.status === "awaiting_api_specification" ? "pending" : event.status} /></TableCell><TableCell>{event.retryCount}</TableCell><TableCell sx={{ maxWidth: 300, whiteSpace: "normal", overflowWrap: "anywhere" }}>{event.errorMessage || "—"}</TableCell></TableRow>)}
           {submissionQuery.isSuccess && filteredSubmissionEvents.length === 0 && <TableRow><TableCell colSpan={8} align="center">No attendance submissions match these filters.</TableCell></TableRow>}
         </TableBody></Table></OperationsTable>}
         {submissionEvents.length >= 500 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Showing the latest 500 events returned for the selected service date.</Typography>}

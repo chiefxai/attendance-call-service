@@ -213,7 +213,7 @@ export function NewAssignmentPage() {
   });
   const mutation = useMutation({
     mutationFn: createAssignment,
-    onSuccess: (result) => navigate("/attendance"),
+    onSuccess: () => navigate("/attendance"),
   });
   const update = (key: keyof FormValues) => (value: string) => setForm((current) => ({ ...current, [key]: value }));
   const validBulkCount = bulkRows.filter((row) => row.payload && !bulkResults[row.line]?.sessionId).length;
