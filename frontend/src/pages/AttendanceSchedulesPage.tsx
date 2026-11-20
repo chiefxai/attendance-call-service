@@ -420,7 +420,6 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
               </Box>
             </Card>
 
-     </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ mb: 1.5 }}>
