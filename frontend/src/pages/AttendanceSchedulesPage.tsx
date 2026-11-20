@@ -363,9 +363,8 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         <DialogTitle sx={{ px: { xs: 2, sm: 3 }, pt: 2.5, pb: 1.5 }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} justifyContent="space-between">
             <Box sx={{ minWidth: 0 }}>
-              <Typography variant="h5" fontWeight={750} sx={{ overflowWrap: "anywhere" }}>{selectedSchedule.patient.name || "Patient schedule"}</Typography>
-              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" sx={{ mt: 0.5 }}>
-                <Typography variant="body2" color="text.secondary">{selectedSchedule.service || "Care service"}</Typography>
+              <Stack direction="row" alignItems="center" spacing={0.75} useFlexGap flexWrap="wrap">
+                <Typography variant="h5" fontWeight={750} sx={{ overflowWrap: "anywhere" }}>{selectedSchedule.patient.name || "Patient schedule"}</Typography>
                 <Chip size="small" variant="outlined" label={`Schedule ID · ${selectedSchedule.athulyaScheduleId || selectedSchedule.athulyaSchedulePk || selectedSchedule.id}`} sx={{ height: 23, maxWidth: "100%", fontSize: 11, fontWeight: 650 }} />
               </Stack>
             </Box>
@@ -528,10 +527,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
               })}
             </Card>
 
-            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
-              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Schedule reference</Typography>
-              <Detail label="Schedule ID" value={selectedSchedule.athulyaScheduleId || selectedSchedule.athulyaSchedulePk} />
-            </Card>
+     </Card>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.75 }}><Button onClick={() => setSelectedSchedule(null)} variant="contained">Close</Button></DialogActions>

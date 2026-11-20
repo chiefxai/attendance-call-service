@@ -459,8 +459,20 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     try {
       res.json(await repository.listAttendanceSessions(org(req), {
         search: req.query.search || "", status: req.query.status || "all",
-        limit: req.query.limit || 100, offset: req.query.offset || 0, careManagerExternalId: careManagerScope(req),
+        limit: req.query.limit || 100, offset: req.query.offset || 0,
+        fromDate: req.query.fromDate || null, toDate: req.query.toDate || null,
+        careManagerExternalId: careManagerScope(req),
       }));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/assignments/count", async (req, res) => {
+    try {
+      const total = await repository.countAttendanceSessions(org(req), {
+        fromDate: req.query.fromDate || null, toDate: req.query.toDate || null,
+        careManagerExternalId: careManagerScope(req),
+      });
+      res.json({ total });
     } catch (error) { fail(res, error); }
   });
 
