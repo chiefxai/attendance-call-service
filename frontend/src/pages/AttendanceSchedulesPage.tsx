@@ -1,16 +1,46 @@
 import { useEffect, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TableSortLabel, TextField, Typography } from "@mui/material";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link as RouterLink } from "react-router-dom";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, InputLabel, LinearProgress, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
-import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaSchedules, fetchSessionArtifacts, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
+import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaIntegration, fetchAthulyaSchedules, fetchAthulyaSyncRuns, fetchMockPlatformServerSettings, fetchSessionArtifacts, startAthulyaSync, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
+import { SortByMenu } from "../components/SortByMenu";
 
-type ScheduleSortKey = "check_in" | "check_out" | "status" | "patient" | "caregivers" | "service";
-type ScheduleSort = `${ScheduleSortKey}_${"ascending" | "descending"}`;
+type ScheduleSort =
+  | "current_upcoming"
+  | "check_in_ascending" | "check_in_descending"
+  | "check_out_ascending" | "check_out_descending"
+  | "schedule_time_ascending" | "schedule_time_descending"
+  | "status_ascending" | "status_descending"
+  | "patient_ascending" | "patient_descending"
+  | "caregivers_ascending" | "caregivers_descending"
+  | "service_ascending" | "service_descending";
+const scheduleSortOptions = [
+  { value: "current_upcoming", label: "Current & upcoming first" },
+  { value: "check_in_ascending", label: "Check-in: earliest first" },
+  { value: "check_in_descending", label: "Check-in: latest first" },
+  { value: "check_out_ascending", label: "Check-out: earliest first" },
+  { value: "check_out_descending", label: "Check-out: latest first" },
+  { value: "schedule_time_ascending", label: "Schedule time: earliest first" },
+  { value: "schedule_time_descending", label: "Schedule time: latest first" },
+  { value: "status_ascending", label: "Status: A to Z" },
+  { value: "status_descending", label: "Status: Z to A" },
+  { value: "patient_ascending", label: "Patient: A to Z" },
+  { value: "patient_descending", label: "Patient: Z to A" },
+  { value: "caregivers_ascending", label: "Care givers: A to Z" },
+  { value: "caregivers_descending", label: "Care givers: Z to A" },
+  { value: "service_ascending", label: "Service: A to Z" },
+  { value: "service_descending", label: "Service: Z to A" },
+] as const;
+
+const settingError = (error: unknown) => error instanceof Error ? error.message : "Request failed";
 
 function todayInIndia() {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -118,6 +148,17 @@ function unifiedAttendanceStatus(schedule: AthulyaSchedule, records: AttendanceR
   return "pending check-in";
 }
 
+function SubmissionStatusCell({ event }: { event?: AthulyaAttendanceSubmission }) {
+  if (!event) return <Stack spacing={0.25}><StatusChip compact status="not submitted" /><Typography variant="caption" color="text.secondary">No event record</Typography></Stack>;
+  const error = event.errorMessage;
+  return <Stack spacing={0.25} sx={{ minWidth: 112 }}>
+    <StatusChip compact status={event.status === "awaiting_api_specification" ? "pending" : event.status} />
+    <Typography variant="caption" color={error ? "error.main" : "text.secondary"} sx={{ maxWidth: 220, overflowWrap: "anywhere" }}>
+      {error || `${event.retryCount} ${event.retryCount === 1 ? "attempt" : "attempts"}`}
+    </Typography>
+  </Stack>;
+}
+
 function compactScheduleTime(value: string, scheduleDate: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -146,6 +187,18 @@ function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOu
   return null;
 }
 
+function ScheduleAttendanceCell({ event, localRecords, stage, scheduledTime, scheduleDate }: { event?: AthulyaAttendanceSubmission; localRecords: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduledTime: string | null | undefined; scheduleDate: string | null | undefined }) {
+  const localTimestamp = localRecords.find((record) => record[stage].status === "confirmed")?.[stage].reportedAt;
+  const callHint = localStageHint(localRecords, stage, scheduleDate);
+  return <Stack spacing={0.45} alignItems="flex-start">
+    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+      {event ? dateTimeLabel(event.eventAt) : localTimestamp ? dateTimeLabel(localTimestamp) : `Scheduled ${scheduleClock(scheduledTime)}`}
+    </Typography>
+    {callHint && <Typography variant="caption" color={callHint.startsWith("Follow-up") ? "error.main" : "text.secondary"} sx={{ lineHeight: 1.2, whiteSpace: "nowrap" }}>{callHint}</Typography>}
+    <SubmissionStatusCell event={event} />
+  </Stack>;
+}
+
 function scheduleClock(value: string | null | undefined) {
   if (!value) return "—";
   const date = new Date(value);
@@ -161,6 +214,15 @@ function scheduleClock(value: string | null | undefined) {
   return value;
 }
 
+function scheduleDateLabel(value: string | null | undefined) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-IN", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata",
+  }).format(date);
+}
+
 function dateTimeLabel(value: string | null | undefined) {
   if (!value) return "—";
   const date = new Date(value);
@@ -174,6 +236,7 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
   const dueAt = scheduledInstant(scheduleDate, scheduledTime);
   const overdue = Boolean(dueAt && dueAt.getTime() <= Date.now());
   const stageName = stage === "checkIn" ? "Checked In" : "Completed";
+
   if (!records.length) return <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
     <Typography variant="body2" color={scheduleClock(scheduledTime) === "—" ? "text.disabled" : "text.secondary"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
       {scheduleClock(scheduledTime) === "—" ? emptyLabel : scheduleClock(scheduledTime)}
@@ -189,6 +252,7 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       const employeeRequestedDelay = stageStatus.status === "follow_up" && reason === "employee_requested_callback";
       const retryScheduled = stageStatus.status === "retry" || (stageStatus.status === "follow_up" && !employeeRequestedDelay);
       const wasNotPlaced = overdue && attemptCount === 0 && stageStatus.status === "scheduled";
+
       let displayStatus = stageStatus.status;
       if (stageStatus.status === "confirmed") displayStatus = stageName;
       else if (stageStatus.status === "scheduled") displayStatus = wasNotPlaced ? "call not placed" : "upcoming";
@@ -199,12 +263,13 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
       else if (retryScheduled && reason === "not_answered") displayStatus = "not answered";
       else if (retryScheduled) displayStatus = "retry scheduled";
       else if (stageStatus.status === "review") displayStatus = "needs review";
+
       const displayTime = stageStatus.status === "confirmed"
         ? stageStatus.reportedAt || scheduledTime
         : ["follow_up", "retry", "escalated"].includes(stageStatus.status) && stageStatus.nextCallAt
           ? stageStatus.nextCallAt
           : scheduledTime;
-      const hint = localStageHint([record], stage, scheduleDate);
+
       return <Stack key={record.sessionId} spacing={0.35} alignItems="flex-start">
         {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}</Typography>}
         <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="nowrap">
@@ -213,7 +278,11 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
           </Typography>
           <StatusChip compact status={displayStatus} />
         </Stack>
-        {hint && <Typography variant="caption" color={hint.includes("follow-up") ? "error.main" : "text.secondary"} sx={{ fontSize: 11, lineHeight: 1.2 }}>{hint}</Typography>}
+        {(["follow_up", "retry", "escalated"].includes(stageStatus.status)) && stageStatus.nextCallAt && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.2 }}>
+          {stageStatus.status === "escalated" ? "Care manager" : employeeRequestedDelay ? "Callback" : "Retry"} · {compactScheduleTime(stageStatus.nextCallAt, scheduleDate)}
+        </Typography>}
+        {stageStatus.status === "unresolved" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Follow-up needed</Typography>}
+        {stageStatus.status === "not_answered" && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Retry limit reached</Typography>}
       </Stack>;
     })}
   </Stack>;
@@ -223,20 +292,41 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [selectedDate, setSelectedDate] = useState(todayInIndia);
-  const [sortBy, setSortBy] = useState<ScheduleSort>("check_in_descending");
+  const [sortBy, setSortBy] = useState<ScheduleSort>("current_upcoming");
+  const [search, setSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [caregiverFilter, setCaregiverFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [syncScope, setSyncScope] = useState<"all" | "branch" | "care_manager">("all");
+  const [syncScopeId, setSyncScopeId] = useState("");
+  const [submissionFilters, setSubmissionFilters] = useState({ eventType: "all", status: "all", scheduleId: "" });
   const [selectedSchedule, setSelectedSchedule] = useState<AthulyaSchedule | null>(null);
+  const queryClient = useQueryClient();
   const isAdmin = userRole === "admin";
   const schedules = useQuery({
     queryKey: ["athulya-schedules", selectedDate],
     queryFn: () => fetchAthulyaSchedules({ fromDate: selectedDate, toDate: selectedDate }),
     refetchInterval: 30_000,
   });
+  const integration = useQuery({ queryKey: ["athulya-integration"], queryFn: fetchAthulyaIntegration, enabled: isAdmin, retry: false });
+  const mockPlatform = useQuery({ queryKey: ["mock-platform-server"], queryFn: fetchMockPlatformServerSettings, enabled: isAdmin, retry: false });
+  const syncRuns = useQuery({ queryKey: ["athulya-sync-runs"], queryFn: fetchAthulyaSyncRuns, enabled: isAdmin, refetchInterval: isAdmin ? 5000 : false, retry: false });
   const submissionQuery = useQuery({
     queryKey: ["athulya-attendance-submissions", selectedDate],
     queryFn: () => fetchAthulyaAttendanceSubmissions({ ...serviceDateBounds(selectedDate), limit: 500 }),
     enabled: isAdmin,
     refetchInterval: isAdmin ? 15_000 : false,
     retry: false,
+  });
+  const syncMutation = useMutation({
+    mutationFn: startAthulyaSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["athulya-sync-runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["athulya-schedules", selectedDate] }),
+        queryClient.invalidateQueries({ queryKey: ["attendance", "schedule-status"] }),
+      ]);
+    },
   });
   const attendance = useQuery({
     queryKey: ["attendance", "schedule-status"],
@@ -257,6 +347,13 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const schedulesData = schedules.data || [];
   const attendanceData = attendance.data || [];
   const submissionEvents = submissionQuery.data || [];
+  const syncRunRows = syncRuns.data || [];
+  const isMockMode = mockPlatform.data?.enabled === true;
+  const syncAvailable = integration.data?.enabled === true || isMockMode;
+  const selectedDateRun = syncRunRows.find((run) => run.status === "running" && run.fromDate === selectedDate);
+  const anySyncRunning = syncRunRows.some((run) => run.status === "running");
+  const syncRunning = syncMutation.isPending || anySyncRunning;
+  const lastSuccessfulRun = syncRunRows.find((run) => run.status === "succeeded" && run.fromDate === selectedDate);
   const scheduleSessions = selectedSchedule
     ? (scheduleAttendance.data || matchingAttendance(selectedSchedule, attendanceData))
     : [];
@@ -268,39 +365,63 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
     refetchInterval: selectedSchedule ? 15_000 : (false as const),
   })) });
   const statusesBySchedule = new Map(schedulesData.map((schedule) => [schedule.id, scheduleStatus(schedule, attendanceData)]));
+  const statusPriority: Record<AttendanceStatus, number> = { in_progress: 0, upcoming: 1, retry: 2, retry_scheduled: 2, delayed: 2, escalated: 3, attention_required: 4, unresolved: 5, completed: 6, cancelled: 7 };
+  const branchOptions = [...new Set(schedulesData.map((schedule) => schedule.branch).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const caregiverOptions = [...new Map(schedulesData.flatMap((schedule) => schedule.caregivers.map((caregiver) => [caregiver.id || caregiver.name, caregiver] as const))).values()];
   const enrichedSchedules = schedulesData.map((schedule) => {
     const localTasks = matchingAttendance(schedule, attendanceData);
-    return { schedule, localTasks, status: scheduleStatus(schedule, localTasks) };
+    const events = scheduleSubmissionEvents(schedule, submissionEvents);
+    return { schedule, localTasks, events, status: unifiedAttendanceStatus(schedule, localTasks) };
   });
-  const sortedSchedules = [...enrichedSchedules].sort((left, right) => {
+  const filteredSchedules = enrichedSchedules.filter(({ schedule, status }) => {
+    const query = search.trim().toLowerCase();
+    const searchMatch = !query || [schedule.athulyaScheduleId, schedule.athulyaSchedulePk, schedule.patient.name, schedule.patient.uhid, ...schedule.caregivers.map((caregiver) => `${caregiver.name} ${caregiver.id}`)].some((value) => String(value || "").toLowerCase().includes(query));
+    const statusMatch = statusFilter === "all" || status === statusFilter;
+    const branchMatch = branchFilter === "all" || schedule.branch === branchFilter;
+    const caregiverMatch = caregiverFilter === "all" || schedule.caregivers.some((caregiver) => caregiver.id === caregiverFilter || caregiver.name === caregiverFilter);
+    return searchMatch && statusMatch && branchMatch && caregiverMatch;
+  });
+  const sortedSchedules = [...filteredSchedules].sort((left, right) => {
     const a = left.schedule;
     const b = right.schedule;
     const startA = scheduledInstant(a.date, a.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const startB = scheduledInstant(b.date, b.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const endA = scheduledInstant(a.date, a.endTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const endB = scheduledInstant(b.date, b.endTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-    const sortKey = sortBy.replace(/_(ascending|descending)$/, "") as ScheduleSortKey;
+    if (sortBy === "current_upcoming") {
+      const rank = statusPriority[statusesBySchedule.get(a.id) || "upcoming"] - statusPriority[statusesBySchedule.get(b.id) || "upcoming"];
+      return rank || startA - startB;
+    }
     const descending = sortBy.endsWith("descending");
     let comparison = 0;
-    if (sortKey === "check_in") comparison = startA - startB;
-    else if (sortKey === "check_out") comparison = endA - endB;
+    if (sortBy.startsWith("schedule_time_")) comparison = startA - startB;
+    else if (sortBy.startsWith("check_in_")) comparison = startA - startB;
+    else if (sortBy.startsWith("check_out_")) comparison = endA - endB;
     else {
       const valueFor = (schedule: AthulyaSchedule) => {
-        if (sortKey === "status") return statusesBySchedule.get(schedule.id) || "upcoming";
-        if (sortKey === "patient") return schedule.patient.name || "";
-        if (sortKey === "caregivers") return schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone || "").join(", ");
+        if (sortBy.startsWith("status_")) return statusesBySchedule.get(schedule.id) || "upcoming";
+        if (sortBy.startsWith("patient_")) return schedule.patient.name || "";
+        if (sortBy.startsWith("caregivers_")) return schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone || "").join(", ");
         return schedule.service || "";
       };
       comparison = valueFor(a).localeCompare(valueFor(b), undefined, { sensitivity: "base", numeric: true });
     }
     return descending ? -comparison : comparison;
   });
-  useEffect(() => setPage(0), [selectedDate, sortBy, schedulesData.length]);
+  useEffect(() => setPage(0), [selectedDate, sortBy, statusFilter, branchFilter, caregiverFilter, search, submissionFilters.scheduleId, schedulesData.length]);
   const pageRows = sortedSchedules.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  const counts = enrichedSchedules.reduce((result, { status }) => {
-    result[status] += 1;
-    return result;
-  }, { upcoming: 0, in_progress: 0, delayed: 0, retry: 0, escalated: 0, unresolved: 0, retry_scheduled: 0, attention_required: 0, completed: 0, cancelled: 0 } satisfies Record<AttendanceStatus, number>);
+  const completedSchedules = enrichedSchedules.filter(({ status }) => status === "completed").length;
+  const pendingAttendance = enrichedSchedules.filter(({ status }) => !["completed", "cancelled"].includes(status)).length;
+  const submissionFailures = submissionEvents.filter((event) => event.status === "failed").length;
+  const filteredSubmissionEvents = submissionEvents.filter((event) =>
+    (submissionFilters.eventType === "all" || event.eventType === submissionFilters.eventType)
+    && (submissionFilters.status === "all" || event.status === submissionFilters.status)
+    && (!submissionFilters.scheduleId || String(event.scheduleId || "").toLowerCase().includes(submissionFilters.scheduleId.toLowerCase())));
+  const syncSelectedDate = () => syncMutation.mutate({
+    scheduleDate: selectedDate,
+    careManagerId: syncScope === "care_manager" ? syncScopeId.trim() : undefined,
+    branchId: syncScope === "branch" ? syncScopeId.trim() : undefined,
+  });
   const dateLabel = selectedDate
     ? new Date(`${selectedDate}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
     : "Choose a date";
@@ -308,63 +429,115 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const selectedScheduleEvents = selectedSchedule ? scheduleSubmissionEvents(selectedSchedule, submissionEvents) : [];
   const selectedCheckInSubmission = latestStageSubmission(selectedScheduleEvents, "check_in");
   const selectedCheckOutSubmission = latestStageSubmission(selectedScheduleEvents, "check_out");
-  const activeSortKey = sortBy.replace(/_(ascending|descending)$/, "") as ScheduleSortKey;
-  const activeSortDirection = sortBy.endsWith("descending") ? "desc" : "asc";
-  const changeSort = (key: ScheduleSortKey) => setSortBy((current) => {
-    const currentKey = current.replace(/_(ascending|descending)$/, "");
-    const nextDirection = currentKey === key && current.endsWith("ascending") ? "descending" : "ascending";
-    return `${key}_${nextDirection}` as ScheduleSort;
-  });
+  const latestSelectedDateRun = syncRunRows.find((run) => run.fromDate === selectedDate);
 
   return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
-    <PageHeader title="Attendance & schedules" actions={<Chip icon={<EventAvailableRoundedIcon />} label={dateLabel} variant="outlined" />} />
-    <Grid container spacing={1.75}>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard compact label="Schedules" value={schedules.isLoading ? "—" : schedulesData.length.toLocaleString()} detail="For the selected day" icon={<EventAvailableRoundedIcon />} /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard compact label="Upcoming" value={schedules.isLoading ? "—" : counts.upcoming.toLocaleString()} detail="Waiting for scheduled time" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard compact label="Delayed" value={schedules.isLoading || attendance.isLoading ? "—" : counts.delayed.toLocaleString()} detail="Missed calls or needs follow-up" icon={<PendingActionsRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
-      <Grid size={{ xs: 6, sm: 6, md: 3 }}><MetricCard compact label="Completed" value={schedules.isLoading ? "—" : counts.completed.toLocaleString()} detail="Finished duties" icon={<TaskAltRoundedIcon />} tint="#e5f5ee" accent="#178264" /></Grid>
+    <PageHeader eyebrow="ATHULYA / DUTY OPERATIONS" title="Schedule & Attendance" description="Review imported duties, attendance calls, and Athulya submission status in one place." />
+    <Card variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderColor: "#e2e9e6", boxShadow: "none" }}>
+      <Stack spacing={1.5}>
+        <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ xs: "stretch", lg: "center" }} justifyContent="space-between">
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} alignItems={{ xs: "stretch", sm: "center" }}>
+            <TextField type="date" size="small" required label="Service date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value || todayInIndia())} InputLabelProps={{ shrink: true }} sx={{ minWidth: { sm: 190 } }} />
+            <Button size="small" onClick={() => setSelectedDate(todayInIndia())} disabled={selectedDate === todayInIndia()}>Today</Button>
+            <Chip size="small" label="Asia/Kolkata · midnight to midnight" variant="outlined" />
+          </Stack>
+          {isAdmin && <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }}>
+            <FormControl size="small" sx={{ minWidth: 150 }}><InputLabel>Sync scope</InputLabel><Select label="Sync scope" value={syncScope} onChange={(event) => { setSyncScope(event.target.value as typeof syncScope); setSyncScopeId(""); }}><MenuItem value="all">Everyone</MenuItem><MenuItem value="branch">One branch</MenuItem><MenuItem value="care_manager">One Care Manager</MenuItem></Select></FormControl>
+            {syncScope !== "all" && <TextField size="small" label={syncScope === "branch" ? "Branch ID" : "Care Manager ID"} value={syncScopeId} onChange={(event) => setSyncScopeId(event.target.value)} sx={{ minWidth: 180 }} />}
+            <Button variant="contained" startIcon={<SyncRoundedIcon />} disabled={!syncAvailable || !selectedDate || syncRunning || (syncScope !== "all" && !syncScopeId.trim())} onClick={syncSelectedDate}>
+              {syncRunning ? "Sync running…" : "Sync schedules"}
+            </Button>
+          </Stack>}
+        </Stack>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} justifyContent="space-between">
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" color="text.secondary">Sync status</Typography>
+            {isAdmin ? <StatusChip compact status={selectedDateRun?.status || latestSelectedDateRun?.status || "not synced"} /> : <Typography variant="caption" color="text.secondary">Admin sync controls</Typography>}
+            {isAdmin && <Typography variant="caption" color="text.secondary">Last successful sync: {lastSuccessfulRun?.completedAt ? formatAppDateTime(lastSuccessfulRun.completedAt) : "No successful sync recorded"}</Typography>}
+          </Stack>
+          {isAdmin && !syncAvailable && !integration.isLoading && !mockPlatform.isLoading && <Button size="small" component={RouterLink} to="/settings/athulya">Configure Athulya integration</Button>}
+        </Stack>
+        {schedules.isError && <Alert severity="error">Schedule list could not be loaded. Check the selected date and your organization access.</Alert>}
+        {isAdmin && (syncMutation.isError || integration.isError || mockPlatform.isError) && <Alert severity="error">{syncMutation.isError ? `Schedule sync could not be started: ${settingError(syncMutation.error)}` : "Athulya sync availability could not be checked."}</Alert>}
+        {syncMutation.isSuccess && <Alert severity="success">Sync queued for {syncMutation.data.scheduleDate}. The selected date’s schedule list and sync status will refresh automatically.</Alert>}
+        {submissionQuery.isError && isAdmin && <Alert severity="warning">Athulya attendance submission details could not be loaded; schedules and local attendance remain available.</Alert>}
+      </Stack>
+    </Card>
+
+    <Grid container spacing={1.5}>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard compact label="Imported schedules" value={schedules.isLoading ? "—" : schedulesData.length.toLocaleString()} detail="For the selected service date" icon={<EventAvailableRoundedIcon />} /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard compact label="Pending attendance" value={schedules.isLoading || attendance.isLoading ? "—" : pendingAttendance.toLocaleString()} detail="Excludes completed and cancelled duties" icon={<PendingActionsRoundedIcon />} tint="#fff3df" accent="#b8751a" /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard compact label="Completed schedules" value={schedules.isLoading || attendance.isLoading ? "—" : completedSchedules.toLocaleString()} detail="Both local attendance stages confirmed" icon={<TaskAltRoundedIcon />} tint="#e5f5ee" accent="#178264" /></Grid>
+      <Grid size={{ xs: 6, md: 3 }}><MetricCard compact label="Submission failures" value={!isAdmin || submissionQuery.isLoading ? "—" : submissionFailures.toLocaleString()} detail="Failed Athulya events for selected date" icon={<PendingActionsRoundedIcon />} tint="#fff0ed" accent="#c44747" /></Grid>
     </Grid>
+
     <Card sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: { xs: 400, md: 0 }, overflow: "hidden" }}>
       {schedules.isLoading && <LinearProgress />}
-      {schedules.isError && <Alert severity="error" sx={{ m: 2 }}>Scheduled duties could not be loaded.</Alert>}
-      {attendance.isError && <Alert severity="warning" sx={{ m: 2 }}>Attendance updates could not be loaded.</Alert>}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} sx={{ p: { xs: 1.25, sm: 2 }, borderBottom: "1px solid #e8edf3", flexShrink: 0 }}>
-        <TextField type="date" size="small" required label="Schedule date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value || todayInIndia())} InputLabelProps={{ shrink: true }} sx={{ minWidth: { sm: 200 } }} />
-        <Button size="small" onClick={() => setSelectedDate(todayInIndia())} disabled={selectedDate === todayInIndia()}>Today</Button>
-        <Chip label={`${schedulesData.length} schedules`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
+      {attendance.isError && <Alert severity="warning" sx={{ m: 1.5 }}>Local attendance call status could not be loaded.</Alert>}
+      <Stack direction={{ xs: "column", lg: "row" }} spacing={1} alignItems={{ xs: "stretch", lg: "center" }} sx={{ p: { xs: 1.25, sm: 1.75 }, borderBottom: "1px solid #e8edf3", flexShrink: 0 }}>
+        <TextField size="small" placeholder="Search patient, UHID, caregiver, schedule ID" value={search} onChange={(event) => setSearch(event.target.value)} InputProps={{ startAdornment: <SearchRoundedIcon fontSize="small" color="action" sx={{ mr: 1 }} /> }} sx={{ flex: 1, minWidth: 220 }} />
+        <FormControl size="small" sx={{ minWidth: 140 }}><InputLabel>Attendance</InputLabel><Select label="Attendance" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><MenuItem value="all">All statuses</MenuItem>{["upcoming", "pending check-in", "checked in", "missing check-out", "completed", "cancelled"].map((value) => <MenuItem key={value} value={value} sx={{ textTransform: "capitalize" }}>{value}</MenuItem>)}</Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 140 }}><InputLabel>Branch</InputLabel><Select label="Branch" value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}><MenuItem value="all">All branches</MenuItem>{branchOptions.map((branch) => <MenuItem key={branch} value={branch}>{branch}</MenuItem>)}</Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}><InputLabel>Caregiver</InputLabel><Select label="Caregiver" value={caregiverFilter} onChange={(event) => setCaregiverFilter(event.target.value)}><MenuItem value="all">All caregivers</MenuItem>{caregiverOptions.map((caregiver) => <MenuItem key={caregiver.id || caregiver.name} value={caregiver.id || caregiver.name}>{caregiver.name || caregiver.id}</MenuItem>)}</Select></FormControl>
+        <SortByMenu value={sortBy} options={scheduleSortOptions} onChange={setSortBy} />
       </Stack>
       <OperationsTable sx={{ flex: 1, minHeight: { xs: 250, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}>
-        <Table size="small" stickyHeader sx={{ minWidth: 850 }} aria-label="Attendance and schedules">
-          <TableHead><TableRow>
-            {([{ key: "patient", label: "Patient" }, { key: "caregivers", label: "Care givers" }, { key: "service", label: "Service" }, { key: "check_in", label: "Check in" }, { key: "check_out", label: "Check out" }, { key: "status", label: "Status" }] as const).map(({ key, label }) => <TableCell key={key} sortDirection={activeSortKey === key ? activeSortDirection : false} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>
-              <TableSortLabel active={activeSortKey === key} direction={activeSortKey === key ? activeSortDirection : "asc"} onClick={() => changeSort(key)}>{label}</TableSortLabel>
-            </TableCell>)}
-            <TableCell sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>Details</TableCell>
-          </TableRow></TableHead>
+        <Table size="small" sx={{ minWidth: 1220 }} aria-label="Schedule and attendance management">
+          <TableHead><TableRow>{["Schedule ID", "Patient", "Caregiver", "Branch", "Schedule time", "Check-in", "Check-out", "Attendance status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap", bgcolor: "#f7f9fc" }}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>
-            {pageRows.map(({ schedule, localTasks, status }) => <TableRow key={schedule.id} hover>
-              <TableCell>{schedule.patient.name || "—"}</TableCell>
-              <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell>
-              <TableCell>{schedule.service || "—"}</TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
+            {pageRows.map(({ schedule, localTasks, events, status }) => <TableRow key={schedule.id} hover>
+              <TableCell><Typography variant="body2" fontWeight={650}>{schedule.athulyaScheduleId || schedule.athulyaSchedulePk}</Typography></TableCell>
+              <TableCell><Typography variant="body2" fontWeight={650}>{schedule.patient.name || "—"}</Typography><Typography variant="caption" color="text.secondary">UHID {schedule.patient.uhid || "—"}</Typography></TableCell>
+              <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.id).join(", ") || "—"}</TableCell>
+              <TableCell>{schedule.branch || "—"}</TableCell>
+              <TableCell sx={{ whiteSpace: "nowrap" }}>{scheduleClock(schedule.startTime)} – {scheduleClock(schedule.endTime)}<Typography variant="caption" display="block" color="text.secondary">{scheduleDateLabel(schedule.date)}</Typography></TableCell>
+              <TableCell><ScheduleAttendanceCell event={latestStageSubmission(events, "check_in")} localRecords={localTasks} stage="checkIn" scheduledTime={schedule.startTime} scheduleDate={schedule.date} /></TableCell>
+              <TableCell><ScheduleAttendanceCell event={latestStageSubmission(events, "check_out")} localRecords={localTasks} stage="checkOut" scheduledTime={schedule.endTime} scheduleDate={schedule.date} /></TableCell>
               <TableCell><StatusChip compact status={status} /></TableCell>
-              <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
+              <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>View details</Button></TableCell>
             </TableRow>)}
-            {schedules.isSuccess && schedulesData.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}>No schedules found for {dateLabel}. Choose another date or contact your administrator.</TableCell></TableRow>}
+            {schedules.isSuccess && pageRows.length === 0 && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 5 }}>{schedulesData.length === 0 ? `No schedules found for ${dateLabel}. Choose another date or sync this service date.` : "No schedules match the current search and filters."}</TableCell></TableRow>}
           </TableBody>
         </Table>
       </OperationsTable>
       <TablePagination component="div" count={sortedSchedules.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Schedules per page" />
     </Card>
 
+    {isAdmin && <Accordion disableGutters sx={{ border: "1px solid #e2e9e6", borderRadius: "14px !important", boxShadow: "none", "&:before": { display: "none" } }}>
+      <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}><Box><Typography fontWeight={700}>Schedule Sync History</Typography><Typography variant="caption" color="text.secondary">Recent manual and automatic imports for the organization.</Typography></Box></AccordionSummary>
+      <AccordionDetails sx={{ pt: 0 }}>
+        {syncRuns.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load schedule sync history.</Alert>}
+        {syncRuns.isLoading ? <LinearProgress /> : <OperationsTable sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Started", "Type", "Scope", "Schedule date", "Status", "Received", "Saved", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
+          {syncRunRows.map((run) => <TableRow key={run.id}><TableCell>{formatAppDateTime(run.startedAt)}</TableCell><TableCell>{run.syncSource === "automatic" ? "Automatic" : "Manual"}</TableCell><TableCell>{run.syncScope === "branch" ? `Branch ${run.syncScopeId}` : run.syncScope === "care_manager" ? `Care Manager ${run.syncScopeId}` : "Everyone"}</TableCell><TableCell>{run.fromDate && run.fromDate === run.toDate ? run.fromDate : `${run.fromDate || "—"} – ${run.toDate || "—"}`}</TableCell><TableCell><StatusChip compact status={run.status} /></TableCell><TableCell>{run.recordsReceived}</TableCell><TableCell>{run.recordsUpserted}</TableCell><TableCell>{run.errorMessage || "—"}</TableCell></TableRow>)}
+          {syncRuns.isSuccess && syncRunRows.length === 0 && <TableRow><TableCell colSpan={8} align="center">No schedule sync history yet.</TableCell></TableRow>}
+        </TableBody></Table></OperationsTable>}
+      </AccordionDetails>
+    </Accordion>}
+
+    {isAdmin && <Accordion disableGutters sx={{ border: "1px solid #e2e9e6", borderRadius: "14px !important", boxShadow: "none", "&:before": { display: "none" } }}>
+      <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}><Box><Typography fontWeight={700}>Attendance Submission History</Typography><Typography variant="caption" color="text.secondary">Athulya check-in and check-out events for the selected service date.</Typography></Box></AccordionSummary>
+      <AccordionDetails sx={{ pt: 0 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 1.5 }}>
+          <FormControl size="small" sx={{ minWidth: 145 }}><InputLabel>Event</InputLabel><Select label="Event" value={submissionFilters.eventType} onChange={(event) => setSubmissionFilters((current) => ({ ...current, eventType: event.target.value }))}><MenuItem value="all">All events</MenuItem><MenuItem value="check_in">Check-in</MenuItem><MenuItem value="check_out">Check-out</MenuItem></Select></FormControl>
+          <FormControl size="small" sx={{ minWidth: 155 }}><InputLabel>Submission status</InputLabel><Select label="Submission status" value={submissionFilters.status} onChange={(event) => setSubmissionFilters((current) => ({ ...current, status: event.target.value }))}><MenuItem value="all">All statuses</MenuItem>{["pending", "processing", "retry_scheduled", "failed", "synced", "awaiting_api_specification"].map((value) => <MenuItem key={value} value={value} sx={{ textTransform: "capitalize" }}>{value.replaceAll("_", " ")}</MenuItem>)}</Select></FormControl>
+          <TextField size="small" label="Schedule ID" value={submissionFilters.scheduleId} onChange={(event) => setSubmissionFilters((current) => ({ ...current, scheduleId: event.target.value }))} />
+        </Stack>
+        {submissionQuery.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load attendance submission history.</Alert>}
+        {submissionQuery.isLoading ? <LinearProgress /> : <OperationsTable sx={{ maxHeight: 360 }}><Table size="small" stickyHeader><TableHead><TableRow>{["Event time", "Event", "Patient", "Caregiver", "Schedule ID", "Status", "Attempts", "Error"].map((label) => <TableCell key={label} sx={{ fontWeight: 700 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
+          {filteredSubmissionEvents.map((event) => <TableRow key={event.id}><TableCell>{formatAppDateTime(event.eventAt)}</TableCell><TableCell>{event.eventType === "check_in" ? "Check-in" : "Check-out"}</TableCell><TableCell>{event.patientName || event.patientId || "—"}</TableCell><TableCell>{event.caregiverName || "—"}</TableCell><TableCell>{event.scheduleId || "—"}</TableCell><TableCell><StatusChip compact status={event.status === "awaiting_api_specification" ? "pending" : event.status} /></TableCell><TableCell>{event.retryCount}</TableCell><TableCell sx={{ maxWidth: 300, whiteSpace: "normal", overflowWrap: "anywhere" }}>{event.errorMessage || "—"}</TableCell></TableRow>)}
+          {submissionQuery.isSuccess && filteredSubmissionEvents.length === 0 && <TableRow><TableCell colSpan={8} align="center">No attendance submissions match these filters.</TableCell></TableRow>}
+        </TableBody></Table></OperationsTable>}
+        {submissionEvents.length >= 500 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Showing the latest 500 events returned for the selected service date.</Typography>}
+      </AccordionDetails>
+    </Accordion>}
+
     <Dialog open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: 3 } }}>
       {selectedSchedule && <>
         <DialogTitle sx={{ px: { xs: 2, sm: 3 }, pt: 2.5, pb: 1.5 }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} justifyContent="space-between">
             <Box sx={{ minWidth: 0 }}>
-              <Stack direction="row" alignItems="center" spacing={0.75} useFlexGap flexWrap="wrap">
-                <Typography variant="h5" fontWeight={750} sx={{ overflowWrap: "anywhere" }}>{selectedSchedule.patient.name || "Patient schedule"}</Typography>
+              <Typography variant="h5" fontWeight={750} sx={{ overflowWrap: "anywhere" }}>{selectedSchedule.patient.name || "Patient schedule"}</Typography>
+              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" sx={{ mt: 0.5 }}>
                 <Chip size="small" variant="outlined" label={`Schedule ID · ${selectedSchedule.athulyaScheduleId || selectedSchedule.athulyaSchedulePk || selectedSchedule.id}`} sx={{ height: 23, maxWidth: "100%", fontSize: 11, fontWeight: 650 }} />
               </Stack>
             </Box>
@@ -373,40 +546,18 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         </DialogTitle>
         <DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 2.5, bgcolor: "#fbfcfb" }}>
           <Stack spacing={2}>
-            <Card variant="outlined" sx={{ p: { xs: 1.25, sm: 1.5 }, boxShadow: "none", borderColor: "#d8e6df", bgcolor: "#f6faf8" }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <Typography variant="subtitle2" fontWeight={800}>Attendance timeline</Typography>
-                <Chip size="small" label="IST" variant="outlined" sx={{ height: 22, fontSize: 11 }} />
-              </Stack>
-              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 0.5 }} />}
-              {scheduleAttendance.isError && <Typography variant="caption" color="error.main" sx={{ display: "block", mb: 0.5 }}>Actual attendance could not be loaded.</Typography>}
-              {([{
-                label: "Check-in",
-                scheduled: scheduledInstant(selectedSchedule.date, selectedSchedule.startTime),
-                actual: scheduleSessions.find((record) => record.checkIn.reportedAt)?.checkIn.reportedAt || selectedCheckInSubmission?.eventAt || null,
-                submission: selectedCheckInSubmission,
-              }, {
-                label: "Check-out",
-                scheduled: scheduledInstant(selectedSchedule.date, selectedSchedule.endTime),
-                actual: scheduleSessions.find((record) => record.checkOut.reportedAt)?.checkOut.reportedAt || selectedCheckOutSubmission?.eventAt || null,
-                submission: selectedCheckOutSubmission,
-              }]).map(({ label, scheduled, actual, submission }) => {
-                const scheduledLabel = scheduled ? dateTimeLabel(scheduled.toISOString()) : null;
-                const actualLabel = actual ? dateTimeLabel(actual) : null;
-                const showBoth = Boolean(scheduledLabel && actualLabel && scheduledLabel !== actualLabel);
-                return <Stack key={label} direction="row" alignItems="center" spacing={1} sx={{ py: 0.75, borderTop: "1px solid #e3ebe6" }}>
-                  <Typography variant="body2" fontWeight={700} sx={{ width: 78, flexShrink: 0 }}>{label}</Typography>
-                  <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
-                    {showBoth ? <><Box component="span" color="text.secondary" fontWeight={550}>{scheduledLabel}</Box><Box component="span" color="text.disabled" sx={{ mx: 0.5 }}>/</Box><Box component="span" color="success.dark" fontWeight={750}>{actualLabel}</Box></> : <Box component="span" color={actualLabel ? "success.dark" : "text.secondary"} fontWeight={actualLabel ? 750 : 600}>{actualLabel || scheduledLabel || "Time unavailable"}</Box>}
-                  </Typography>
-                  {submission?.status === "synced" ? <Chip size="small" icon={<TaskAltRoundedIcon sx={{ fontSize: "15px !important" }} />} label="Synced" color="success" variant="outlined" sx={{ height: 22, fontSize: 10, fontWeight: 700, "& .MuiChip-label": { px: 0.75 } }} /> : submission ? <StatusChip compact status={submission.status === "awaiting_api_specification" ? "pending" : submission.status} /> : <Chip size="small" label="Not synced" variant="outlined" sx={{ height: 22, fontSize: 10, color: "text.secondary", "& .MuiChip-label": { px: 0.75 } }} />}
-                </Stack>;
-              })}
+            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none", borderColor: "#dfe8e3", bgcolor: "#f4f8f6" }}>
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Duty timing</Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1.2fr 1fr 1fr" }, gap: 2 }}>
+                <Detail label="Scheduled date" value={scheduleDateLabel(selectedSchedule.date)} />
+                <Detail label="Check-in time" value={scheduleClock(selectedSchedule.startTime)} />
+                <Detail label="Check-out time" value={scheduleClock(selectedSchedule.endTime)} />
+              </Box>
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
               <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Patient and care details</Typography>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1 }}>
                 <Detail label="Patient" value={selectedSchedule.patient.name} />
                 <Detail label="Patient ID" value={selectedSchedule.patient.id} />
                 <Detail label="Patient UHID" value={selectedSchedule.patient.uhid} />
@@ -418,7 +569,6 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                 <Detail label="Schedule imported" value={selectedSchedule.lastSyncedAt ? dateTimeLabel(selectedSchedule.lastSyncedAt) : "Timestamp unavailable"} />
               </Box>
             </Card>
-
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ mb: 1.5 }}>
@@ -435,98 +585,74 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
-              <Box sx={{ mb: 1.5 }}>
-                <Typography variant="subtitle1" fontWeight={800}>Call and retry history</Typography>
-                <Typography variant="caption" color="text.secondary">Expand a stage, then open a call to review its transcript and recording.</Typography>
-              </Box>
-              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 1.5 }} />}
-              {scheduleAttendance.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load this schedule’s call history.</Alert>}
+              <Box sx={{ mb: 1.5 }}><Typography variant="subtitle2" fontWeight={750}>Call recordings and transcripts</Typography><Typography variant="caption" color="text.secondary">Every check-in and check-out attempt linked to this schedule.</Typography></Box>
+              {scheduleAttendance.isLoading && <LinearProgress />}
+              {scheduleAttendance.isError && <Alert severity="error">Could not find attendance call sessions for this schedule.</Alert>}
               {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Alert severity="info">No attendance call sessions are linked to this schedule yet.</Alert>}
               {scheduleSessions.map((record, index) => {
                 const query = conversationQueries[index];
                 const artifacts = query?.data;
                 return <Box key={record.sessionId} sx={{ mt: index ? 2 : 0, pt: index ? 2 : 0, borderTop: index ? "1px solid" : undefined, borderColor: "divider" }}>
-                  <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={0.5} sx={{ mb: 1 }}>
-                    <Box><Typography variant="body2" fontWeight={750}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Call session</Typography></Box>
-                    <StatusChip compact status={record.sessionStatus} />
+                  <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={.5} sx={{ mb: 1.25 }}>
+                    <Box><Typography variant="body2" fontWeight={700}>{record.employee.name || "Caregiver"}</Typography><Typography variant="caption" color="text.secondary">Attendance calls</Typography></Box>
+                    <StatusChip status={record.sessionStatus} />
                   </Stack>
                   {query?.isLoading && <LinearProgress sx={{ mb: 1.25 }} />}
                   {query?.isError && <Alert severity="error" sx={{ mb: 1.25 }}>Could not load this session’s call details.</Alert>}
-                  {artifacts && <Stack spacing={1}>
+                  {artifacts && <Stack spacing={1.5}>
                     {(["check_in", "check_out"] as const).map((stage) => {
-                      const attempts = artifacts.callAttempts.filter((attempt) => attempt.stage === stage).sort((a, b) => a.attemptNumber - b.attemptNumber);
-                      const latestAttempt = attempts.at(-1);
-                      const stageAttendance = stage === "check_in" ? record.checkIn : record.checkOut;
-                      const stageLabel = stage === "check_in" ? "Check-in" : "Check-out";
-                      return <Accordion key={stage} disableGutters elevation={0} sx={{ border: "1px solid #e3e9e6", borderRadius: "12px !important", boxShadow: "none", "&:before": { display: "none" }, "&.Mui-expanded": { my: 0 } }}>
-                        <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: 1.5, minHeight: 58, "&.Mui-expanded": { minHeight: 58 }, "& .MuiAccordionSummary-content": { my: 1, minWidth: 0 }, "& .MuiAccordionSummary-content.Mui-expanded": { my: 1 } }}>
-                          <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.5, sm: 1.25 }} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ width: "100%", minWidth: 0, pr: 1 }}>
-                            <Box sx={{ minWidth: 0 }}>
-                              <Typography variant="body2" fontWeight={750}>{stageLabel} calls</Typography>
-                              <Typography variant="caption" color="text.secondary">{attempts.length} {attempts.length === 1 ? "attempt" : "attempts"}{latestAttempt?.scheduledAt ? ` · Latest ${dateTimeLabel(latestAttempt.scheduledAt)}` : ""}</Typography>
-                            </Box>
-                            <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
-                              <StatusChip compact status={latestAttempt?.status || stageAttendance.status} />
-                              {stageAttendance.nextCallAt && <Chip size="small" variant="outlined" color="warning" label={`${stageAttendance.status === "escalated" ? "Care manager" : "Next retry"} · ${compactScheduleTime(stageAttendance.nextCallAt, selectedSchedule.date)}`} />}
-                            </Stack>
-                          </Stack>
-                        </AccordionSummary>
-                        <AccordionDetails sx={{ px: 1.5, pt: 0, pb: 1.5 }}>
-                          {attempts.length === 0 ? <Typography variant="body2" color="text.secondary">No calls have been placed for this stage.</Typography> : <Stack spacing={1}>
-                            {attempts.map((attempt) => {
-                              const transcript = artifacts.transcripts.find((item) => item.callAttemptId === attempt.id);
-                              const transcriptSummary = typeof attempt.outcome?.transcript_summary === "string"
-                                ? attempt.outcome.transcript_summary
-                                : typeof attempt.outcome?.transcriptSummary === "string"
-                                  ? attempt.outcome.transcriptSummary
-                                  : null;
-                              return <Accordion key={attempt.id} disableGutters elevation={0} sx={{ border: "1px solid #e8edeb", borderRadius: "10px !important", boxShadow: "none", bgcolor: "#fff", "&:before": { display: "none" }, "&.Mui-expanded": { my: 0 } }}>
-                                <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: 1.25, minHeight: 54, "&.Mui-expanded": { minHeight: 54 }, "& .MuiAccordionSummary-content": { my: 0.75, minWidth: 0 }, "& .MuiAccordionSummary-content.Mui-expanded": { my: 0.75 } }}>
-                                  <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.5, sm: 1 }} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ width: "100%", minWidth: 0, pr: 1 }}>
-                                    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0, flexWrap: "wrap" }}>
-                                      <Chip size="small" label={attempt.attemptNumber === 1 ? "Initial call" : `Retry ${attempt.attemptNumber - 1}`} color={attempt.attemptNumber === 1 ? "default" : "warning"} variant={attempt.attemptNumber === 1 ? "outlined" : "filled"} />
-                                      <Typography variant="body2" fontWeight={700}>{attempt.callTargetRole === "care_manager" ? "Care manager" : "Caregiver"}</Typography>
-                                      <Typography variant="caption" color="text.secondary">{attempt.scheduledAt ? dateTimeLabel(attempt.scheduledAt) : "Call time unavailable"}</Typography>
-                                    </Stack>
-                                    <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}><StatusChip compact status={attempt.status} />{attempt.durationSeconds != null && <Typography variant="caption" color="text.secondary" fontWeight={650}>{attempt.durationSeconds}s</Typography>}</Stack>
-                                  </Stack>
-                                </AccordionSummary>
-                                <AccordionDetails sx={{ px: 1.25, pt: 0, pb: 1.5 }}>
-                                  <Stack spacing={1.25}>
-                                    <Typography variant="caption" color="text.secondary">
-                                      {attempt.answeredAt ? `Answered ${dateTimeLabel(attempt.answeredAt)}` : "Not answered"}{attempt.endedAt ? ` · ended ${dateTimeLabel(attempt.endedAt)}` : ""}
-                                    </Typography>
-                                    {attempt.failure && <Alert severity={attempt.failure.retryable ? "warning" : "error"} variant="outlined">
-                                      Chiefvoice {attempt.failure.stage === "post_call" ? "post-call processing" : "call"} failed: {attempt.failure.code.replace(/[_.-]+/g, " ")}. {attempt.failure.retryable ? "A retry is allowed." : "This failure is not retryable."}
-                                    </Alert>}
-                                    {transcriptSummary && <Box sx={{ p: 1.25, borderRadius: 1.5, bgcolor: "#f6f8f7" }}>
-                                      <Typography variant="overline" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.4, fontWeight: 750 }}>CALL SUMMARY</Typography>
-                                      <Typography variant="body2" fontWeight={550} sx={{ mt: 0.35, overflowWrap: "anywhere" }}>{transcriptSummary}</Typography>
-                                    </Box>}
-                                    <Accordion disableGutters elevation={0} sx={{ border: "1px solid #e5ebe8", borderRadius: "10px !important", boxShadow: "none", "&:before": { display: "none" }, "&.Mui-expanded": { my: 0 } }}>
-                                      <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: 1.25, minHeight: 46, "&.Mui-expanded": { minHeight: 46 }, "& .MuiAccordionSummary-content": { my: 0.75 }, "& .MuiAccordionSummary-content.Mui-expanded": { my: 0.75 } }}>
-                                        <Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" fontWeight={700}>Transcript</Typography>{transcript?.language && <Chip size="small" label={transcript.language.toUpperCase()} variant="outlined" />}</Stack>
-                                      </AccordionSummary>
-                                      <AccordionDetails sx={{ px: 1.5, pt: 0, pb: 1.5 }}>
-                                        {transcript?.text ? <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: 1.6 }}>{transcript.text}</Typography> : <Typography variant="body2" color="text.secondary">Transcript not available yet.</Typography>}
-                                      </AccordionDetails>
-                                    </Accordion>
-                                    <Box sx={{ pt: 0.5 }}>
-                                      {attempt.recordingAvailable ? <CallRecording sessionId={record.sessionId} attemptId={attempt.id} /> : <Typography variant="caption" color="text.secondary">Recording not available yet.</Typography>}
-                                    </Box>
-                                  </Stack>
-                                </AccordionDetails>
-                              </Accordion>;
-                            })}
-                          </Stack>}
-                        </AccordionDetails>
-                      </Accordion>;
+                      const attempts = artifacts.callAttempts.filter((attempt) => attempt.stage === stage);
+                      return <Box key={stage}>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: .75 }}>
+                          <Typography variant="body2" fontWeight={700}>{stage === "check_in" ? "Check-in" : "Check-out"}</Typography>
+                          <Chip size="small" variant="outlined" label={`${attempts.length} ${attempts.length === 1 ? "call" : "calls"}`} />
+                        </Stack>
+                        {attempts.length === 0 ? <Typography variant="caption" color="text.secondary">No calls placed for this stage.</Typography> : <Stack spacing={1}>
+                          {attempts.map((attempt) => {
+                            const transcript = artifacts.transcripts.find((item) => item.callAttemptId === attempt.id);
+                            const transcriptSummary = typeof attempt.outcome?.transcript_summary === "string"
+                              ? attempt.outcome.transcript_summary
+                              : typeof attempt.outcome?.transcriptSummary === "string"
+                                ? attempt.outcome.transcriptSummary
+                                : null;
+                            return <Card key={attempt.id} variant="outlined" sx={{ p: 1.5, boxShadow: "none", bgcolor: "#fff" }}>
+                              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={.75}>
+                                <Typography variant="body2" fontWeight={700}>{attempt.callTargetRole === "care_manager" ? "Care manager" : "Caregiver"} · attempt {attempt.attemptNumber}</Typography>
+                                <Stack direction="row" spacing={1} alignItems="center"><StatusChip status={attempt.status} />{attempt.durationSeconds != null && <Typography variant="caption" color="text.secondary">{attempt.durationSeconds}s</Typography>}</Stack>
+                              </Stack>
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: .5 }}>
+                                {attempt.scheduledAt ? dateTimeLabel(attempt.scheduledAt) : "Call time unavailable"}
+                                {attempt.answeredAt ? ` · answered ${dateTimeLabel(attempt.answeredAt)}` : ""}
+                                {attempt.endedAt ? ` · ended ${dateTimeLabel(attempt.endedAt)}` : ""}
+                              </Typography>
+                              {attempt.failure && <Alert severity={attempt.failure.retryable ? "warning" : "error"} variant="outlined" sx={{ mt: 1 }}>
+                                Chiefvoice {attempt.failure.stage === "post_call" ? "post-call processing" : "call"} failed: {attempt.failure.code.replace(/[_.-]+/g, " ")}. {attempt.failure.retryable ? "A retry is allowed." : "This failure is not retryable."}
+                              </Alert>}
+                              {transcriptSummary && <Box sx={{ mt: 1.25 }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={700}>CALL SUMMARY</Typography>
+                                <Typography variant="body2" sx={{ mt: .5, overflowWrap: "anywhere" }}>{transcriptSummary}</Typography>
+                              </Box>}
+                              <Box sx={{ mt: 1.25, pt: 1.25, borderTop: "1px solid", borderColor: "divider" }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={700}>TRANSCRIPT{transcript?.language ? ` · ${transcript.language.toUpperCase()}` : ""}</Typography>
+                                {transcript?.text ? <Typography variant="body2" sx={{ mt: .5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{transcript.text}</Typography> : <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: .5 }}>Transcript not available yet.</Typography>}
+                              </Box>
+                              <Box sx={{ mt: 1.25 }}>
+                                {attempt.recordingAvailable ? <CallRecording sessionId={record.sessionId} attemptId={attempt.id} /> : <Typography variant="caption" color="text.secondary">Recording not available yet.</Typography>}
+                              </Box>
+                            </Card>;
+                          })}
+                        </Stack>}
+                      </Box>;
                     })}
                   </Stack>}
                 </Box>;
               })}
             </Card>
 
+            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
+              <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.5 }}>Schedule reference</Typography>
+              <Detail label="Schedule ID" value={selectedSchedule.athulyaScheduleId || selectedSchedule.athulyaSchedulePk} />
+            </Card>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.75 }}><Button onClick={() => setSelectedSchedule(null)} variant="contained">Close</Button></DialogActions>

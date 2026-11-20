@@ -969,7 +969,7 @@ class PostgresRepository {
       updatedAt: row.updated_at,
     };
   }
-  async listAttendanceSessions(organizationId, { search = "", status = "all", limit = 100, offset = 0, fromDate = null, toDate = null, careManagerExternalId = null } = {}) {
+  async listAttendanceSessions(organizationId, { search = "", status = "all", limit = 100, offset = 0, careManagerExternalId = null } = {}) {
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const safeOffset = Math.max(Number(offset) || 0, 0);
     const r = await this.pool.query(
@@ -984,23 +984,10 @@ class PostgresRepository {
               OR COALESCE(s.patient->>'name','') ILIKE '%'||$2||'%' OR COALESCE(s.patient->>'id','') ILIKE '%'||$2||'%')
          AND ($3='all' OR s.check_in_status=$3 OR s.check_out_status=$3 OR s.session_status=$3)
          AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$6))
-         AND ($7::date IS NULL OR s.scheduled_start_at >= ($7::date::timestamp AT TIME ZONE $9))
-         AND ($8::date IS NULL OR s.scheduled_start_at < (($8::date + 1)::timestamp AT TIME ZONE $9))
        GROUP BY s.id ORDER BY s.scheduled_start_at DESC LIMIT $4 OFFSET $5`,
-      [organizationId, String(search || "").trim(), status, safeLimit, safeOffset, careManagerExternalId || null, fromDate || null, toDate || null, process.env.APP_TIMEZONE || "Asia/Kolkata"],
+      [organizationId, String(search || "").trim(), status, safeLimit, safeOffset, careManagerExternalId || null],
     );
     return r.rows.map((row) => this.mapAttendanceSummary(row));
-  }
-  async countAttendanceSessions(organizationId, { fromDate = null, toDate = null, careManagerExternalId = null } = {}) {
-    const { rows } = await this.pool.query(
-      `SELECT COUNT(*)::int AS total FROM attendance_sessions s
-       WHERE s.organization_id=$1
-         AND ($2::date IS NULL OR s.scheduled_start_at >= ($2::date::timestamp AT TIME ZONE $4))
-         AND ($3::date IS NULL OR s.scheduled_start_at < (($3::date + 1)::timestamp AT TIME ZONE $4))
-         AND ($5::text IS NULL OR EXISTS (SELECT 1 FROM athulya_schedules aps WHERE aps.organization_id=s.organization_id AND aps.athulya_schedule_id=s.external_assignment_id AND aps.care_manager_external_id=$5))`,
-      [organizationId, fromDate || null, toDate || null, process.env.APP_TIMEZONE || "Asia/Kolkata", careManagerExternalId || null],
-    );
-    return Number(rows[0]?.total || 0);
   }
   async getOperationsSummary(organizationId, { careManagerExternalId = null } = {}) {
     const timezone = process.env.APP_TIMEZONE || "Asia/Kolkata";

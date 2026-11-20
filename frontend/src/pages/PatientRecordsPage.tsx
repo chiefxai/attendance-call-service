@@ -169,13 +169,13 @@ export function PatientRecordsPage() {
         {upcomingTasks.isLoading && <LinearProgress />}
         {upcomingTasks.isError && <Alert severity="error">Could not load this patient’s upcoming tasks.</Alert>}
         {upcomingTasks.isSuccess && upcomingForPatient.length === 0 && <Alert severity="info">No upcoming assigned tasks for this patient.</Alert>}
-        {upcomingForPatient.length > 0 && <Card variant="outlined"><OperationsTable><Table size="small" aria-label="Upcoming patient tasks"><TableHead><TableRow><TableCell>Duty interval · local time</TableCell><TableCell>Assigned staff</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForPatient.map((task) => <TableRow key={task.sessionId}>
+        {upcomingForPatient.length > 0 && <OperationsTable component={Card} variant="outlined"><Table size="small" aria-label="Upcoming patient tasks"><TableHead><TableRow><TableCell>Duty interval · local time</TableCell><TableCell>Assigned staff</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForPatient.map((task) => <TableRow key={task.sessionId}>
           <TableCell>{formatTaskInterval(task.scheduledStartAt, task.scheduledEndAt)}</TableCell>
           <TableCell><Typography variant="body2">{task.employee.name}</Typography><Typography variant="caption" color="text.secondary">{task.employee.id || "Employee ID unavailable"}</Typography></TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkIn.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkOut.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.sessionStatus.replaceAll("_", " ")}</TableCell>
-        </TableRow>)}</TableBody></Table></OperationsTable></Card>}
+        </TableRow>)}</TableBody></Table></OperationsTable>}
       </Stack>
     </Stack></DialogContent><DialogActions><Button onClick={() => setViewPatient(null)}>Close profile</Button></DialogActions></>}</Dialog>
   </Stack>;

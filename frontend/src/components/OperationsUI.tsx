@@ -11,16 +11,18 @@ export function DemoDataNotice({ children = "Illustrative preview data — live 
 
 export const PageHeaderTargetContext = createContext<HTMLElement | null>(null);
 
-export function PageHeader({ title, actions, showOutboundOnly = false }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode; showOutboundOnly?: boolean }) {
+export function PageHeader({ eyebrow, title, description, actions, showOutboundOnly = false }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode; showOutboundOnly?: boolean }) {
   const target = useContext(PageHeaderTargetContext);
   if (!target) return null;
   return createPortal(
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} spacing={{ xs: 1, sm: 2 }} sx={{ width: "100%", minWidth: 0 }}>
       <Box sx={{ minWidth: 0, flex: 1 }}>
+        {eyebrow && <Typography variant="overline" color="text.secondary" sx={{ display: "block", fontSize: 10, lineHeight: 1.4, letterSpacing: ".11em", fontWeight: 700 }}>{eyebrow}</Typography>}
         <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, flexWrap: "wrap" }}>
           <Typography variant="h5" sx={{ fontWeight: 750 }} noWrap>{title}</Typography>
           {showOutboundOnly && <Chip label="Outbound only" size="small" sx={{ bgcolor: "#edf6f2", color: "#246b59", fontWeight: 650 }} />}
         </Stack>
+        {description && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>{description}</Typography>}
       </Box>
       {actions && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "flex-start", sm: "flex-end" }, flexShrink: 0 }}>{actions}</Stack>}
     </Stack>,

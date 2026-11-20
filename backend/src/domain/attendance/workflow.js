@@ -251,6 +251,12 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         patient: { name: session.patient?.name || "", address: session.patient?.address || "" },
       };
       const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer, technicalFailureRetry });
+      const selectedScenario = callTargetRole === "care_manager" ? "CARE_MANAGER_ESCALATION" : templateScenario;
+      const callSettings = await repository.getOrganizationCallSettings(session.organizationId);
+      const callPrompts = require("./call-prompts").normalizeCallPrompts(callSettings.callPrompts);
+      const scenarioPrompts = callPrompts[selectedScenario];
+      callContext.app_live_prompt_instructions = scenarioPrompts.live;
+      postCallContext.app_post_call_prompt_instructions = scenarioPrompts.post;
       const call = await chiefvoice.createOutboundCall({
         to: normalizedTargetPhone,
         from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
@@ -259,7 +265,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         callAttemptId: attempt.id,
         context: callContext,
         postCallContext,
-        templateScenario: callTargetRole === "care_manager" ? "CARE_MANAGER_ESCALATION" : templateScenario,
+        templateScenario: selectedScenario,
       });
       const providerCallId = call.session_id || call.call_id || call.id;
       if (!providerCallId) throw new Error("ChiefVoice response did not include session_id; reconcile before retrying");

@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, FormControlLabel, Grid, InputLabel, MenuItem, Select, Stack, Switch, Tabs, Tab, TextField, Typography } from "@mui/material";
-import { useNavigate } from "react-router-dom";
+import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, FormControlLabel, Grid, InputLabel, MenuItem, Select, Stack, Switch, TextField, Typography } from "@mui/material";
 import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
 import { AxiosError } from "axios";
@@ -24,7 +23,7 @@ const emptySettings: CallingForm = {
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 export function SettingsPage({ section }: { section: "calling" | "api" | "athulya" }) {
-  const navigate = useNavigate();
+  const sectionTitle = section === "calling" ? "Calling settings" : section === "api" ? "API configuration" : "Athulya integration";
   const [form, setForm] = useState<CallingForm>(emptySettings);
   const [integrationForm, setIntegrationForm] = useState<IntegrationForm>({ integrationName: "Athulya Platform", apiBaseUrl: "https://homecare.athulyaliving.net/api", enabled: false, autoSyncEnabled: false, autoSyncScope: "all", autoSyncScopeId: "", apiKey: "" });
   const queryClient = useQueryClient();
@@ -65,12 +64,7 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader title="Settings"
-      actions={<Tabs value={section} onChange={(_, value: "calling" | "api" | "athulya") => navigate(`/settings/${value}`)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile aria-label="Settings sections" sx={{ minHeight: 42, "& .MuiTab-root": { minHeight: 42, px: { xs: 1.25, sm: 2 }, fontSize: 13, fontWeight: 650, textTransform: "none" } }}>
-        <Tab value="calling" label="Calling settings" />
-        <Tab value="api" label="API configuration" />
-        <Tab value="athulya" label="Athulya integration" />
-      </Tabs>} />
+    <PageHeader eyebrow="WORKSPACE CONFIGURATION" title={sectionTitle} description="Manage calling behavior, API access, and Athulya integration settings." />
     {section === "calling" ? <Stack spacing={2.5}>
       <Alert severity="info">
         Environment values in .env are the defaults. Saving here stores workspace overrides in PostgreSQL. Reset removes the overrides and returns to the environment defaults. Retry changes apply as calls finish; retries already queued keep their current scheduled time.

@@ -181,13 +181,13 @@ export function StaffRecordsPage() {
         {upcomingTasks.isLoading && <LinearProgress />}
         {upcomingTasks.isError && <Alert severity="error">Could not load this staff member’s upcoming tasks.</Alert>}
         {upcomingTasks.isSuccess && upcomingForSelected.length === 0 && <Alert severity="info">No upcoming assigned tasks for this staff member.</Alert>}
-        {upcomingForSelected.length > 0 && <Card variant="outlined"><OperationsTable><Table size="small" aria-label="Upcoming staff tasks"><TableHead><TableRow><TableCell>Patient</TableCell><TableCell>Duty interval · local time</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForSelected.map((task) => <TableRow key={task.sessionId}>
+        {upcomingForSelected.length > 0 && <OperationsTable component={Card} variant="outlined"><Table size="small" aria-label="Upcoming staff tasks"><TableHead><TableRow><TableCell>Patient</TableCell><TableCell>Duty interval · local time</TableCell><TableCell>Check in</TableCell><TableCell>Check out</TableCell><TableCell>Status</TableCell></TableRow></TableHead><TableBody>{upcomingForSelected.map((task) => <TableRow key={task.sessionId}>
           <TableCell><Typography variant="body2" fontWeight={650}>{task.patient.name || "Patient"}</Typography><Typography variant="caption" color="text.secondary">{task.assignmentId}</Typography></TableCell>
           <TableCell>{formatDutyInterval(task.scheduledStartAt, task.scheduledEndAt)}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkIn.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.checkOut.status.replaceAll("_", " ")}</TableCell>
           <TableCell sx={{ textTransform: "capitalize" }}>{task.sessionStatus.replaceAll("_", " ")}</TableCell>
-        </TableRow>)}</TableBody></Table></OperationsTable></Card>}
+        </TableRow>)}</TableBody></Table></OperationsTable>}
       </Stack>
       <Alert severity="info">Voice biometrics and carrier whitelist checks are not connected in this service.</Alert>
     </Stack></DialogContent><DialogActions><Button onClick={() => setSelected(null)}>Close profile</Button></DialogActions></>}</Dialog>

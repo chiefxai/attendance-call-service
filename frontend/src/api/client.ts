@@ -408,6 +408,18 @@ export interface CallingSettings {
   source: { defaultFromNumber: "settings" | "environment"; lateScheduleGraceMinutes: "settings" | "environment"; retry: "settings" | "environment" };
 }
 
+export interface CallPromptScenario {
+  id: string;
+  label: string;
+  live: string;
+  post: string;
+}
+
+export interface CallPromptsResponse {
+  scenarios: CallPromptScenario[];
+  defaults?: Record<string, { live: string; post: string }>;
+}
+
 export type CallingSettingsUpdate = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource">
   & { chiefvoiceWebhookSecret?: string; clearChiefVoiceWebhookSecret?: boolean };
 
@@ -564,19 +576,24 @@ export async function resetCallingSettings() {
   return response.data;
 }
 
+export async function fetchCallPrompts() {
+  const response = await api.get<CallPromptsResponse>("/settings/call-prompts");
+  return response.data;
+}
+
+export async function saveCallPrompts(prompts: Record<string, { live: string; post: string }>) {
+  const response = await api.put<CallPromptsResponse>("/settings/call-prompts", { prompts });
+  return response.data;
+}
+
 export async function fetchOperationsSummary() {
   const response = await api.get<OperationsSummary>("/dashboard/summary");
   return response.data;
 }
 
-export async function fetchAttendance(params: { search?: string; status?: string; limit?: number; offset?: number; fromDate?: string; toDate?: string } = {}) {
+export async function fetchAttendance(params: { search?: string; status?: string; limit?: number } = {}) {
   const response = await api.get<AttendanceRecord[]>("/assignments", { params });
   return response.data;
-}
-
-export async function fetchAttendanceCount(params: { fromDate?: string; toDate?: string } = {}) {
-  const response = await api.get<{ total: number }>("/assignments/count", { params });
-  return response.data.total;
 }
 
 export async function createStaff(payload: CreateStaffPayload) {

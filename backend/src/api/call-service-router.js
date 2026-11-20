@@ -7,6 +7,7 @@ const { assertRepository } = require("../domain/repository-contract");
 const { DEFAULT_BASE_URL, encryptSecret, decryptSecret, validateBaseUrl, fetchAthulyaSchedules, resolveAthulyaConnection, localDateInTimeZone } = require("../infrastructure/integrations/athulya-platform");
 const { verifyChiefVoiceSignature, normalizeChiefVoiceWebhook, normalizeChiefVoiceFailureWebhook } = require("../infrastructure/integrations/chiefvoice-webhook");
 const { processChiefVoiceResult, processChiefVoiceFailure } = require("../domain/attendance/chiefvoice-result");
+const { CALL_PROMPT_SCENARIOS, DEFAULT_CALL_PROMPTS, normalizeCallPrompts } = require("../domain/attendance/call-prompts");
 
 function createCallServiceRouter({ express, repository, queue, recordings }) {
   if (!express?.Router) throw new Error("An Express-compatible module is required");
@@ -459,20 +460,8 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     try {
       res.json(await repository.listAttendanceSessions(org(req), {
         search: req.query.search || "", status: req.query.status || "all",
-        limit: req.query.limit || 100, offset: req.query.offset || 0,
-        fromDate: req.query.fromDate || null, toDate: req.query.toDate || null,
-        careManagerExternalId: careManagerScope(req),
+        limit: req.query.limit || 100, offset: req.query.offset || 0, careManagerExternalId: careManagerScope(req),
       }));
-    } catch (error) { fail(res, error); }
-  });
-
-  router.get("/assignments/count", async (req, res) => {
-    try {
-      const total = await repository.countAttendanceSessions(org(req), {
-        fromDate: req.query.fromDate || null, toDate: req.query.toDate || null,
-        careManagerExternalId: careManagerScope(req),
-      });
-      res.json({ total });
     } catch (error) { fail(res, error); }
   });
 
@@ -664,6 +653,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         ? encryptSecret(webhookSecretInput)
         : clearWebhookSecret ? null : existingSettings.encryptedChiefVoiceWebhookSecret || null;
       await repository.saveOrganizationCallSettings(organizationId, {
+        ...existingSettings,
         defaultFromNumber,
         lateScheduleGraceMinutes,
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
@@ -678,8 +668,44 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     if (!requireAdmin(req, res)) return;
     try {
       const organizationId = org(req);
-      await repository.saveOrganizationCallSettings(organizationId, { defaultFromNumber: null, lateScheduleGraceMinutes: null, callRetry: null, unansweredCallEscalation: "call_care_manager", encryptedChiefVoiceWebhookSecret: null });
+      const existingSettings = await repository.getOrganizationCallSettings(organizationId);
+      await repository.saveOrganizationCallSettings(organizationId, { ...existingSettings, defaultFromNumber: null, lateScheduleGraceMinutes: null, callRetry: null, unansweredCallEscalation: "call_care_manager", encryptedChiefVoiceWebhookSecret: null });
       res.json(await getEffectiveCallingSettings(organizationId));
+    } catch (error) { fail(res, error); }
+  });
+
+  router.get("/settings/call-prompts", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const settings = await repository.getOrganizationCallSettings(org(req));
+      const prompts = normalizeCallPrompts(settings.callPrompts);
+      res.set("Cache-Control", "private, no-store").json({
+        scenarios: CALL_PROMPT_SCENARIOS.map(({ id, label }) => ({ id, label, ...prompts[id] })),
+        defaults: DEFAULT_CALL_PROMPTS,
+      });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.put("/settings/call-prompts", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const incoming = req.body?.prompts;
+      if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+        return res.status(400).json({ error: "prompts must be an object keyed by scenario." });
+      }
+      for (const { id } of CALL_PROMPT_SCENARIOS) {
+        const prompt = incoming[id];
+        if (!prompt || typeof prompt.live !== "string" || typeof prompt.post !== "string") {
+          return res.status(400).json({ error: `Both live and post-call prompts are required for ${id}.` });
+        }
+        if (prompt.live.trim().length < 10 || prompt.post.trim().length < 10 || prompt.live.length > 12000 || prompt.post.length > 12000) {
+          return res.status(400).json({ error: `Prompts for ${id} must be 10–12,000 characters.` });
+        }
+      }
+      const normalized = normalizeCallPrompts(incoming);
+      const settings = await repository.getOrganizationCallSettings(org(req));
+      await repository.saveOrganizationCallSettings(org(req), { ...settings, callPrompts: normalized });
+      res.json({ scenarios: CALL_PROMPT_SCENARIOS.map(({ id, label }) => ({ id, label, ...normalized[id] })) });
     } catch (error) { fail(res, error); }
   });
 
