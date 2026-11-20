@@ -65,7 +65,7 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
   };
 
   return <Stack spacing={2.5}>
-    <PageHeader eyebrow="WORKSPACE CONFIGURATION" title="Settings" description="Manage calling behavior, API access, and Athulya integration settings."
+    <PageHeader title="Settings"
       actions={<Tabs value={section} onChange={(_, value: "calling" | "api" | "athulya") => navigate(`/settings/${value}`)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile aria-label="Settings sections" sx={{ minHeight: 42, "& .MuiTab-root": { minHeight: 42, px: { xs: 1.25, sm: 2 }, fontSize: 13, fontWeight: 650, textTransform: "none" } }}>
         <Tab value="calling" label="Calling settings" />
         <Tab value="api" label="API configuration" />
