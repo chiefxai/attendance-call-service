@@ -1,37 +1,15 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TableSortLabel, TextField, Typography } from "@mui/material";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaSchedules, fetchSessionArtifacts, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
-import { SortByMenu } from "../components/SortByMenu";
 
-type ScheduleSort =
-  | "current_upcoming"
-  | "check_in_ascending" | "check_in_descending"
-  | "check_out_ascending" | "check_out_descending"
-  | "status_ascending" | "status_descending"
-  | "patient_ascending" | "patient_descending"
-  | "caregivers_ascending" | "caregivers_descending"
-  | "service_ascending" | "service_descending";
-const scheduleSortOptions = [
-  { value: "current_upcoming", label: "Current & upcoming first" },
-  { value: "check_in_ascending", label: "Check-in: earliest first" },
-  { value: "check_in_descending", label: "Check-in: latest first" },
-  { value: "check_out_ascending", label: "Check-out: earliest first" },
-  { value: "check_out_descending", label: "Check-out: latest first" },
-  { value: "status_ascending", label: "Status: A to Z" },
-  { value: "status_descending", label: "Status: Z to A" },
-  { value: "patient_ascending", label: "Patient: A to Z" },
-  { value: "patient_descending", label: "Patient: Z to A" },
-  { value: "caregivers_ascending", label: "Care givers: A to Z" },
-  { value: "caregivers_descending", label: "Care givers: Z to A" },
-  { value: "service_ascending", label: "Service: A to Z" },
-  { value: "service_descending", label: "Service: Z to A" },
-] as const;
+type ScheduleSortKey = "check_in" | "check_out" | "status" | "patient" | "caregivers" | "service";
+type ScheduleSort = `${ScheduleSortKey}_${"ascending" | "descending"}`;
 
 function todayInIndia() {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -289,7 +267,6 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
     refetchInterval: selectedSchedule ? 15_000 : (false as const),
   })) });
   const statusesBySchedule = new Map(schedulesData.map((schedule) => [schedule.id, scheduleStatus(schedule, attendanceData)]));
-  const statusPriority: Record<AttendanceStatus, number> = { in_progress: 0, upcoming: 1, retry: 2, retry_scheduled: 2, delayed: 2, escalated: 3, attention_required: 4, unresolved: 5, completed: 6, cancelled: 7 };
   const enrichedSchedules = schedulesData.map((schedule) => {
     const localTasks = matchingAttendance(schedule, attendanceData);
     return { schedule, localTasks, status: scheduleStatus(schedule, localTasks) };
@@ -301,19 +278,16 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
     const startB = scheduledInstant(b.date, b.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const endA = scheduledInstant(a.date, a.endTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const endB = scheduledInstant(b.date, b.endTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-    if (sortBy === "current_upcoming") {
-      const rank = statusPriority[statusesBySchedule.get(a.id) || "upcoming"] - statusPriority[statusesBySchedule.get(b.id) || "upcoming"];
-      return rank || startA - startB;
-    }
+    const sortKey = sortBy.replace(/_(ascending|descending)$/, "") as ScheduleSortKey;
     const descending = sortBy.endsWith("descending");
     let comparison = 0;
-    if (sortBy.startsWith("check_in_")) comparison = startA - startB;
-    else if (sortBy.startsWith("check_out_")) comparison = endA - endB;
+    if (sortKey === "check_in") comparison = startA - startB;
+    else if (sortKey === "check_out") comparison = endA - endB;
     else {
       const valueFor = (schedule: AthulyaSchedule) => {
-        if (sortBy.startsWith("status_")) return statusesBySchedule.get(schedule.id) || "upcoming";
-        if (sortBy.startsWith("patient_")) return schedule.patient.name || "";
-        if (sortBy.startsWith("caregivers_")) return schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone || "").join(", ");
+        if (sortKey === "status") return statusesBySchedule.get(schedule.id) || "upcoming";
+        if (sortKey === "patient") return schedule.patient.name || "";
+        if (sortKey === "caregivers") return schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone || "").join(", ");
         return schedule.service || "";
       };
       comparison = valueFor(a).localeCompare(valueFor(b), undefined, { sensitivity: "base", numeric: true });
@@ -333,6 +307,13 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const selectedScheduleEvents = selectedSchedule ? scheduleSubmissionEvents(selectedSchedule, submissionEvents) : [];
   const selectedCheckInSubmission = latestStageSubmission(selectedScheduleEvents, "check_in");
   const selectedCheckOutSubmission = latestStageSubmission(selectedScheduleEvents, "check_out");
+  const activeSortKey = sortBy.replace(/_(ascending|descending)$/, "") as ScheduleSortKey;
+  const activeSortDirection = sortBy.endsWith("descending") ? "desc" : "asc";
+  const changeSort = (key: ScheduleSortKey) => setSortBy((current) => {
+    const currentKey = current.replace(/_(ascending|descending)$/, "");
+    const nextDirection = currentKey === key && current.endsWith("ascending") ? "descending" : "ascending";
+    return `${key}_${nextDirection}` as ScheduleSort;
+  });
 
   return <Stack spacing={{ xs: 1.5, md: 1.75 }} sx={{ height: { xs: "auto", md: "calc(100dvh - 152px)" }, minHeight: { xs: 0, md: 440 }, pb: { xs: 1, md: 0 } }}>
     <PageHeader title="Attendance & schedules" actions={<Chip icon={<EventAvailableRoundedIcon />} label={dateLabel} variant="outlined" />} />
@@ -349,12 +330,16 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} sx={{ p: { xs: 1.25, sm: 2 }, borderBottom: "1px solid #e8edf3", flexShrink: 0 }}>
         <TextField type="date" size="small" required label="Schedule date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value || todayInIndia())} InputLabelProps={{ shrink: true }} sx={{ minWidth: { sm: 200 } }} />
         <Button size="small" onClick={() => setSelectedDate(todayInIndia())} disabled={selectedDate === todayInIndia()}>Today</Button>
-        <SortByMenu value={sortBy} options={scheduleSortOptions} onChange={setSortBy} />
         <Chip label={`${schedulesData.length} schedules`} variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
       </Stack>
       <OperationsTable sx={{ flex: 1, minHeight: { xs: 250, md: 0 }, maxHeight: { xs: "55dvh", md: "none" }, overflow: "auto" }}>
-        <Table size="small" sx={{ minWidth: 850 }} aria-label="Attendance and schedules">
-          <TableHead><TableRow>{["Patient", "Care givers", "Service", "Check in", "Check out", "Status", "Details"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
+        <Table size="small" stickyHeader sx={{ minWidth: 850 }} aria-label="Attendance and schedules">
+          <TableHead><TableRow>
+            {([{ key: "patient", label: "Patient" }, { key: "caregivers", label: "Care givers" }, { key: "service", label: "Service" }, { key: "check_in", label: "Check in" }, { key: "check_out", label: "Check out" }, { key: "status", label: "Status" }] as const).map(({ key, label }) => <TableCell key={key} sortDirection={activeSortKey === key ? activeSortDirection : false} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+              <TableSortLabel active={activeSortKey === key} direction={activeSortKey === key ? activeSortDirection : "asc"} onClick={() => changeSort(key)}>{label}</TableSortLabel>
+            </TableCell>)}
+            <TableCell sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>Details</TableCell>
+          </TableRow></TableHead>
           <TableBody>
             {pageRows.map(({ schedule, localTasks, status }) => <TableRow key={schedule.id} hover>
               <TableCell>{schedule.patient.name || "—"}</TableCell>
