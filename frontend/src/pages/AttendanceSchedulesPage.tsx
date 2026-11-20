@@ -363,41 +363,39 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         <DialogTitle sx={{ px: { xs: 2, sm: 3 }, pt: 2.5, pb: 1.5 }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} justifyContent="space-between">
             <Box sx={{ minWidth: 0 }}>
-              <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: ".08em" }}>Duty schedule</Typography>
               <Typography variant="h5" fontWeight={750} sx={{ overflowWrap: "anywhere" }}>{selectedSchedule.patient.name || "Patient schedule"}</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: .35 }}>{selectedSchedule.service || "Care service"}</Typography>
+              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" sx={{ mt: 0.5 }}>
+                <Typography variant="body2" color="text.secondary">{selectedSchedule.service || "Care service"}</Typography>
+                <Chip size="small" variant="outlined" label={`Schedule ID · ${selectedSchedule.athulyaScheduleId || selectedSchedule.athulyaSchedulePk || selectedSchedule.id}`} sx={{ height: 23, maxWidth: "100%", fontSize: 11, fontWeight: 650 }} />
+              </Stack>
             </Box>
             <StatusChip status={unifiedAttendanceStatus(selectedSchedule, scheduleSessions)} />
           </Stack>
         </DialogTitle>
         <DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 2.5, bgcolor: "#fbfcfb" }}>
           <Stack spacing={2}>
-            <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none", borderColor: "#d8e6df", bgcolor: "#f6faf8" }}>
-              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={0.5} sx={{ mb: 1.5 }}>
-                <Box><Typography variant="subtitle1" fontWeight={800}>Attendance timeline</Typography><Typography variant="caption" color="text.secondary">Scheduled and reported times</Typography></Box>
-                <Chip size="small" label="Asia/Kolkata" variant="outlined" />
+            <Card variant="outlined" sx={{ p: { xs: 1.25, sm: 1.5 }, boxShadow: "none", borderColor: "#d8e6df", bgcolor: "#f6faf8" }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" fontWeight={800}>Attendance timeline</Typography>
+                <Chip size="small" label="IST" variant="outlined" sx={{ height: 22, fontSize: 11 }} />
               </Stack>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr" }, gap: 1.25 }}>
-                {[{ label: "Scheduled check-in", time: scheduledInstant(selectedSchedule.date, selectedSchedule.startTime) }, { label: "Scheduled check-out", time: scheduledInstant(selectedSchedule.date, selectedSchedule.endTime) }].map(({ label, time }) => <Box key={label} sx={{ p: 1.5, bgcolor: "#fff", border: "1px solid #e7ece9", borderRadius: 2 }}>
-                  <Typography variant="overline" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.4, fontWeight: 700 }}>{label}</Typography>
-                  <Typography variant="body1" fontWeight={650} color="text.secondary" sx={{ mt: 0.35 }}>{time ? dateTimeLabel(time.toISOString()) : "Schedule time unavailable"}</Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr 1fr" }, gap: 0.75 }}>
+                {[{ label: "Scheduled check-in", time: scheduledInstant(selectedSchedule.date, selectedSchedule.startTime) }, { label: "Scheduled check-out", time: scheduledInstant(selectedSchedule.date, selectedSchedule.endTime) }].map(({ label, time }) => <Box key={label} sx={{ px: 1, py: 0.8, bgcolor: "#fff", border: "1px solid #e7ece9", borderRadius: 1.5 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: 10, lineHeight: 1.3, fontWeight: 700 }}>{label}</Typography>
+                  <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ mt: 0.25 }}>{time ? dateTimeLabel(time.toISOString()) : "Unavailable"}</Typography>
                 </Box>)}
               </Box>
-              <Box sx={{ borderTop: "1px solid #dce7e1", my: 1.5 }} />
-              <Stack direction="row" alignItems="baseline" justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
-                <Typography variant="subtitle2" fontWeight={750}>Actual attendance</Typography>
-                <Typography variant="caption" color="text.secondary">Recorded by caregiver</Typography>
-              </Stack>
-              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 1.5 }} />}
-              {scheduleAttendance.isError && <Alert severity="error" sx={{ mb: 1.5 }}>Could not load actual attendance times.</Alert>}
-              {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Alert severity="info">No actual check-in or check-out times have been recorded yet.</Alert>}
-              <Stack spacing={1}>
-                {scheduleSessions.map((record) => <Box key={record.sessionId} sx={{ p: 1.5, border: "1px solid #e2e9e5", borderRadius: 2, bgcolor: "#fff" }}>
-                  <Typography variant="body2" fontWeight={750} sx={{ mb: 1 }}>{record.employee.name || "Caregiver"}</Typography>
-                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr" }, gap: 1.25 }}>
-                    {[{ label: "Actual check-in", time: record.checkIn.reportedAt }, { label: "Actual check-out", time: record.checkOut.reportedAt }].map(({ label, time }) => <Box key={label} sx={{ p: 1.25, bgcolor: time ? "#eaf6ef" : "#f5f7f6", border: "1px solid", borderColor: time ? "#c9e8d4" : "#e8edeb", borderRadius: 1.75 }}>
-                      <Typography variant="overline" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.4, fontWeight: 700 }}>{label}</Typography>
-                      <Typography variant="h6" fontWeight={800} color={time ? "success.dark" : "text.disabled"} sx={{ mt: 0.25, fontSize: { xs: 15, sm: 17 }, lineHeight: 1.25 }}>{time ? dateTimeLabel(time) : "Not recorded"}</Typography>
+              <Box sx={{ borderTop: "1px solid #dce7e1", my: 1 }} />
+              {scheduleAttendance.isLoading && <LinearProgress sx={{ mb: 1 }} />}
+              {scheduleAttendance.isError && <Alert severity="error" sx={{ mb: 1, py: 0 }}>Could not load actual attendance times.</Alert>}
+              {scheduleAttendance.isSuccess && scheduleSessions.length === 0 && <Typography variant="caption" color="text.secondary">No actual check-in or check-out times recorded.</Typography>}
+              <Stack spacing={0.75}>
+                {scheduleSessions.map((record) => <Box key={record.sessionId} sx={{ px: 1, py: 0.8, border: "1px solid #e2e9e5", borderRadius: 1.5, bgcolor: "#fff" }}>
+                  <Typography variant="caption" fontWeight={750} sx={{ display: "block", mb: 0.5 }}>{record.employee.name || "Caregiver"}</Typography>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr" }, gap: 0.75 }}>
+                    {[{ label: "Actual check-in", time: record.checkIn.reportedAt }, { label: "Actual check-out", time: record.checkOut.reportedAt }].map(({ label, time }) => <Box key={label} sx={{ px: 1, py: 0.65, bgcolor: time ? "#eaf6ef" : "#f5f7f6", borderRadius: 1.25 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: 10, lineHeight: 1.3, fontWeight: 700 }}>{label}</Typography>
+                      <Typography variant="body2" fontWeight={750} color={time ? "success.dark" : "text.disabled"} sx={{ mt: 0.2 }}>{time ? dateTimeLabel(time) : "Not recorded"}</Typography>
                     </Box>)}
                   </Box>
                 </Box>)}
@@ -426,13 +424,17 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                   { title: "Check-in", event: selectedCheckInSubmission, localTime: scheduleSessions.find((record) => record.checkIn.status === "confirmed")?.checkIn.reportedAt },
                   { title: "Check-out", event: selectedCheckOutSubmission, localTime: scheduleSessions.find((record) => record.checkOut.status === "confirmed")?.checkOut.reportedAt },
                 ]).map(({ title, event, localTime }) => <Box key={title} sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={700}>{title}</Typography>
-                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 0.6 }}>Attendance event: {event ? dateTimeLabel(event.eventAt) : localTime ? dateTimeLabel(localTime) : "Not recorded"}</Typography>
-                  {event ? <Stack spacing={0.45} alignItems="flex-start"><StatusChip compact status={event.status === "awaiting_api_specification" ? "pending" : event.status} /><Typography variant="caption" color="text.secondary">{event.retryCount} {event.retryCount === 1 ? "attempt" : "attempts"}</Typography>{event.errorMessage && <Typography variant="caption" color="error.main" sx={{ overflowWrap: "anywhere" }}>{event.errorMessage}</Typography>}</Stack>
-                    : <Typography variant="caption" color="text.secondary">No Athulya submission record</Typography>}
+                  <Box sx={{ p: 1.25, border: "1px solid #e5ebe8", borderRadius: 1.5, bgcolor: "#fff", minHeight: 86 }}>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ mb: 0.5 }}>
+                      <Typography variant="body2" fontWeight={750}>{title}</Typography>
+                      {event?.status === "synced" ? <Chip size="small" icon={<TaskAltRoundedIcon />} label="Synced" color="success" sx={{ height: 23, fontWeight: 700 }} /> : event ? <StatusChip compact status={event.status === "awaiting_api_specification" ? "pending" : event.status} /> : <Chip size="small" label="Not submitted" variant="outlined" sx={{ height: 23 }} />}
+                    </Stack>
+                    <Typography variant="caption" display="block" color="text.secondary">{event ? dateTimeLabel(event.eventAt) : localTime ? dateTimeLabel(localTime) : "Attendance event not recorded"}</Typography>
+                    {event && <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 0.6 }}><Typography variant="caption" color="text.secondary">{event.retryCount} {event.retryCount === 1 ? "attempt" : "attempts"}</Typography>{event.errorMessage && <Typography variant="caption" color="error.main" sx={{ overflowWrap: "anywhere" }}>{event.errorMessage}</Typography>}</Stack>}
+                  </Box>
                 </Box>)}
               </Box>
-              <Alert severity="info" sx={{ mt: 1.5 }}>Eligible submissions retry automatically. The current API provides event time, status, attempt count, and error, but no last-attempt timestamp or manual retry action.</Alert>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Eligible submissions retry automatically.</Typography>
             </Card>
 
             <Card variant="outlined" sx={{ p: { xs: 1.75, sm: 2.25 }, boxShadow: "none" }}>
