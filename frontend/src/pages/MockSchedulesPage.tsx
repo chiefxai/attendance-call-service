@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Grid, IconButton, MenuItem, Radio, RadioGroup, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Grid, IconButton, MenuItem, Radio, RadioGroup, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
@@ -97,6 +97,10 @@ export function MockSchedulesPage() {
   const [caregiverTemplate, setCaregiverTemplate] = useState<CaregiverTemplate>("sam_jose");
   const [error, setError] = useState("");
   const [quickScheduleCreated, setQuickScheduleCreated] = useState(false);
+  const [fixturePage, setFixturePage] = useState(0);
+  const [fixtureRowsPerPage, setFixtureRowsPerPage] = useState(10);
+  const [syncPage, setSyncPage] = useState(0);
+  const [syncRowsPerPage, setSyncRowsPerPage] = useState(5);
   const phoneErrors = {
     care_manager_phone: form.care_manager_phone && !normalizeIndianMobile(form.care_manager_phone) ? "Enter a valid 10-digit Indian mobile number, optionally prefixed with 91 or +91." : "",
     caregiver_phones: form.caregiver_phones && normalizeMobileList(form.caregiver_phones) === null ? "Enter valid Indian mobile numbers separated by commas." : "",
@@ -148,6 +152,11 @@ export function MockSchedulesPage() {
     onError: (e: any) => setError(e?.response?.data?.error || e.message || "Unable to start sync"),
   });
   const rows = schedules.data?.data || [];
+  const visibleFixturePage = Math.min(fixturePage, Math.max(0, Math.ceil(rows.length / fixtureRowsPerPage) - 1));
+  const fixturePageRows = rows.slice(visibleFixturePage * fixtureRowsPerPage, (visibleFixturePage + 1) * fixtureRowsPerPage);
+  const syncRows = runs.data || [];
+  const visibleSyncPage = Math.min(syncPage, Math.max(0, Math.ceil(syncRows.length / syncRowsPerPage) - 1));
+  const syncPageRows = syncRows.slice(visibleSyncPage * syncRowsPerPage, (visibleSyncPage + 1) * syncRowsPerPage);
   const latestRun = runs.data?.[0];
   const running = runs.data?.some((run) => run.status === "running") || false;
   const metrics = useMemo(() => ({
@@ -195,13 +204,13 @@ export function MockSchedulesPage() {
               <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={openCreate}>Add schedule</Button>
             </Stack>
           </Stack>
-          <OperationsTable sx={{ mt: 2 }}>
-            <Table size="small">
+          <OperationsTable sx={{ mt: 2, height: 360, overflow: "auto" }}>
+            <Table size="small" stickyHeader>
               <TableHead><TableRow>
                 <TableCell>Date / time</TableCell><TableCell>Patient</TableCell><TableCell>Caregiver</TableCell><TableCell>Phone</TableCell><TableCell>Status</TableCell><TableCell align="right">Actions</TableCell>
               </TableRow></TableHead>
               <TableBody>
-                {rows.map((row) => <TableRow key={row.schedule_id} hover>
+                {fixturePageRows.map((row) => <TableRow key={row.schedule_id} hover>
                   <TableCell><Typography fontWeight={650}>{row.schedule_date}</Typography><Typography variant="caption" color="text.secondary">{row.start_time} – {row.end_time}</Typography></TableCell>
                   <TableCell><Typography fontWeight={650}>{row.client_name}</Typography><Typography variant="caption" color="text.secondary">{row.patient_id}</Typography></TableCell>
                   <TableCell><Typography>{row.caregiver_names || "—"}</Typography><Typography variant="caption" color="text.secondary">{row.caregiver_ids || "No caregiver"}</Typography></TableCell>
@@ -216,6 +225,17 @@ export function MockSchedulesPage() {
               </TableBody>
             </Table>
           </OperationsTable>
+          <TablePagination
+            component="div"
+            count={rows.length}
+            page={visibleFixturePage}
+            onPageChange={(_, nextPage) => setFixturePage(nextPage)}
+            rowsPerPage={fixtureRowsPerPage}
+            onRowsPerPageChange={(event) => { setFixtureRowsPerPage(Number(event.target.value)); setFixturePage(0); }}
+            rowsPerPageOptions={[5, 10, 25]}
+            labelRowsPerPage="Schedules per page"
+            sx={{ borderTop: "1px solid", borderColor: "divider" }}
+          />
         </CardContent>
       </Card>
       <Card variant="outlined">
@@ -247,10 +267,10 @@ export function MockSchedulesPage() {
         <CardContent>
           <Typography variant="h6" fontWeight={750}>Sync activity</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Automatically refreshes every few seconds while you work.</Typography>
-          <OperationsTable sx={{ mt: 1.5 }}><Table size="small">
+          <OperationsTable sx={{ mt: 1.5, height: 360, overflow: "auto" }}><Table size="small" stickyHeader>
             <TableHead><TableRow><TableCell>Started</TableCell><TableCell>Date</TableCell><TableCell>Source</TableCell><TableCell>Status</TableCell><TableCell>Received</TableCell><TableCell>Saved / updated</TableCell><TableCell>Error</TableCell></TableRow></TableHead>
             <TableBody>
-              {(runs.data || []).slice(0, 8).map((run) => <TableRow key={run.id}>
+              {syncPageRows.map((run) => <TableRow key={run.id}>
                 <TableCell>{formatAppDateTime(run.startedAt)}</TableCell><TableCell>{run.fromDate || "—"}</TableCell><TableCell>{run.syncSource || "—"}</TableCell>
                 <TableCell><Chip size="small" label={run.status} color={run.status === "succeeded" ? "success" : run.status === "failed" ? "error" : "info"} /></TableCell>
                 <TableCell>{run.recordsReceived}</TableCell><TableCell>{run.recordsUpserted}</TableCell><TableCell sx={{ maxWidth: 240, whiteSpace: "normal" }}>{run.errorMessage || "—"}</TableCell>
@@ -258,6 +278,17 @@ export function MockSchedulesPage() {
               {!runs.data?.length && <TableRow><TableCell colSpan={7}><Typography color="text.secondary" textAlign="center" py={2}>No sync activity yet.</Typography></TableCell></TableRow>}
             </TableBody>
           </Table></OperationsTable>
+          <TablePagination
+            component="div"
+            count={syncRows.length}
+            page={visibleSyncPage}
+            onPageChange={(_, nextPage) => setSyncPage(nextPage)}
+            rowsPerPage={syncRowsPerPage}
+            onRowsPerPageChange={(event) => { setSyncRowsPerPage(Number(event.target.value)); setSyncPage(0); }}
+            rowsPerPageOptions={[5, 10, 25]}
+            labelRowsPerPage="Runs per page"
+            sx={{ borderTop: "1px solid", borderColor: "divider" }}
+          />
         </CardContent>
       </Card>
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
