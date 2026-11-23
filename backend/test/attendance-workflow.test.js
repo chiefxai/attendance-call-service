@@ -7,6 +7,7 @@ const {
   inferRequestedCallbackAt,
   chiefVoiceTemplateScenario,
 } = require("../src/domain/attendance/workflow");
+const { createChiefVoiceClient } = require("../src/infrastructure/integrations/chiefvoice-client");
 
 test("attendance retries and follow-ups select the scenario-specific ChiefVoice templates", () => {
   assert.equal(chiefVoiceTemplateScenario({ stage: "check_in", attemptNumber: 1 }), "CHECK_IN");
