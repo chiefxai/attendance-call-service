@@ -241,7 +241,19 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         callContext.escalation_message = `Repeated ${stageLabel} calls were unanswered. Please contact operations.`;
       }
       const postCallContext = {
-        ...callContext,
+        // Keep the post-call payload focused on extraction facts. Copying the
+        // whole live context duplicated the prompt, identity decoys and
+        // long live-only instructions in ChiefVoice's combined 12 KB limit.
+        schedule: { start_at: session.scheduledStartAt, end_at: session.scheduledEndAt },
+        language: session.language,
+        scheduled_check_in_at: session.scheduledStartAt || "",
+        scheduled_check_out_at: session.scheduledEndAt || "",
+        attempt_number: String(attemptNumber || 1),
+        call_target_role: callTargetRole,
+        consecutive_no_answer: String(consecutiveNoAnswer || 0),
+        callback_requested_at: stageContext.lastCallbackAt
+          || (stageContext.reason === "employee_requested_callback" ? stageContext.nextCallAt : "")
+          || "",
         assignment: session.assignmentMetadata || {},
         organization_id: session.organizationId,
         expected_staff_name: callTargetRole === "care_manager" ? session.employee?.name || session.employee?.fullName || "" : person.name || person.fullName || "",
@@ -249,6 +261,12 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         expected_patient_address: session.patient?.address || "",
         employee: { name: callTargetRole === "care_manager" ? session.employee?.name || session.employee?.fullName || "" : person.name || person.fullName || "" },
         patient: { name: session.patient?.name || "", address: session.patient?.address || "" },
+        ...(callTargetRole === "care_manager" ? {
+          call_purpose: "care_manager_escalation",
+          care_manager_name: person.name || "Care Manager",
+          message: callContext.message,
+          escalation_message: callContext.escalation_message,
+        } : {}),
       };
       const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer, technicalFailureRetry });
       const selectedScenario = callTargetRole === "care_manager" ? "CARE_MANAGER_ESCALATION" : templateScenario;
