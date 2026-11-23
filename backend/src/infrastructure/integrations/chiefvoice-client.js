@@ -104,7 +104,7 @@ function createChiefVoiceClient({
           : isOutboundCall && response.status === 404
             ? "selected template was not found or is disabled"
             : "";
-        const details = response.status === 422 ? safeValidationSummary(data, body, requestApiKey) : "";
+        const details = response.status === 422 ? safeValidationSummary(data, body, resolvedApiKey) : "";
         const fallback = isOutboundCall && response.status === 422 ? "outbound request was rejected" : "";
         const error = new Error(`ChiefVoice API returned HTTP ${response.status}${reason ? `: ${reason}` : details ? `: ${details}` : fallback ? `: ${fallback}` : ""}`);
         error.status = response.status;
