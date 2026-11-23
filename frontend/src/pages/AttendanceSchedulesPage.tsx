@@ -128,11 +128,18 @@ function compactScheduleTime(value: string, scheduleDate: string | null | undefi
 
 function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOut", scheduleDate: string | null | undefined) {
   const candidates = records.map((record) => ({ record, value: record[stage], reason: record.stageReasons[stage] }));
-  const priority = (status: string) => status === "calling" || status === "processing" ? 4 : ["retry", "follow_up"].includes(status) ? 3 : status === "escalated" ? 2 : status === "unresolved" ? 1 : 0;
-  const current = candidates.sort((left, right) => priority(right.value.status) - priority(left.value.status))[0];
+  // A schedule can have multiple attendance sessions over time. Prefer the
+  // most recently updated stage so an old `calling` session cannot mask a
+  // newer failed/finished attempt.
+  const priority = (status: string) => ["calling", "processing"].includes(status) ? 3 : ["retry", "follow_up", "escalated"].includes(status) ? 2 : ["review", "not_answered", "missed", "unresolved", "confirmed"].includes(status) ? 1 : 0;
+  const current = candidates.sort((left, right) => {
+    const updatedDifference = new Date(right.record.updatedAt).getTime() - new Date(left.record.updatedAt).getTime();
+    return updatedDifference || priority(right.value.status) - priority(left.value.status);
+  })[0];
   if (!current) return null;
   if (current.value.status === "calling") return "Calling now";
   if (current.value.status === "processing") return "Processing call";
+  if (["review", "not_answered", "missed"].includes(current.value.status)) return "Needs review";
   if (current.value.status === "retry" || (current.value.status === "follow_up" && current.reason !== "employee_requested_callback")) {
     return current.value.nextCallAt ? `Retry · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Retry scheduled";
   }
