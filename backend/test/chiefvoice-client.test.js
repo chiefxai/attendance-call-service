@@ -134,15 +134,15 @@ test("outbound calls use each use-case live and post-call template pair", async 
     ["CARE_MANAGER_ESCALATION", "check_in"],
   ];
   const names = ["CHIEFVOICE_LIVE_TEMPLATE_ID", "CHIEFVOICE_POST_CALL_TEMPLATE_ID", ...cases.flatMap(([s]) => [
-    \`CHIEFVOICE_TEMPLATE_\${s}_LIVE_ID\`, \`CHIEFVOICE_TEMPLATE_\${s}_POST_CALL_ID\`,
+    `CHIEFVOICE_TEMPLATE_${s}_LIVE_ID`, `CHIEFVOICE_TEMPLATE_${s}_POST_CALL_ID`,
   ])];
   const old = Object.fromEntries(names.map((n) => [n, process.env[n]]));
   t.after(() => names.forEach((n) => old[n] === undefined ? delete process.env[n] : process.env[n] = old[n]));
   process.env.CHIEFVOICE_LIVE_TEMPLATE_ID = "global-live-not-used";
   process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID = "global-post-not-used";
   for (const [s] of cases) {
-    process.env[\`CHIEFVOICE_TEMPLATE_\${s}_LIVE_ID\`] = \`\${s.toLowerCase()}-live\`;
-    process.env[\`CHIEFVOICE_TEMPLATE_\${s}_POST_CALL_ID\`] = \`\${s.toLowerCase()}-post\`;
+    process.env[`CHIEFVOICE_TEMPLATE_${s}_LIVE_ID`] = `${s.toLowerCase()}-live`;
+    process.env[`CHIEFVOICE_TEMPLATE_${s}_POST_CALL_ID`] = `${s.toLowerCase()}-post`;
   }
   for (const [scenario, stage] of cases) {
     let captured;
@@ -158,10 +158,10 @@ test("outbound calls use each use-case live and post-call template pair", async 
       stage, callAttemptId: scenario, context: { language: "ta" }, templateScenario: scenario,
     });
     assert.equal(captured.url, "https://core.elvoryx.in/v1/calls/outbound");
-    assert.equal(captured.body.live_agent.template_id, \`\${scenario.toLowerCase()}-live\`);
-    assert.equal(captured.body.post_call.template_id, \`\${scenario.toLowerCase()}-post\`);
+    assert.equal(captured.body.live_agent.template_id, `${scenario.toLowerCase()}-live`);
+    assert.equal(captured.body.post_call.template_id, `${scenario.toLowerCase()}-post`);
     assert.notEqual(captured.body.live_agent.template_id, captured.body.post_call.template_id);
-    assert.equal(captured.options.headers["Idempotency-Key"], \`attendance-\${scenario}\`);
+    assert.equal(captured.options.headers["Idempotency-Key"], `attendance-${scenario}`);
   }
 });
 
