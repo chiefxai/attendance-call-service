@@ -172,7 +172,7 @@ function createChiefVoiceClient({
     });
   }
 
-  async function createOutboundCall({ to, from, sessionId, stage, callAttemptId, context, postCallContext = context, templateScenario = null }) {
+  async function createOutboundCall({ to, from, sessionId, stage, callAttemptId, context, postCallContext = context, postCallWorkflowContext, templateScenario = null }) {
     const callStartedAt = now();
     const timeZone = process.env.APP_TIMEZONE || "Asia/Kolkata";
     const currentLocalTime = new Intl.DateTimeFormat("sv-SE", {
@@ -287,7 +287,8 @@ function createChiefVoiceClient({
           mandatory_fields: mandatoryFields,
           current_time_utc: callStartedAt.toISOString(),
           current_local_time: currentLocalTime,
-          time_zone: timeZone,
+          ...(postCallWorkflowContext !== undefined ? { workflow_context: postCallWorkflowContext } : {}),
+        time_zone: timeZone,
           callback_time_instructions: "If a follow-up is requested, convert a relative delay such as 5 minutes into an absolute ISO 8601 date-time using current_local_time and time_zone. For a clock time such as 10:10, use its next future occurrence in time_zone. Return that absolute timestamp in callback_at; use null if no callback was requested or its time is unclear.",
           attendance_session_id: sessionId,
           call_attempt_id: callAttemptId,
