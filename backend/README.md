@@ -19,8 +19,8 @@ There is no Vobiz media bridge, local Gemini/Vertex runtime, local speech transc
 The client sends `POST /v1/calls/outbound` with bearer API-key authentication (`calls:write`) and an idempotency key. ChiefVoice immediately returns `202 Accepted` with `session_id` and the initial status; the worker persists them and does not wait for the call to finish. The request includes:
 
 - `channel: "phone"`, `destination`, `caller_id`, and `recording_allowed`
-- `live_agent.template_id` and per-call `context`
-- `post_call.template_id`, per-call `context`, strict `output_schema`, the built-in time tool, `time_zone`, `time_format`, and `include_live_agent_context`
+- a `live_agent.template_id` and per-call `context` when explicit template mode is enabled; otherwise the API key's assigned default calling template
+- a `post_call.template_id` when explicit template mode is enabled; otherwise the API key's assigned default post-call template, plus per-call `context`, strict `output_schema`, the built-in time tool, `time_zone`, `time_format`, and `include_live_agent_context`
 
 The live and post-call prompts live in ChiefVoice reusable templates. The service selects a pair for each scenario: check-in, check-out, care-manager escalation, check-in/check-out retry, or check-in/check-out follow-up. It adds assignment, caregiver, patient, schedule, language, organization, attendance session, attempt, and stage context to each call, including the flat expected-name/address variables used by these templates.
 
@@ -58,22 +58,12 @@ The webhook updates the attempt using provider `chiefvoice`, stores the post-cal
 Required ChiefVoice variables:
 
 ```dotenv
-CHIEFVOICE_URL=https://chiefvoice.elvoryx.in
+CHIEFVOICE_URL=https://core.elvoryx.in
 CHIEFVOICE_API_KEY=
-CHIEFVOICE_TEMPLATE_CHECK_IN_LIVE_ID=
-CHIEFVOICE_TEMPLATE_CHECK_IN_POST_CALL_ID=
-CHIEFVOICE_TEMPLATE_CHECK_OUT_LIVE_ID=
-CHIEFVOICE_TEMPLATE_CHECK_OUT_POST_CALL_ID=
-CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_LIVE_ID=
-CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_POST_CALL_ID=
-CHIEFVOICE_TEMPLATE_CHECK_IN_RETRY_LIVE_ID=
-CHIEFVOICE_TEMPLATE_CHECK_IN_RETRY_POST_CALL_ID=
-CHIEFVOICE_TEMPLATE_CHECK_OUT_RETRY_LIVE_ID=
-CHIEFVOICE_TEMPLATE_CHECK_OUT_RETRY_POST_CALL_ID=
-CHIEFVOICE_TEMPLATE_CHECK_IN_FOLLOW_UP_LIVE_ID=
-CHIEFVOICE_TEMPLATE_CHECK_IN_FOLLOW_UP_POST_CALL_ID=
-CHIEFVOICE_TEMPLATE_CHECK_OUT_FOLLOW_UP_LIVE_ID=
-CHIEFVOICE_TEMPLATE_CHECK_OUT_FOLLOW_UP_POST_CALL_ID=
+CHIEFVOICE_USE_EXPLICIT_TEMPLATE_IDS=false
+# Optional; leave blank to use this API's default assigned templates.
+CHIEFVOICE_LIVE_TEMPLATE_ID=
+CHIEFVOICE_POST_CALL_TEMPLATE_ID=
 CHIEFVOICE_CALLER_ID=
 ATHULYA_LATE_SCHEDULE_GRACE_MINUTES=2
 CHIEFVOICE_TIMEOUT_MS=20000
@@ -87,7 +77,7 @@ CHIEFVOICE_WEBHOOK_SECRET=
 CHIEFVOICE_WEBHOOK_CALLBACK_URL=https://calls.elvoryx.in/api/call-service/webhooks/chiefvoice
 ```
 
-Also configure `DATABASE_URL`, `DEFAULT_ORGANIZATION_ID`, the storage settings, and the Athulya attendance API credentials as required by the deployment.
+Template IDs are scoped to the API key that owns them. In default mode, mark one calling and one post-call template as defaults in that API's Prompt templates panel; the worker omits template_id so ChiefVoice resolves those defaults. Set `CHIEFVOICE_USE_EXPLICIT_TEMPLATE_IDS=true` only when supplying all required scenario-specific IDs or generic live/post-call IDs. Also configure `DATABASE_URL`, `DEFAULT_ORGANIZATION_ID`, storage settings, and Athulya attendance API credentials.
 
 ## Commands
 
