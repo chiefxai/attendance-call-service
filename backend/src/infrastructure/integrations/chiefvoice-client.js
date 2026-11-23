@@ -9,12 +9,13 @@ const { resilientRequest } = require("./resilient-request");
 function createChiefVoiceClient({
   baseUrl = process.env.CHIEFVOICE_URL || "https://core.elvoryx.in",
   apiKey = process.env.CHIEFVOICE_API_KEY,
+  apiKeyProvider = null,
   fetchImpl = globalThis.fetch,
   timeoutMs = Number(process.env.CHIEFVOICE_TIMEOUT_MS) || 20_000,
   now = () => new Date(),
 } = {}) {
   if (!baseUrl) throw new Error("CHIEFVOICE_URL is required");
-  if (!apiKey) throw new Error("CHIEFVOICE_API_KEY is required");
+  if (!apiKey && !apiKeyProvider) throw new Error("CHIEFVOICE_API_KEY is required");
   if (typeof fetchImpl !== "function") throw new Error("A Fetch-compatible implementation is required");
 
   const root = baseUrl.replace(/\/+$/, "");
@@ -65,6 +66,8 @@ function createChiefVoiceClient({
   }
 
   async function request(path, { method = "GET", body, idempotencyKey } = {}) {
+    const resolvedApiKey = apiKeyProvider ? await apiKeyProvider() : apiKey;
+    if (!resolvedApiKey) throw new Error("CHIEFVOICE_API_KEY is required");
     return resilientRequest(circuitKey, async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -73,7 +76,7 @@ function createChiefVoiceClient({
         method,
         signal: controller.signal,
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${resolvedApiKey}`,
           Accept: "application/json",
           ...(body ? { "Content-Type": "application/json" } : {}),
           ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
@@ -102,6 +105,8 @@ function createChiefVoiceClient({
   }
 
   async function getRecording(sessionId, { maxBytes = Number(process.env.MAX_RECORDING_DOWNLOAD_BYTES) || 100 * 1024 * 1024 } = {}) {
+    const resolvedApiKey = apiKeyProvider ? await apiKeyProvider() : apiKey;
+    if (!resolvedApiKey) throw new Error("CHIEFVOICE_API_KEY is required");
     return resilientRequest(circuitKey, async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Math.max(timeoutMs, 30_000));
@@ -109,7 +114,7 @@ function createChiefVoiceClient({
       const response = await fetchImpl(`${root}/v1/calls/${encodeURIComponent(sessionId)}/recording`, {
         method: "GET",
         signal: controller.signal,
-        headers: { Authorization: `Bearer ${apiKey}`, Accept: "audio/*, application/octet-stream" },
+        headers: { Authorization: `Bearer ${resolvedApiKey}`, Accept: "audio/*, application/octet-stream" },
       });
       if (!response.ok) {
         const error = new Error(`ChiefVoice recording request returned HTTP ${response.status}`);

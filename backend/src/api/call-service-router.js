@@ -107,6 +107,10 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       webhookSecretEnvironmentConfigured: Boolean(process.env.CHIEFVOICE_WEBHOOK_SECRET),
       webhookSecretSource: stored.encryptedChiefVoiceWebhookSecret ? "settings"
         : process.env.CHIEFVOICE_WEBHOOK_SECRET ? "environment" : "missing",
+      chiefvoiceApiKeyConfigured: Boolean(stored.encryptedChiefVoiceApiKey || process.env.CHIEFVOICE_API_KEY),
+      chiefvoiceApiKeyEnvironmentConfigured: Boolean(process.env.CHIEFVOICE_API_KEY),
+      chiefvoiceApiKeySource: stored.encryptedChiefVoiceApiKey ? "settings"
+        : process.env.CHIEFVOICE_API_KEY ? "environment" : "missing",
       source: {
         defaultFromNumber: stored.defaultFromNumber ? "settings" : "environment",
         lateScheduleGraceMinutes: stored.lateScheduleGraceMinutes != null ? "settings" : "environment",
@@ -660,8 +664,20 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       const existingSettings = await repository.getOrganizationCallSettings(organizationId);
       const webhookSecretInput = typeof body.chiefvoiceWebhookSecret === "string" ? body.chiefvoiceWebhookSecret.trim() : "";
       const clearWebhookSecret = body.clearChiefVoiceWebhookSecret === true;
+      const apiKeyInput = typeof body.chiefvoiceApiKey === "string" ? body.chiefvoiceApiKey.trim() : "";
+      const clearApiKey = body.clearChiefVoiceApiKey === true;
       if (body.clearChiefVoiceWebhookSecret != null && typeof body.clearChiefVoiceWebhookSecret !== "boolean") {
         return res.status(400).json({ error: "clearChiefVoiceWebhookSecret must be a boolean." });
+      }
+      if (body.clearChiefVoiceApiKey != null && typeof body.clearChiefVoiceApiKey !== "boolean") {
+        return res.status(400).json({ error: "clearChiefVoiceApiKey must be a boolean." });
+      }
+      if (body.chiefvoiceApiKey != null && typeof body.chiefvoiceApiKey !== "string") {
+        return res.status(400).json({ error: "chiefvoiceApiKey must be a string." });
+      }
+      if (apiKeyInput && clearApiKey) return res.status(400).json({ error: "Enter a ChiefVoice API key or request the environment fallback, not both." });
+      if (apiKeyInput.length > 4096 || /[\r\n]/.test(apiKeyInput)) {
+        return res.status(400).json({ error: "ChiefVoice API key must be a single line of at most 4096 characters." });
       }
       if (webhookSecretInput && clearWebhookSecret) return res.status(400).json({ error: "Enter a webhook secret or request the environment fallback, not both." });
       if (body.chiefvoiceWebhookSecret != null && typeof body.chiefvoiceWebhookSecret !== "string") {
@@ -673,6 +689,9 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       const encryptedChiefVoiceWebhookSecret = webhookSecretInput
         ? encryptSecret(webhookSecretInput)
         : clearWebhookSecret ? null : existingSettings.encryptedChiefVoiceWebhookSecret || null;
+      const encryptedChiefVoiceApiKey = apiKeyInput
+        ? encryptSecret(apiKeyInput)
+        : clearApiKey ? null : existingSettings.encryptedChiefVoiceApiKey || null;
       await repository.saveOrganizationCallSettings(organizationId, {
         ...existingSettings,
         defaultFromNumber,
@@ -680,6 +699,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         callRetry: { maxConsecutiveNoAnswer, initialMinutes, multiplier, maxMinutes },
         unansweredCallEscalation: body.unansweredCallEscalation ?? existingSettings.unansweredCallEscalation ?? "call_care_manager",
         encryptedChiefVoiceWebhookSecret,
+        encryptedChiefVoiceApiKey,
       });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
@@ -690,7 +710,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
     try {
       const organizationId = org(req);
       const existingSettings = await repository.getOrganizationCallSettings(organizationId);
-      await repository.saveOrganizationCallSettings(organizationId, { ...existingSettings, defaultFromNumber: null, lateScheduleGraceMinutes: null, callRetry: null, unansweredCallEscalation: "call_care_manager", encryptedChiefVoiceWebhookSecret: null });
+      await repository.saveOrganizationCallSettings(organizationId, { ...existingSettings, defaultFromNumber: null, lateScheduleGraceMinutes: null, callRetry: null, unansweredCallEscalation: "call_care_manager", encryptedChiefVoiceWebhookSecret: null, encryptedChiefVoiceApiKey: null });
       res.json(await getEffectiveCallingSettings(organizationId));
     } catch (error) { fail(res, error); }
   });

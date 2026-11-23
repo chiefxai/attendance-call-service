@@ -11,8 +11,8 @@ import { ApiAccessPage } from "./ApiAccessPage";
 import { PageHeader } from "../components/OperationsUI";
 import { formatAppDateTime } from "../utils/dateTime";
 
-type CallingForm = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource">
-  & { chiefvoiceWebhookSecret: string; clearChiefVoiceWebhookSecret: boolean };
+type CallingForm = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource" | "chiefvoiceApiKeyConfigured" | "chiefvoiceApiKeyEnvironmentConfigured" | "chiefvoiceApiKeySource">
+  & { chiefvoiceWebhookSecret: string; clearChiefVoiceWebhookSecret: boolean; chiefvoiceApiKey: string; clearChiefVoiceApiKey: boolean };
 type SyncScope = "all" | "branch" | "care_manager";
 type IntegrationForm = Pick<AthulyaIntegrationSettings, "integrationName" | "apiBaseUrl" | "enabled" | "autoSyncEnabled" | "autoSyncScope" | "autoSyncScopeId"> & { apiKey: string };
 const emptySettings: CallingForm = {
@@ -22,6 +22,8 @@ const emptySettings: CallingForm = {
   retry: { maxConsecutiveNoAnswer: 3, initialMinutes: 3, multiplier: 1.2, maxMinutes: 30 },
   chiefvoiceWebhookSecret: "",
   clearChiefVoiceWebhookSecret: false,
+  chiefvoiceApiKey: "",
+  clearChiefVoiceApiKey: false,
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
 const todayInIndia = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -39,7 +41,7 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
 
   useEffect(() => {
     if (!settings.data) return;
-    setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, lateScheduleGraceMinutes: settings.data.lateScheduleGraceMinutes, retry: settings.data.retry, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: false });
+    setForm({ defaultFromNumber: settings.data.defaultFromNumber, unansweredCallEscalation: settings.data.unansweredCallEscalation, lateScheduleGraceMinutes: settings.data.lateScheduleGraceMinutes, retry: settings.data.retry, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: false, chiefvoiceApiKey: "", clearChiefVoiceApiKey: false });
   }, [settings.data]);
   useEffect(() => {
     if (integration.data) setIntegrationForm({ integrationName: integration.data.integrationName, apiBaseUrl: integration.data.apiBaseUrl, enabled: integration.data.enabled, autoSyncEnabled: integration.data.autoSyncEnabled, autoSyncScope: integration.data.autoSyncScope, autoSyncScopeId: integration.data.autoSyncScopeId, apiKey: "" });
@@ -50,7 +52,7 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
     mutationFn: saveCallingSettings,
     onSuccess: (data) => {
       queryClient.setQueryData(["calling-settings"], data);
-      setForm((current) => ({ ...current, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: false }));
+      setForm((current) => ({ ...current, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: false, chiefvoiceApiKey: "", clearChiefVoiceApiKey: false }));
     },
   });
   const reset = useMutation({
@@ -125,6 +127,22 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
             variant="text" sx={{ alignSelf: "flex-start" }}
             onClick={() => setForm((current) => ({ ...current, chiefvoiceWebhookSecret: "", clearChiefVoiceWebhookSecret: !current.clearChiefVoiceWebhookSecret }))}
           >{form.clearChiefVoiceWebhookSecret ? "Keep workspace override" : "Use .env fallback"}</Button>}
+          <Box><Typography variant="h6">ChiefVoice API key</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Used for outbound calls and recordings. Workspace overrides are encrypted in the database and never shown after saving.</Typography></Box>
+          <TextField
+            fullWidth type="password" label="ChiefVoice API key" autoComplete="new-password"
+            value={form.chiefvoiceApiKey}
+            onChange={(event) => setForm((current) => ({ ...current, chiefvoiceApiKey: event.target.value, clearChiefVoiceApiKey: false }))}
+            placeholder={settings.data.chiefvoiceApiKeySource === "settings" ? "Workspace override saved" : settings.data.chiefvoiceApiKeySource === "environment" ? "Using .env API key" : "Enter an API key"}
+            helperText={form.clearChiefVoiceApiKey
+              ? settings.data.chiefvoiceApiKeyEnvironmentConfigured ? "Saving will remove the workspace override and use the .env API key." : "No .env fallback is configured."
+              : settings.data.chiefvoiceApiKeySource === "settings" ? "Workspace override active. Leave blank to keep it, or enter a replacement."
+                : settings.data.chiefvoiceApiKeySource === "environment" ? "Using .env fallback. Enter a key to override it for this workspace."
+                  : "No API key configured. Enter one or configure CHIEFVOICE_API_KEY in .env."}
+          />
+          {settings.data.chiefvoiceApiKeySource === "settings" && <Button
+            variant="text" sx={{ alignSelf: "flex-start" }}
+            onClick={() => setForm((current) => ({ ...current, chiefvoiceApiKey: "", clearChiefVoiceApiKey: !current.clearChiefVoiceApiKey }))}
+          >{form.clearChiefVoiceApiKey ? "Keep workspace override" : "Use .env fallback"}</Button>}
           <TextField
             fullWidth type="number" label="Late schedule call window (minutes)" value={form.lateScheduleGraceMinutes}
             onChange={(event) => setForm((current) => ({ ...current, lateScheduleGraceMinutes: Number(event.target.value) }))}

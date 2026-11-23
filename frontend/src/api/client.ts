@@ -405,6 +405,9 @@ export interface CallingSettings {
   webhookSecretConfigured: boolean;
   webhookSecretEnvironmentConfigured: boolean;
   webhookSecretSource: "settings" | "environment" | "missing";
+  chiefvoiceApiKeyConfigured: boolean;
+  chiefvoiceApiKeyEnvironmentConfigured: boolean;
+  chiefvoiceApiKeySource: "settings" | "environment" | "missing";
   source: { defaultFromNumber: "settings" | "environment"; lateScheduleGraceMinutes: "settings" | "environment"; retry: "settings" | "environment" };
 }
 
@@ -420,8 +423,8 @@ export interface CallPromptsResponse {
   defaults?: Record<string, { live: string; post: string }>;
 }
 
-export type CallingSettingsUpdate = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource">
-  & { chiefvoiceWebhookSecret?: string; clearChiefVoiceWebhookSecret?: boolean };
+export type CallingSettingsUpdate = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource" | "chiefvoiceApiKeyConfigured" | "chiefvoiceApiKeyEnvironmentConfigured" | "chiefvoiceApiKeySource">
+  & { chiefvoiceWebhookSecret?: string; clearChiefVoiceWebhookSecret?: boolean; chiefvoiceApiKey?: string; clearChiefVoiceApiKey?: boolean };
 
 export interface CareManagerNotification {
   id: string;

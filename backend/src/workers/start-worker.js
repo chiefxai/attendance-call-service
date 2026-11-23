@@ -16,6 +16,7 @@ const {
   createAthulyaAttendanceClient,
   latestDueAthulyaSyncSlot,
 } = require("../index");
+const { decryptSecret } = require("../infrastructure/integrations/athulya-platform");
 
 async function main() {
   const config = loadConfig();
@@ -26,7 +27,14 @@ async function main() {
     defaultMaxAttempts: config.worker.maxAttempts,
     retry: config.worker.retry,
   });
-  const chiefvoice = createChiefVoiceClient();
+  const chiefvoice = createChiefVoiceClient({
+    apiKeyProvider: async () => {
+      const settings = await repository.getOrganizationCallSettings(process.env.DEFAULT_ORGANIZATION_ID);
+      return settings.encryptedChiefVoiceApiKey
+        ? decryptSecret(settings.encryptedChiefVoiceApiKey)
+        : process.env.CHIEFVOICE_API_KEY;
+    },
+  });
   const recordings = createMinioRecordingStore();
   const backend = createAttendanceBackendClient();
   const athulyaAttendanceClient = createAthulyaAttendanceClient({ repository });
