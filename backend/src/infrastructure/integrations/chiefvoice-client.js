@@ -7,7 +7,7 @@ const { resilientRequest } = require("./resilient-request");
  * This service only schedules calls and consumes the resulting attendance data.
  */
 function createChiefVoiceClient({
-  baseUrl = process.env.CHIEFVOICE_URL || "https://chiefvoice.elvoryx.in",
+  baseUrl = process.env.CHIEFVOICE_URL || "https://core.elvoryx.in",
   apiKey = process.env.CHIEFVOICE_API_KEY,
   fetchImpl = globalThis.fetch,
   timeoutMs = Number(process.env.CHIEFVOICE_TIMEOUT_MS) || 20_000,
@@ -162,18 +162,18 @@ function createChiefVoiceClient({
     }).format(callStartedAt);
     const scenario = String(templateScenario || "").trim().toUpperCase();
     const scenarioPrefix = scenario ? `CHIEFVOICE_TEMPLATE_${scenario}` : null;
-    const liveTemplateId = scenarioPrefix
-      ? process.env[`${scenarioPrefix}_LIVE_ID`]
+    // API-owned templates are scoped to one ChiefVoice API key. The API can
+    // resolve its assigned defaults when template_id is omitted. This avoids
+    // sending IDs copied from a different ChiefVoice deployment/tenant.
+    const useExplicitTemplateIds = process.env.CHIEFVOICE_USE_EXPLICIT_TEMPLATE_IDS === "true";
+    const liveTemplateId = useExplicitTemplateIds && scenarioPrefix
+      ? process.env[`${scenarioPrefix}_LIVE_ID`] || process.env.CHIEFVOICE_LIVE_TEMPLATE_ID
       : process.env.CHIEFVOICE_LIVE_TEMPLATE_ID;
-    const postCallTemplateId = scenarioPrefix
-      ? process.env[`${scenarioPrefix}_POST_CALL_ID`]
+    const postCallTemplateId = useExplicitTemplateIds && scenarioPrefix
+      ? process.env[`${scenarioPrefix}_POST_CALL_ID`] || process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID
       : process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID;
-    if (!liveTemplateId || !postCallTemplateId) {
-      const missing = [
-        !liveTemplateId ? `${scenarioPrefix || "CHIEFVOICE_TEMPLATE_<SCENARIO>"}_LIVE_ID` : null,
-        !postCallTemplateId ? `${scenarioPrefix || "CHIEFVOICE_TEMPLATE_<SCENARIO>"}_POST_CALL_ID` : null,
-      ].filter(Boolean);
-      throw new Error(`${missing.join(" and ")} must be configured`);
+    if (useExplicitTemplateIds && (!liveTemplateId || !postCallTemplateId)) {
+      throw new Error("Explicit ChiefVoice template mode requires live and post-call template IDs");
     }
     const checkInOutputSchema = {
       type: "object",
@@ -256,7 +256,7 @@ function createChiefVoiceClient({
       caller_id: from,
       recording_allowed: process.env.CHIEFVOICE_RECORDING_ALLOWED === "true",
       live_agent: {
-        template_id: liveTemplateId,
+        ...(liveTemplateId ? { template_id: liveTemplateId } : {}),
         context: {
           ...context,
           mandatory_fields: mandatoryFields,
@@ -270,7 +270,7 @@ function createChiefVoiceClient({
         },
       },
       post_call: {
-        template_id: postCallTemplateId,
+        ...(postCallTemplateId ? { template_id: postCallTemplateId } : {}),
         context: {
           ...postCallContext,
           identity_matching_instructions: "Compare the spoken names semantically, not by exact full-string equality. A clear, unambiguous part of an expected multi-part name (for example, 'Ram' for 'Ram Kumar') is a match when the rest of the conversation supports the same person. Compare the patient address by distinctive locality and consistent place names; normalize obvious speech-recognition spelling or transliteration errors using the audio/transcript and expected address (for example, 'Subiksha Nagar' for '1 Subiksha Nagar, Chennai, Tamil Nadu'). Do not require every address component to be spoken. Never invent a name or address detail, and do not mark a match when the caller says nothing about it or gives a conflicting detail. Set each identity boolean from the caller's actual words and the evidence in the call.",
