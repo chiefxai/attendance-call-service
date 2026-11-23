@@ -275,6 +275,16 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       const scenarioPrompts = callPrompts[selectedScenario];
       callContext.app_live_prompt_instructions = scenarioPrompts.live;
       postCallContext.app_post_call_prompt_instructions = scenarioPrompts.post;
+      // ChiefVoice counts workflow_context separately from post_call.context.
+      // Send only the assignment facts its attendance validator consumes
+      // instead of duplicating prompts and operational metadata a third time.
+      const postCallWorkflowContext = {
+        caregiver_identity: callTargetRole === "care_manager"
+          ? session.employee?.name || session.employee?.fullName || ""
+          : person.name || person.fullName || "",
+        patient_identity: session.patient?.name || "",
+        patient_address: session.patient?.address || "",
+      };
       const call = await chiefvoice.createOutboundCall({
         to: normalizedTargetPhone,
         from: session.fromNumber || process.env.CHIEFVOICE_CALLER_ID,
@@ -283,6 +293,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         callAttemptId: attempt.id,
         context: callContext,
         postCallContext,
+        postCallWorkflowContext,
         templateScenario: selectedScenario,
       });
       const providerCallId = call.session_id || call.call_id || call.id;
