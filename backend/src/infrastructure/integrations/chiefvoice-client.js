@@ -28,7 +28,7 @@ function createChiefVoiceClient({
     return knownTags[normalized.toLowerCase()] || normalized;
   }
 
-  function redactProviderText(value, requestBody) {
+  function redactProviderText(value, requestBody, requestApiKey) {
     let text = String(value || "").slice(0, 240);
     const privateValues = new Set();
     const collectPrivateValues = (value) => {
@@ -37,6 +37,7 @@ function createChiefVoiceClient({
       else if (value && typeof value === "object") Object.values(value).forEach(collectPrivateValues);
     };
     collectPrivateValues(requestBody);
+    if (typeof requestApiKey === "string" && requestApiKey.length >= 3) privateValues.add(requestApiKey);
     for (const privateValue of [...privateValues].sort((a, b) => b.length - a.length)) {
       text = text.split(privateValue).join("[redacted]");
     }
@@ -50,7 +51,7 @@ function createChiefVoiceClient({
       .trim();
   }
 
-  function safeValidationSummary(data, requestBody) {
+  function safeValidationSummary(data, requestBody, requestApiKey) {
     const entries = Array.isArray(data?.detail) ? data.detail
       : Array.isArray(data?.errors) ? data.errors
         : Array.isArray(data?.issues) ? data.issues : [];
@@ -63,13 +64,13 @@ function createChiefVoiceClient({
       const code = String(entry?.type || entry?.code || "validation_error")
         .replace(/[^A-Za-z0-9_.-]/g, "")
         .slice(0, 64);
-      const message = redactProviderText(entry?.msg || entry?.message || "", requestBody);
+      const message = redactProviderText(entry?.msg || entry?.message || "", requestBody, requestApiKey);
       return [path || "request", code, message].filter(Boolean).join(": ");
     }).filter(Boolean).join("; ");
     if (summary) return summary;
     const detail = typeof data?.detail === "string" ? data.detail
       : typeof data?.message === "string" ? data.message : "";
-    return redactProviderText(detail, requestBody);
+    return redactProviderText(detail, requestBody, requestApiKey);
   }
 
   async function request(path, { method = "GET", body, idempotencyKey } = {}) {
@@ -102,11 +103,10 @@ function createChiefVoiceClient({
           ? "selected template is not assigned to this API key, or the caller ID is not assigned"
           : isOutboundCall && response.status === 404
             ? "selected template was not found or is disabled"
-            : isOutboundCall && response.status === 422
-              ? "outbound request was rejected; verify template kind, enabled state, and API-key assignment"
-              : "";
-        const details = response.status === 422 && !isOutboundCall ? safeValidationSummary(data, body) : "";
-        const error = new Error(`ChiefVoice API returned HTTP ${response.status}${reason ? `: ${reason}` : details ? `: ${details}` : ""}`);
+            : "";
+        const details = response.status === 422 ? safeValidationSummary(data, body, requestApiKey) : "";
+        const fallback = isOutboundCall && response.status === 422 ? "outbound request was rejected" : "";
+        const error = new Error(`ChiefVoice API returned HTTP ${response.status}${reason ? `: ${reason}` : details ? `: ${details}` : fallback ? `: ${fallback}` : ""}`);
         error.status = response.status;
         error.retryable = response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
         const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));

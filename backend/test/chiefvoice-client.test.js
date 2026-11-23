@@ -221,7 +221,7 @@ test("template validation failures retain status and a sanitized non-retryable r
     for (const [status, reason] of [
       [403, "selected template is not assigned to this API key, or the caller ID is not assigned"],
       [404, "selected template was not found or is disabled"],
-      [422, "outbound request was rejected; verify template kind, enabled state, and API-key assignment"],
+      [422, "wrong tenant"],
     ]) {
       const client = createChiefVoiceClient({
         baseUrl: "https://core.elvoryx.in", apiKey: "must-never-appear",
