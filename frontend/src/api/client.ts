@@ -556,6 +556,15 @@ export async function fetchSessionArtifacts(sessionId: string) {
   return response.data;
 }
 
+export async function submitAttendanceReviewDecision(sessionId: string, decision: {
+  action: "approve" | "cancel";
+  stage: "check_in" | "check_out";
+  actualAt?: string;
+}) {
+  const response = await api.post(`/assignments/${encodeURIComponent(sessionId)}/review-decision`, decision);
+  return response.data;
+}
+
 export async function fetchCallRecording(sessionId: string, attemptId: string) {
   const response = await api.get<Blob>(`/assignments/${sessionId}/recordings/${attemptId}`, { responseType: "blob" });
   return response.data;

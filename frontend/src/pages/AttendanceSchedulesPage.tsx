@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, TableSortLabel, TextField, Typography } from "@mui/material";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
-import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaSchedules, fetchSessionArtifacts, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
+import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaSchedules, fetchSessionArtifacts, submitAttendanceReviewDecision, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
 
@@ -177,7 +177,7 @@ function dateTimeLabel(value: string | null | undefined) {
   }).format(date);
 }
 
-function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLabel, canAssessCall }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduleDate: string | null; scheduledTime: string | null | undefined; emptyLabel: string; canAssessCall: boolean }) {
+function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLabel, canAssessCall, onReviewClick }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduleDate: string | null; scheduledTime: string | null | undefined; emptyLabel: string; canAssessCall: boolean; onReviewClick?: (sessionId: string, stage: "check_in" | "check_out") => void }) {
   const dueAt = scheduledInstant(scheduleDate, scheduledTime);
   const overdue = Boolean(dueAt && dueAt.getTime() <= Date.now());
   const stageName = stage === "checkIn" ? "Checked In" : "Completed";
@@ -218,7 +218,9 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
           <Typography variant="body2" color={stageStatus.status === "confirmed" ? "text.primary" : displayTime ? "text.secondary" : "text.disabled"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
             {displayTime ? scheduleClock(displayTime) : emptyLabel}
           </Typography>
-          <StatusChip compact status={displayStatus} />
+          {["review", "unresolved", "not_answered", "missed"].includes(stageStatus.status)
+            ? <Chip size="small" color="error" label="Review" clickable onClick={() => onReviewClick?.(record.sessionId, stage === "checkIn" ? "check_in" : "check_out")} />
+            : <StatusChip compact status={displayStatus} />}
         </Stack>
         {hint && <Typography variant="caption" color={hint.includes("follow-up") ? "error.main" : "text.secondary"} sx={{ fontSize: 11, lineHeight: 1.2 }}>{hint}</Typography>}
       </Stack>;
@@ -232,6 +234,28 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const [selectedDate, setSelectedDate] = useState(todayInIndia);
   const [sortBy, setSortBy] = useState<ScheduleSort>("check_in_descending");
   const [selectedSchedule, setSelectedSchedule] = useState<AthulyaSchedule | null>(null);
+  const [reviewFocus, setReviewFocus] = useState<{ sessionId: string; stage: "check_in" | "check_out" } | null>(null);
+  const [reviewActualAt, setReviewActualAt] = useState("");
+  const [reviewMessage, setReviewMessage] = useState<{ severity: "success" | "error"; text: string } | null>(null);
+  const queryClient = useQueryClient();
+  const reviewDecision = useMutation({
+    mutationFn: (action: "approve" | "cancel") => {
+      if (!reviewFocus) throw new Error("Select an attendance stage to review.");
+      return submitAttendanceReviewDecision(reviewFocus.sessionId, {
+        action, stage: reviewFocus.stage,
+        ...(action === "approve" ? { actualAt: new Date(reviewActualAt).toISOString() } : {}),
+      });
+    },
+    onSuccess: async (_result, action) => {
+      setReviewFocus(null);
+      setReviewMessage({ severity: "success", text: action === "approve" ? "Attendance marked completed and queued for Athulya submission." : "Duty cancelled." });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["attendance"] }),
+        queryClient.invalidateQueries({ queryKey: ["session-artifacts"] }),
+      ]);
+    },
+    onError: (error: any) => setReviewMessage({ severity: "error", text: error?.response?.data?.error || error.message || "Could not save the review decision." }),
+  });
   const isAdmin = userRole === "admin";
   const schedules = useQuery({
     queryKey: ["athulya-schedules", selectedDate],
@@ -353,8 +377,8 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
               <TableCell>{schedule.patient.name || "—"}</TableCell>
               <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell>
               <TableCell>{schedule.service || "—"}</TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} /></TableCell>
+              <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
+              <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
               <TableCell><StatusChip compact status={status} /></TableCell>
               <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
             </TableRow>)}
@@ -365,7 +389,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
       <TablePagination component="div" count={sortedSchedules.length} page={page} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} labelRowsPerPage="Schedules per page" />
     </Card>
 
-    <Dialog open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: 3 } }}>
+    <Dialog open={Boolean(selectedSchedule)} onClose={() => { setSelectedSchedule(null); setReviewFocus(null); }} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: 3 } }}>
       {selectedSchedule && <>
         <DialogTitle sx={{ px: { xs: 2, sm: 3 }, pt: 2.5, pb: 1.5 }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} justifyContent="space-between">
@@ -381,6 +405,32 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
         </DialogTitle>
         <DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 2.5, bgcolor: "#fbfcfb" }}>
           <Stack spacing={2}>
+            {reviewFocus && scheduleSessions.filter((record) => record.sessionId === reviewFocus.sessionId).map((record) => {
+              const queryIndex = scheduleSessions.findIndex((item) => item.sessionId === record.sessionId);
+              const artifacts = conversationQueries[queryIndex]?.data;
+              const attempts = (artifacts?.callAttempts || []).filter((attempt) => attempt.stage === reviewFocus.stage && attempt.callTargetRole === "employee").sort((a, b) => a.attemptNumber - b.attemptNumber);
+              const attempt = attempts.at(-1);
+              const transcript = attempt ? artifacts?.transcripts.find((item) => item.callAttemptId === attempt.id) : undefined;
+              const summary = typeof attempt?.outcome?.transcript_summary === "string" ? attempt.outcome.transcript_summary : typeof attempt?.outcome?.summary === "string" ? attempt.outcome.summary : "";
+              return <Card key={record.sessionId} variant="outlined" sx={{ p: 2, borderColor: "#efb5b5", boxShadow: "none" }}>
+                <Typography variant="subtitle1" fontWeight={800}>Care manager review · {reviewFocus.stage === "check_in" ? "Check-in" : "Check-out"}</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Review the call recording and transcript, then confirm the actual attendance time or cancel the duty.</Typography>
+                {conversationQueries[queryIndex]?.isLoading && <LinearProgress sx={{ mb: 1 }} />}
+                {conversationQueries[queryIndex]?.isError && <Alert severity="error" sx={{ mb: 1 }}>Call evidence could not be loaded.</Alert>}
+                {!attempt && <Alert severity="warning" sx={{ mb: 1 }}>No caregiver call attempt is available for this stage.</Alert>}
+                {attempt && <Stack spacing={1.25} sx={{ mb: 1.5 }}>
+                  {attempt.recordingAvailable ? <CallRecording sessionId={record.sessionId} attemptId={attempt.id} /> : <Alert severity="info">Call recording is not available for this attempt.</Alert>}
+                  {summary && <Typography variant="body2"><strong>Call summary:</strong> {summary}</Typography>}
+                  {transcript?.text && <Box sx={{ p: 1.25, bgcolor: "#f6f8f7", borderRadius: 1.5 }}><Typography variant="caption" fontWeight={750}>TRANSCRIPT</Typography><Typography variant="body2" sx={{ whiteSpace: "pre-wrap", mt: 0.5 }}>{transcript.text}</Typography></Box>}
+                </Stack>}
+                {reviewMessage && <Alert severity={reviewMessage.severity} sx={{ mb: 1.25 }}>{reviewMessage.text}</Alert>}
+                <TextField size="small" type="datetime-local" label="Actual attendance time" value={reviewActualAt} onChange={(event) => setReviewActualAt(event.target.value)} InputLabelProps={{ shrink: true }} helperText="Required to mark this stage completed." sx={{ mb: 1.25, width: { xs: "100%", sm: 330 } }} />
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  <Button variant="contained" color="success" disabled={!attempt || reviewDecision.isPending || !reviewActualAt || !Number.isFinite(new Date(reviewActualAt).getTime())} onClick={() => reviewDecision.mutate("approve")}>Mark stage completed</Button>
+                  <Button variant="outlined" color="error" disabled={reviewDecision.isPending} onClick={() => reviewDecision.mutate("cancel")}>Cancel duty</Button>
+                </Stack>
+              </Card>;
+            })}
             <Card variant="outlined" sx={{ p: { xs: 1.25, sm: 1.5 }, boxShadow: "none", borderColor: "#d8e6df", bgcolor: "#f6faf8" }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <Typography variant="subtitle2" fontWeight={800}>Attendance timeline</Typography>

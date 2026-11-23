@@ -78,6 +78,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
   const careManagerScope = (req) => req.webUser?.role === "care_manager"
     ? (req.webUser.careManagerExternalId || "__unlinked_care_manager__")
     : null;
+  const taskForStage = (session, stage) => stage === "check_in" ? session?.checkInTask : session?.checkOutTask;
   const assertSessionVisible = async (req, sessionId, res) => {
     const managerId = careManagerScope(req);
     if (!managerId) return true;
@@ -879,6 +880,57 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
         transcripts: artifacts.transcripts,
         logs: artifacts.logs,
       });
+    } catch (error) { fail(res, error); }
+  });
+
+  router.post("/assignments/:id/review-decision", async (req, res) => {
+    try {
+      if (!req.webUser || !["admin", "care_manager"].includes(req.webUser.role)) {
+        return res.status(403).json({ error: "A care manager or administrator must sign in to decide attendance review." });
+      }
+      const organizationId = org(req);
+      const sessionId = req.params.id;
+      if (!await assertSessionVisible(req, sessionId, res)) return;
+      const session = await repository.getAttendanceSession(sessionId);
+      if (!session || session.organizationId !== organizationId) return res.status(404).json({ error: "Assignment session not found" });
+      if (["completed", "cancelled"].includes(session.sessionStatus)) return res.status(409).json({ error: "This attendance session is already closed." });
+
+      const action = String(req.body?.action || "");
+      const stage = String(req.body?.stage || "");
+      if (!["approve", "cancel"].includes(action)) return res.status(400).json({ error: "Choose approve or cancel." });
+      if (!["check_in", "check_out"].includes(stage)) return res.status(400).json({ error: "Choose a check-in or check-out stage." });
+      const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
+      if (action !== "cancel" && !["review", "unresolved", "not_answered", "missed"].includes(stageStatus)) {
+        return res.status(409).json({ error: "This stage is no longer waiting for a care manager decision." });
+      }
+
+      if (action === "cancel") {
+        const cancelled = await repository.cancelAttendanceSession(organizationId, sessionId, {
+          stage, decidedBy: req.webUser.id, decidedAt: new Date().toISOString(), reason: "care_manager_cancelled_duty",
+        });
+        if (!cancelled) return res.status(409).json({ error: "This attendance session has already changed or closed." });
+        return res.json({ sessionId, sessionStatus: "cancelled", action });
+      }
+
+      const artifacts = await repository.getSessionArtifacts(sessionId);
+      const attempts = (artifacts?.callAttempts || []).filter((attempt) => attempt.stage === stage && attempt.callTargetRole === "employee");
+      const latestAttempt = attempts.sort((a, b) => b.attemptNumber - a.attemptNumber)[0];
+      if (!latestAttempt) return res.status(409).json({ error: "No caregiver call attempt is available for this stage." });
+      const actualAt = new Date(String(req.body?.actualAt || ""));
+      if (!Number.isFinite(actualAt.getTime())) return res.status(400).json({ error: "Enter the actual attendance time before approving." });
+      await repository.setStageStatus(sessionId, stage, "confirmed", {
+        reportedAt: actualAt.toISOString(), nextCallAt: null, reason: "care_manager_approved",
+        reviewedBy: req.webUser.id, reviewedAt: new Date().toISOString(), callAttemptId: latestAttempt.id,
+        manualReviewRequired: false, manualReviewAfterAttempt: null,
+      });
+      await queue.enqueue("deliver_attendance", { sessionId, stage, callAttemptId: latestAttempt.id }, {
+        idempotencyKey: `care-manager-approval:${sessionId}:${stage}:${latestAttempt.id}`,
+      });
+      const current = await repository.getAttendanceSession(sessionId);
+      if (current?.checkInStatus === "confirmed" && current.checkOutStatus === "confirmed") {
+        await repository.markSessionCompleted(sessionId);
+      }
+      return res.json({ sessionId, stage, action, status: "confirmed", actualAt: actualAt.toISOString() });
     } catch (error) { fail(res, error); }
   });
 

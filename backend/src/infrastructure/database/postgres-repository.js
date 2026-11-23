@@ -1714,6 +1714,22 @@ class PostgresRepository {
     );
     return result.rows[0]?.eligible === true;
   }
+  async cancelAttendanceSession(organizationId, sessionId, eventData = {}) {
+    const result = await this.pool.query(
+      `WITH updated AS (
+         UPDATE attendance_sessions SET session_status='cancelled',updated_at=NOW()
+         WHERE organization_id=$1 AND id=$2 AND session_status IN ('active','exception')
+         RETURNING organization_id,id
+       ), audit AS (
+         INSERT INTO attendance_audit_events (organization_id,session_id,event_type,event_data)
+         SELECT organization_id,id,'attendance.care_manager_cancelled',$3::jsonb FROM updated
+       )
+       SELECT id FROM updated`,
+      [organizationId, sessionId, JSON.stringify(eventData)],
+    );
+    return result.rowCount > 0;
+  }
+
   async markSessionException(sessionId) {
     await this.pool.query(
       `WITH updated AS (UPDATE attendance_sessions SET session_status='exception',updated_at=NOW() WHERE id=$1 RETURNING organization_id)

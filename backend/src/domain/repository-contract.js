@@ -66,6 +66,7 @@ const repositoryMethods = Object.freeze([
   "claimCallStream(callAttemptId)",
   "endCallStream(callAttemptId)",
   "setStageStatus(sessionId, stage, status, context)",
+  "cancelAttendanceSession(organizationId, sessionId, eventData)",
   "setRecordingObjectKey(callAttemptId, objectKey, contentType)",
   "saveTranscript(transcript)",
   "getTranscriptForCall(callAttemptId)",
