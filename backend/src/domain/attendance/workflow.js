@@ -274,7 +274,11 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       // A timeout may mean ChiefVoice accepted the request but its response was
       // lost. Do not blindly redial; mark the placement for reconciliation.
       await repository.markCallPlacementFailed(attempt.id, error.message);
-      await repository.setStageStatus(sessionId, stage, "review", { reason: "call_placement_unknown", callAttemptId: attempt.id });
+      await repository.setStageStatus(sessionId, stage, "review", {
+        reason: error.retryable === false ? "call_placement_rejected" : "call_placement_unknown",
+        providerHttpStatus: Number.isInteger(error.status) ? error.status : null,
+        callAttemptId: attempt.id,
+      });
       throw error;
     }
     await queue.enqueue("poll_chiefvoice_call", { callAttemptId: attempt.id, pollCount: 0 }, {
@@ -871,4 +875,4 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
   };
 }
 
-module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime, inferRequestedCallbackAt };
+module.exports = { createAttendanceHandlers, classifyCallStatus, chooseAttendanceAction, normalizeCallbackTime, inferRequestedCallbackAt, chiefVoiceTemplateScenario };

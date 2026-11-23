@@ -5,7 +5,18 @@ const assert = require("node:assert/strict");
 const {
   chooseAttendanceAction,
   inferRequestedCallbackAt,
+  chiefVoiceTemplateScenario,
 } = require("../src/domain/attendance/workflow");
+
+test("attendance retries and follow-ups select the scenario-specific ChiefVoice templates", () => {
+  assert.equal(chiefVoiceTemplateScenario({ stage: "check_in", attemptNumber: 1 }), "CHECK_IN");
+  assert.equal(chiefVoiceTemplateScenario({ stage: "check_out", attemptNumber: 1 }), "CHECK_OUT");
+  assert.equal(chiefVoiceTemplateScenario({ stage: "check_in", attemptNumber: 2, consecutiveNoAnswer: 1 }), "CHECK_IN_RETRY");
+  assert.equal(chiefVoiceTemplateScenario({ stage: "check_out", attemptNumber: 2, consecutiveNoAnswer: 1 }), "CHECK_OUT_RETRY");
+  assert.equal(chiefVoiceTemplateScenario({ stage: "check_in", attemptNumber: 2, consecutiveNoAnswer: 0 }), "CHECK_IN_FOLLOW_UP");
+  assert.equal(chiefVoiceTemplateScenario({ stage: "check_out", attemptNumber: 2, consecutiveNoAnswer: 0 }), "CHECK_OUT_FOLLOW_UP");
+  assert.equal(chiefVoiceTemplateScenario({ stage: "check_out", context: { call_purpose: "care_manager_escalation" } }), "CARE_MANAGER_ESCALATION");
+});
 
 test("check-in delay requests a follow-up instead of confirming attendance", () => {
   const decision = chooseAttendanceAction("check_in", {

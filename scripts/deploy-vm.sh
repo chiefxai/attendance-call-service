@@ -77,7 +77,9 @@ for line in Path(sys.argv[1]).read_text().splitlines():
     if line and not line.lstrip().startswith("#") and "=" in line:
         key, value = line.split("=", 1)
         values[key] = value
-required = ["POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY", "CHIEFVOICE_API_KEY", "CHIEFVOICE_LIVE_TEMPLATE_ID", "CHIEFVOICE_POST_CALL_TEMPLATE_ID", "CHIEFVOICE_WEBHOOK_SECRET", "DEFAULT_ORGANIZATION_ID", "API_KEY_ADMIN_TOKEN"]
+template_scenarios = ["CHECK_IN", "CHECK_OUT", "CARE_MANAGER_ESCALATION", "CHECK_IN_RETRY", "CHECK_OUT_RETRY", "CHECK_IN_FOLLOW_UP", "CHECK_OUT_FOLLOW_UP"]
+required = ["POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY", "CHIEFVOICE_URL", "CHIEFVOICE_API_KEY", "CHIEFVOICE_WEBHOOK_SECRET", "DEFAULT_ORGANIZATION_ID", "API_KEY_ADMIN_TOKEN"]
+required += [f"CHIEFVOICE_TEMPLATE_{scenario}_{stage}_ID" for scenario in template_scenarios for stage in ("LIVE", "POST_CALL")]
 missing = [key for key in required if not values.get(key) or "replace-with" in values[key].lower() or "example-project" in values[key].lower()]
 if missing:
     print("Fill these .env values before deployment: " + ", ".join(missing), file=sys.stderr)

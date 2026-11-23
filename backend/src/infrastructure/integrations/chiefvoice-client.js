@@ -88,11 +88,20 @@ function createChiefVoiceClient({
       try { data = raw ? JSON.parse(raw) : {}; }
       catch { data = { message: raw.slice(0, 1000) }; }
       if (!response.ok) {
-        // Keep only allowlisted validation metadata. Never persist the response
-        // body or provider-supplied input values, which may contain call data.
-        const details = response.status === 422 ? safeValidationSummary(data, body) : "";
-        const error = new Error(`ChiefVoice API returned HTTP ${response.status}${details ? `: ${details}` : ""}`);
+        // Never persist provider response bodies for outbound calls; they may
+        // include call data or secrets. Keep only a status and safe reason.
+        const isOutboundCall = path === "/v1/calls/outbound";
+        const reason = isOutboundCall && response.status === 403
+          ? "selected template is not assigned to this API key, or the caller ID is not assigned"
+          : isOutboundCall && response.status === 404
+            ? "selected template was not found or is disabled"
+            : isOutboundCall && response.status === 422
+              ? "outbound request was rejected; verify template kind, enabled state, and API-key assignment"
+              : "";
+        const details = response.status === 422 && !isOutboundCall ? safeValidationSummary(data, body) : "";
+        const error = new Error(`ChiefVoice API returned HTTP ${response.status}${reason ? `: ${reason}` : details ? `: ${details}` : ""}`);
         error.status = response.status;
+        error.retryable = response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
         const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));
         if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
         throw error;
@@ -167,18 +176,20 @@ function createChiefVoiceClient({
     }).format(callStartedAt);
     const scenario = String(templateScenario || "").trim().toUpperCase();
     const scenarioPrefix = scenario ? `CHIEFVOICE_TEMPLATE_${scenario}` : null;
-    // API-owned templates are scoped to one ChiefVoice API key. The API can
-    // resolve its assigned defaults when template_id is omitted. This avoids
-    // sending IDs copied from a different ChiefVoice deployment/tenant.
-    const useExplicitTemplateIds = process.env.CHIEFVOICE_USE_EXPLICIT_TEMPLATE_IDS === "true";
-    const liveTemplateId = useExplicitTemplateIds && scenarioPrefix
-      ? process.env[`${scenarioPrefix}_LIVE_ID`] || process.env.CHIEFVOICE_LIVE_TEMPLATE_ID
+    const liveTemplateId = scenarioPrefix
+      ? process.env[`${scenarioPrefix}_LIVE_ID`]
       : process.env.CHIEFVOICE_LIVE_TEMPLATE_ID;
-    const postCallTemplateId = useExplicitTemplateIds && scenarioPrefix
-      ? process.env[`${scenarioPrefix}_POST_CALL_ID`] || process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID
+    const postCallTemplateId = scenarioPrefix
+      ? process.env[`${scenarioPrefix}_POST_CALL_ID`]
       : process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID;
-    if (useExplicitTemplateIds && (!liveTemplateId || !postCallTemplateId)) {
-      throw new Error("Explicit ChiefVoice template mode requires live and post-call template IDs");
+    if (!liveTemplateId || !postCallTemplateId) {
+      const missing = [
+        !liveTemplateId ? `${scenarioPrefix || "CHIEFVOICE_TEMPLATE_<SCENARIO>"}_LIVE_ID` : null,
+        !postCallTemplateId ? `${scenarioPrefix || "CHIEFVOICE_TEMPLATE_<SCENARIO>"}_POST_CALL_ID` : null,
+      ].filter(Boolean);
+      const error = new Error(`${missing.join(" and ")} must be configured`);
+      error.retryable = false;
+      throw error;
     }
     const checkInOutputSchema = {
       type: "object",
@@ -261,7 +272,7 @@ function createChiefVoiceClient({
       caller_id: from,
       recording_allowed: process.env.CHIEFVOICE_RECORDING_ALLOWED === "true",
       live_agent: {
-        ...(liveTemplateId ? { template_id: liveTemplateId } : {}),
+        template_id: liveTemplateId,
         context: {
           ...context,
           mandatory_fields: mandatoryFields,
@@ -275,7 +286,7 @@ function createChiefVoiceClient({
         },
       },
       post_call: {
-        ...(postCallTemplateId ? { template_id: postCallTemplateId } : {}),
+        template_id: postCallTemplateId,
         context: {
           ...postCallContext,
           identity_matching_instructions: "Compare the spoken names semantically, not by exact full-string equality. A clear, unambiguous part of an expected multi-part name (for example, 'Ram' for 'Ram Kumar') is a match when the rest of the conversation supports the same person. Compare the patient address by distinctive locality and consistent place names; normalize obvious speech-recognition spelling or transliteration errors using the audio/transcript and expected address (for example, 'Subiksha Nagar' for '1 Subiksha Nagar, Chennai, Tamil Nadu'). Do not require every address component to be spoken. Never invent a name or address detail, and do not mark a match when the caller says nothing about it or gives a conflicting detail. Set each identity boolean from the caller's actual words and the evidence in the call.",

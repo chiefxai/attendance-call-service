@@ -90,7 +90,7 @@ class PostgresJobQueue {
 
   async fail(job, workerId, error) {
     const message = String(error?.message || error || "Job failed").slice(0, 4000);
-    const dead = job.attempts >= job.max_attempts;
+    const dead = error?.retryable === false || job.attempts >= job.max_attempts;
     const delayMs = backoffMilliseconds(job.attempts, this.retry);
     const result = await this.pool.query(
       `UPDATE attendance_jobs SET status=$3,

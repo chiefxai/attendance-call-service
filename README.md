@@ -28,7 +28,7 @@ Copy `.env.docker.example` to `.env` and configure:
 
 - `CHIEFVOICE_URL` — defaults to `https://core.elvoryx.in`
 - `CHIEFVOICE_API_KEY` — bearer API key
-- `CHIEFVOICE_USE_EXPLICIT_TEMPLATE_IDS` — defaults to `false`; when false, ChiefVoice uses the calling and post-call templates marked as defaults for this API key. Set each default in **API → [API record] → Prompt templates**. When true, configure the scenario-specific template IDs (or the generic `CHIEFVOICE_LIVE_TEMPLATE_ID` and `CHIEFVOICE_POST_CALL_TEMPLATE_ID`) and the worker sends those IDs explicitly. Template IDs are API-scoped, so never carry IDs over from another ChiefVoice deployment.
+- `CHIEFVOICE_TEMPLATE_<SCENARIO>_LIVE_ID` and `CHIEFVOICE_TEMPLATE_<SCENARIO>_POST_CALL_ID` — required scenario-specific templates for `CHECK_IN`, `CHECK_OUT`, `CARE_MANAGER_ESCALATION`, `CHECK_IN_RETRY`, `CHECK_OUT_RETRY`, `CHECK_IN_FOLLOW_UP`, and `CHECK_OUT_FOLLOW_UP`. Each template must be enabled and assigned to the configured API key. The worker sends only the selected scenario's live ID and its separate post-call ID. The shared Compose environment supplies the URL and template map to both API and worker containers.
 - `CHIEFVOICE_CALLER_ID` — default E.164 caller ID; organization calling settings can override it
 - `ATHULYA_LATE_SCHEDULE_GRACE_MINUTES` — default `2`; if sync arrives after check-in/check-out time by this many minutes or less, queue the call immediately. Admins can change it in **Settings → Calling settings** (0–30; 0 disables late calls).
 - `CHIEFVOICE_WEBHOOK_SECRET` — signing secret shared with the webhook registration
@@ -56,7 +56,7 @@ The outbound API request uses `POST /v1/calls/outbound` with bearer API-key auth
 ## Run with Docker
 
 1. Copy `.env.docker.example` to `.env`.
-2. Set PostgreSQL and MinIO credentials, `DEFAULT_ORGANIZATION_ID`, the ChiefVoice API key, the webhook secret, and `API_KEY_ADMIN_TOKEN`. For the default-template mode, assign one calling and one post-call template as defaults in the ChiefVoice API console; no template IDs are needed in the attendance `.env`.
+2. Set PostgreSQL and MinIO credentials, `DEFAULT_ORGANIZATION_ID`, the ChiefVoice URL and API key, all 14 scenario-specific template IDs assigned to that key, the webhook secret, and `API_KEY_ADMIN_TOKEN`.
 3. Set `PUBLIC_DOMAIN` to the VM's public hostname and make sure DNS points to the VM.
 4. Run:
 
