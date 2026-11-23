@@ -4,8 +4,9 @@ import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormCont
 import { useNavigate } from "react-router-dom";
 import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
 import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
+import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import { AxiosError } from "axios";
-import { fetchAthulyaIntegration, fetchCallingSettings, fetchMockPlatformServerSettings, resetCallingSettings, saveAthulyaIntegration, saveCallingSettings, setMockPlatformServerEnabled, testAthulyaIntegration, type CallingSettings, type AthulyaIntegrationSettings } from "../api/client";
+import { fetchAthulyaIntegration, fetchCallingSettings, fetchMockPlatformServerSettings, resetCallingSettings, saveAthulyaIntegration, saveCallingSettings, setMockPlatformServerEnabled, startAthulyaSync, testAthulyaIntegration, type CallingSettings, type AthulyaIntegrationSettings } from "../api/client";
 import { ApiAccessPage } from "./ApiAccessPage";
 import { PageHeader } from "../components/OperationsUI";
 import { formatAppDateTime } from "../utils/dateTime";
@@ -23,10 +24,14 @@ const emptySettings: CallingForm = {
   clearChiefVoiceWebhookSecret: false,
 };
 const settingError = (error: unknown) => error instanceof AxiosError ? error.response?.data?.error || error.message : error instanceof Error ? error.message : "Request failed";
+const todayInIndia = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 export function SettingsPage({ section }: { section: "calling" | "api" | "athulya" }) {
   const navigate = useNavigate();
   const [form, setForm] = useState<CallingForm>(emptySettings);
   const [integrationForm, setIntegrationForm] = useState<IntegrationForm>({ integrationName: "Athulya Platform", apiBaseUrl: "https://homecare.athulyaliving.net/api", enabled: false, autoSyncEnabled: false, autoSyncScope: "all", autoSyncScopeId: "", apiKey: "" });
+  const [manualSyncDate, setManualSyncDate] = useState(todayInIndia);
+  const [manualSyncScope, setManualSyncScope] = useState<SyncScope>("all");
+  const [manualSyncScopeId, setManualSyncScopeId] = useState("");
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: ["calling-settings"], queryFn: fetchCallingSettings, retry: false });
   const integration = useQuery({ queryKey: ["athulya-integration"], queryFn: fetchAthulyaIntegration, enabled: section === "athulya", retry: false });
@@ -55,6 +60,21 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
   const saveIntegration = useMutation({ mutationFn: saveAthulyaIntegration, onSuccess: (data) => { queryClient.setQueryData(["athulya-integration"], data); setIntegrationForm((current) => ({ ...current, apiKey: "" })); } });
   const updateMockPlatform = useMutation({ mutationFn: setMockPlatformServerEnabled, onSuccess: (data) => queryClient.setQueryData(["mock-platform-server"], data) });
   const testIntegration = useMutation({ mutationFn: testAthulyaIntegration });
+  const manualSync = useMutation({
+    mutationFn: () => startAthulyaSync({
+      scheduleDate: manualSyncDate,
+      careManagerId: manualSyncScope === "care_manager" ? manualSyncScopeId.trim() : undefined,
+      branchId: manualSyncScope === "branch" ? manualSyncScopeId.trim() : undefined,
+    }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["athulya-sync-runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["athulya-schedules"] }),
+        queryClient.invalidateQueries({ queryKey: ["attendance"] }),
+        queryClient.invalidateQueries({ queryKey: ["athulya-integration"] }),
+      ]);
+    },
+  });
   const updateRetry = (key: keyof CallingForm["retry"], value: string) => {
     const number = Number(value);
     setForm((current) => ({ ...current, retry: { ...current.retry, [key]: Number.isFinite(number) ? number : 0 } }));
@@ -155,6 +175,18 @@ export function SettingsPage({ section }: { section: "calling" | "api" | "athuly
       </Stack></CardContent></Card>
     </Stack> : <Stack spacing={2.5}>
       <Alert severity="info">Athulya credentials stay encrypted on the server. Every sync imports one selected service date only. Automatic sync runs at 12:00 AM and 12:00 PM for the configured scope. Confirmed check-in and check-out events are posted separately. {mockPlatform.data?.enabled ? "Test mode is active: both operations use the mock server; saved live credentials are preserved." : "Live mode is active: both operations use the saved Athulya URL and key."}</Alert>
+      <Card><CardContent><Stack spacing={1.5}>
+        <Box><Typography variant="h6">Manually import schedules</Typography><Typography variant="body2" color="text.secondary">Choose a service date and import schedules now. The active route shown above determines whether this uses the mock server or live Athulya.</Typography></Box>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ md: "center" }}>
+          <TextField type="date" size="small" label="Service date" value={manualSyncDate} onChange={(event) => setManualSyncDate(event.target.value)} InputLabelProps={{ shrink: true }} inputProps={{ required: true }} sx={{ minWidth: { md: 190 } }} />
+          <FormControl size="small" sx={{ minWidth: 190 }}><InputLabel id="manual-sync-scope-label">Import scope</InputLabel><Select labelId="manual-sync-scope-label" label="Import scope" value={manualSyncScope} onChange={(event) => { setManualSyncScope(event.target.value as SyncScope); setManualSyncScopeId(""); }}><MenuItem value="all">Everyone</MenuItem><MenuItem value="branch">One branch</MenuItem><MenuItem value="care_manager">One care manager</MenuItem></Select></FormControl>
+          {manualSyncScope !== "all" && <TextField size="small" label={manualSyncScope === "branch" ? "Branch ID" : "Care Manager ID"} value={manualSyncScopeId} onChange={(event) => setManualSyncScopeId(event.target.value)} />}
+          <Button variant="contained" startIcon={manualSync.isPending ? <CircularProgress size={16} color="inherit" /> : <SyncRoundedIcon />} disabled={manualSync.isPending || !manualSyncDate || (!integration.data?.enabled && !mockPlatform.data?.enabled) || (manualSyncScope !== "all" && !manualSyncScopeId.trim())} onClick={() => manualSync.mutate()}>{manualSync.isPending ? "Importing…" : "Sync schedules now"}</Button>
+        </Stack>
+        {manualSync.isError && <Alert severity="error">Schedule import could not be started: {settingError(manualSync.error)}</Alert>}
+        {manualSync.isSuccess && <Alert severity="success">Schedule import queued for {manualSync.data.scheduleDate}. The schedule and sync history views will refresh.</Alert>}
+        {!integration.data?.enabled && !mockPlatform.data?.enabled && <Typography variant="caption" color="text.secondary">Enable the live integration or test server before starting a manual import.</Typography>}
+      </Stack></CardContent></Card>
       {integration.isLoading && <CircularProgress size={24} />}
       {integration.isError && <Alert severity="error">Could not load Athulya settings: {settingError(integration.error)}</Alert>}
       {integration.data && <Card><CardContent><Stack component="form" spacing={2} onSubmit={(event) => { event.preventDefault(); saveIntegration.mutate(integrationForm); }}>
