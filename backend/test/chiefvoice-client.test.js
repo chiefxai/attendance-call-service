@@ -84,10 +84,12 @@ test("care-manager escalation requests include a post-call output schema", async
   const names = [
     "CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_LIVE_ID",
     "CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_POST_CALL_ID",
+    "CHIEFVOICE_USE_EXPLICIT_TEMPLATE_IDS",
   ];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   process.env.CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_LIVE_ID = "manager-live-template";
   process.env.CHIEFVOICE_TEMPLATE_CARE_MANAGER_ESCALATION_POST_CALL_ID = "manager-post-template";
+  process.env.CHIEFVOICE_USE_EXPLICIT_TEMPLATE_IDS = "true";
   let payload;
   try {
     const client = createChiefVoiceClient({
