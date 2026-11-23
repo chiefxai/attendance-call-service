@@ -7,7 +7,7 @@ const { resilientRequest } = require("./resilient-request");
  * This service only schedules calls and consumes the resulting attendance data.
  */
 function createChiefVoiceClient({
-  baseUrl = process.env.CHIEFVOICE_URL || "https://chiefvoice.elvoryx.in",
+  baseUrl = process.env.CHIEFVOICE_URL || "https://core.elvoryx.in",
   apiKey = process.env.CHIEFVOICE_API_KEY,
   fetchImpl = globalThis.fetch,
   timeoutMs = Number(process.env.CHIEFVOICE_TIMEOUT_MS) || 20_000,
