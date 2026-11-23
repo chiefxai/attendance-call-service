@@ -121,3 +121,97 @@ test("care-manager escalation requests include a post-call output schema", async
     }
   }
 });
+
+
+test("outbound calls use each use-case live and post-call template pair", async (t) => {
+  const cases = [
+    ["CHECK_IN", "check_in"],
+    ["CHECK_IN_RETRY", "check_in"],
+    ["CHECK_IN_FOLLOW_UP", "check_in"],
+    ["CHECK_OUT", "check_out"],
+    ["CHECK_OUT_RETRY", "check_out"],
+    ["CHECK_OUT_FOLLOW_UP", "check_out"],
+    ["CARE_MANAGER_ESCALATION", "check_in"],
+  ];
+  const names = ["CHIEFVOICE_LIVE_TEMPLATE_ID", "CHIEFVOICE_POST_CALL_TEMPLATE_ID", ...cases.flatMap(([s]) => [
+    \`CHIEFVOICE_TEMPLATE_\${s}_LIVE_ID\`, \`CHIEFVOICE_TEMPLATE_\${s}_POST_CALL_ID\`,
+  ])];
+  const old = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+  t.after(() => names.forEach((n) => old[n] === undefined ? delete process.env[n] : process.env[n] = old[n]));
+  process.env.CHIEFVOICE_LIVE_TEMPLATE_ID = "global-live-not-used";
+  process.env.CHIEFVOICE_POST_CALL_TEMPLATE_ID = "global-post-not-used";
+  for (const [s] of cases) {
+    process.env[\`CHIEFVOICE_TEMPLATE_\${s}_LIVE_ID\`] = \`\${s.toLowerCase()}-live\`;
+    process.env[\`CHIEFVOICE_TEMPLATE_\${s}_POST_CALL_ID\`] = \`\${s.toLowerCase()}-post\`;
+  }
+  for (const [scenario, stage] of cases) {
+    let captured;
+    const client = createChiefVoiceClient({
+      baseUrl: "https://core.elvoryx.in", apiKey: "test-key",
+      fetchImpl: async (url, options) => {
+        captured = { url, options, body: JSON.parse(options.body) };
+        return { ok: true, status: 202, text: async () => JSON.stringify({ session_id: "accepted" }) };
+      },
+    });
+    await client.createOutboundCall({
+      to: "+919876543210", from: "+911234567890", sessionId: "attendance-1",
+      stage, callAttemptId: scenario, context: { language: "ta" }, templateScenario: scenario,
+    });
+    assert.equal(captured.url, "https://core.elvoryx.in/v1/calls/outbound");
+    assert.equal(captured.body.live_agent.template_id, \`\${scenario.toLowerCase()}-live\`);
+    assert.equal(captured.body.post_call.template_id, \`\${scenario.toLowerCase()}-post\`);
+    assert.notEqual(captured.body.live_agent.template_id, captured.body.post_call.template_id);
+    assert.equal(captured.options.headers["Idempotency-Key"], \`attendance-\${scenario}\`);
+  }
+});
+
+test("missing per-use-case template IDs fail before the provider request", async (t) => {
+  const names = ["CHIEFVOICE_TEMPLATE_CHECK_IN_LIVE_ID", "CHIEFVOICE_TEMPLATE_CHECK_IN_POST_CALL_ID"];
+  const old = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+  t.after(() => names.forEach((n) => old[n] === undefined ? delete process.env[n] : process.env[n] = old[n]));
+  delete process.env.CHIEFVOICE_TEMPLATE_CHECK_IN_LIVE_ID;
+  delete process.env.CHIEFVOICE_TEMPLATE_CHECK_IN_POST_CALL_ID;
+  let requests = 0;
+  const client = createChiefVoiceClient({ baseUrl: "https://core.elvoryx.in", apiKey: "test-key", fetchImpl: async () => { requests += 1; } });
+  await assert.rejects(client.createOutboundCall({
+    to: "+919876543210", from: "+911234567890", sessionId: "attendance-1", stage: "check_in",
+    callAttemptId: "missing", context: {}, templateScenario: "CHECK_IN",
+  }), (error) => {
+    assert.match(error.message, /CHIEFVOICE_TEMPLATE_CHECK_IN_LIVE_ID and CHIEFVOICE_TEMPLATE_CHECK_IN_POST_CALL_ID must be configured/);
+    assert.equal(error.retryable, false);
+    return true;
+  });
+  assert.equal(requests, 0);
+});
+
+test("template validation failures retain status and a sanitized non-retryable reason", async () => {
+  const names = ["CHIEFVOICE_TEMPLATE_CHECK_IN_LIVE_ID", "CHIEFVOICE_TEMPLATE_CHECK_IN_POST_CALL_ID"];
+  const old = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+  process.env.CHIEFVOICE_TEMPLATE_CHECK_IN_LIVE_ID = "configured-live";
+  process.env.CHIEFVOICE_TEMPLATE_CHECK_IN_POST_CALL_ID = "configured-post";
+  try {
+    for (const [status, reason] of [
+      [403, "selected template is not assigned to this API key, or the caller ID is not assigned"],
+      [404, "selected template was not found or is disabled"],
+      [422, "outbound request was rejected; verify template kind, enabled state, and API-key assignment"],
+    ]) {
+      const client = createChiefVoiceClient({
+        baseUrl: "https://core.elvoryx.in", apiKey: "must-never-appear",
+        fetchImpl: async () => ({ ok: false, status, text: async () => JSON.stringify({ detail: "wrong tenant secret=do-not-leak must-never-appear" }) }),
+      });
+      await assert.rejects(client.createOutboundCall({
+        to: "+919876543210", from: "+911234567890", sessionId: "attendance-1", stage: "check_in",
+        callAttemptId: "invalid", context: {}, templateScenario: "CHECK_IN",
+      }), (error) => {
+        assert.equal(error.status, status);
+        assert.equal(error.retryable, false);
+        assert.ok(error.message.includes(reason));
+        assert.equal(error.message.includes("do-not-leak"), false);
+        assert.equal(error.message.includes("must-never-appear"), false);
+        return true;
+      });
+    }
+  } finally {
+    names.forEach((n) => old[n] === undefined ? delete process.env[n] : process.env[n] = old[n]);
+  }
+});
