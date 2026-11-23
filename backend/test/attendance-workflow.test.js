@@ -85,16 +85,25 @@ test("outbound attendance request stays within ChiefVoice's combined context lim
     apiKey: "test-key",
     fetchImpl: async (_url, options) => {
       const body = JSON.parse(options.body);
+      const normalizeChiefVoiceSchema = (node) => ({
+        type: node.type,
+        ...(node.description !== undefined ? { description: node.description } : {}),
+        properties: Object.fromEntries(Object.entries(node.properties || {}).map(([key, value]) => [key, normalizeChiefVoiceSchema(value)])),
+        required: node.required || [],
+        ...(node.items ? { items: normalizeChiefVoiceSchema(node.items) } : {}),
+        ...(node.enum ? { enum: node.enum } : {}),
+        additionalProperties: node.additionalProperties ?? false,
+      });
       serializedContextBytes = Buffer.byteLength(JSON.stringify({
         live_agent_context: body.live_agent.context,
         post_call_context: body.post_call.context,
         post_call_workflow_id: null,
-        post_call_output_schema: body.post_call.output_schema,
+        post_call_output_schema: normalizeChiefVoiceSchema(body.post_call.output_schema),
         post_call_tools: body.post_call.tools,
         post_call_time_zone: body.post_call.time_zone,
         post_call_time_format: body.post_call.time_format,
         include_live_agent_context: body.post_call.include_live_agent_context,
-        workflow_context: body.post_call.context,
+        workflow_context: body.post_call.workflow_context ?? body.post_call.context,
       }));
       return { ok: true, status: 202, text: async () => JSON.stringify({ session_id: "provider-session-1" }) };
     },
@@ -117,5 +126,5 @@ test("outbound attendance request stays within ChiefVoice's combined context lim
 
   await handlers.place_call({ sessionId: session.id, taskId: "task-1", stage: "check_in", attemptNumber: 1 });
 
-  assert.ok(serializedContextBytes < 12_000, `ChiefVoice context payload was ${serializedContextBytes} bytes`);
+  assert.ok(serializedContextBytes < 10_000, `ChiefVoice context payload was ${serializedContextBytes} bytes (10 KB safety budget)`);
 });
