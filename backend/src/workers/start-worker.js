@@ -29,7 +29,7 @@ async function main() {
   });
   const chiefvoice = createChiefVoiceClient({
     apiKeyProvider: async () => {
-      const settings = await repository.getOrganizationCallSettings(process.env.DEFAULT_ORGANIZATION_ID);
+      const settings = await repository.getOrganizationCallSettings(config.organizationId || process.env.DEFAULT_ORGANIZATION_ID);
       return settings.encryptedChiefVoiceApiKey
         ? decryptSecret(settings.encryptedChiefVoiceApiKey)
         : process.env.CHIEFVOICE_API_KEY;
