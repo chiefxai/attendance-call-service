@@ -387,6 +387,8 @@ export interface AttendanceRecord {
   callAttemptCount: number;
   checkInAttemptCount: number;
   checkOutAttemptCount: number;
+  checkInCareManagerAttemptCount: number;
+  checkOutCareManagerAttemptCount: number;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

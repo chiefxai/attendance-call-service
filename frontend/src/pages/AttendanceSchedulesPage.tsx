@@ -5,7 +5,7 @@ import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
-import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaSchedules, fetchSessionArtifacts, submitAttendanceReviewDecision, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
+import { fetchAttendance, fetchAthulyaAttendanceSubmissions, fetchAthulyaSchedules, fetchCallingSettings, fetchSessionArtifacts, submitAttendanceReviewDecision, type AttendanceRecord, type AthulyaAttendanceSubmission, type AthulyaSchedule } from "../api/client";
 import { MetricCard, PageHeader, StatusChip, OperationsTable } from "../components/OperationsUI";
 import { CallRecording } from "../components/CallRecording";
 
@@ -126,7 +126,7 @@ function compactScheduleTime(value: string, scheduleDate: string | null | undefi
   return new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
-function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOut", scheduleDate: string | null | undefined) {
+function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOut", scheduleDate: string | null | undefined, retryLimit?: number) {
   const candidates = records.map((record) => ({ record, value: record[stage], reason: record.stageReasons[stage] }));
   // A schedule can have multiple attendance sessions over time. Prefer the
   // most recently updated stage so an old `calling` session cannot mask a
@@ -141,13 +141,17 @@ function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOu
   if (current.value.status === "processing") return "Processing call";
   if (["review", "not_answered", "missed"].includes(current.value.status)) return "Needs review";
   if (current.value.status === "retry" || (current.value.status === "follow_up" && current.reason !== "employee_requested_callback")) {
-    return current.value.nextCallAt ? `Retry · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Retry scheduled";
+    const attempt = current.record[stage === "checkIn" ? "checkInAttemptCount" : "checkOutAttemptCount"] + 1;
+    const count = retryLimit ? ` · attempt ${attempt} of ${retryLimit}` : ` · attempt ${attempt}`;
+    return `Retry${count}${current.value.nextCallAt ? ` · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : " scheduled"}`;
   }
   if (current.value.status === "follow_up") {
     return current.value.nextCallAt ? `Callback · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Callback requested";
   }
   if (current.value.status === "escalated") {
-    return current.value.nextCallAt ? `Care manager · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Care manager follow-up";
+    const attempt = current.record[stage === "checkIn" ? "checkInCareManagerAttemptCount" : "checkOutCareManagerAttemptCount"] + 1;
+    const count = retryLimit ? ` · attempt ${attempt} of ${retryLimit}` : ` · attempt ${attempt}`;
+    return `Care manager${count}${current.value.nextCallAt ? ` · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : " follow-up"}`;
   }
   if (current.value.status === "unresolved") return "Manual follow-up needed";
   return null;
@@ -177,7 +181,7 @@ function dateTimeLabel(value: string | null | undefined) {
   }).format(date);
 }
 
-function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLabel, canAssessCall, onReviewClick }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduleDate: string | null; scheduledTime: string | null | undefined; emptyLabel: string; canAssessCall: boolean; onReviewClick?: (sessionId: string, stage: "check_in" | "check_out") => void }) {
+function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLabel, canAssessCall, retryLimit, onReviewClick }: { records: AttendanceRecord[]; stage: "checkIn" | "checkOut"; scheduleDate: string | null; scheduledTime: string | null | undefined; emptyLabel: string; canAssessCall: boolean; retryLimit?: number; onReviewClick?: (sessionId: string, stage: "check_in" | "check_out") => void }) {
   const dueAt = scheduledInstant(scheduleDate, scheduledTime);
   const overdue = Boolean(dueAt && dueAt.getTime() <= Date.now());
   const stageName = stage === "checkIn" ? "Checked In" : "Completed";
@@ -211,7 +215,7 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
         : ["follow_up", "retry", "escalated"].includes(stageStatus.status) && stageStatus.nextCallAt
           ? stageStatus.nextCallAt
           : scheduledTime;
-      const hint = localStageHint([record], stage, scheduleDate);
+      const hint = localStageHint([record], stage, scheduleDate, retryLimit);
       return <Stack key={record.sessionId} spacing={0.35} alignItems="flex-start">
         {records.length > 1 && <Typography variant="caption" color="text.secondary">{record.employee.name}</Typography>}
         <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="nowrap">
@@ -222,7 +226,7 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
             ? <Chip size="small" color="error" label="Review" clickable onClick={() => onReviewClick?.(record.sessionId, stage === "checkIn" ? "check_in" : "check_out")} />
             : <StatusChip compact status={displayStatus} />}
         </Stack>
-        {hint && <Typography variant="caption" color={hint.includes("follow-up") ? "error.main" : "text.secondary"} sx={{ fontSize: 11, lineHeight: 1.2 }}>{hint}</Typography>}
+        {hint && <Typography variant="caption" color={hint.startsWith("Retry") ? "error.main" : hint.startsWith("Care manager") ? "warning.dark" : hint.includes("follow-up") ? "error.main" : "text.secondary"} sx={{ fontSize: 11, lineHeight: 1.2 }}>{hint}</Typography>}
       </Stack>;
     })}
   </Stack>;
@@ -274,6 +278,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
     queryFn: () => fetchAttendance({ limit: 500 }),
     refetchInterval: 15_000,
   });
+  const callingSettings = useQuery({ queryKey: ["calling-settings"], queryFn: fetchCallingSettings, staleTime: 60_000 });
   const scheduleAttendance = useQuery({
     queryKey: ["attendance", "schedule-detail", selectedSchedule?.id],
     enabled: Boolean(selectedSchedule),
@@ -377,8 +382,8 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
               <TableCell>{schedule.patient.name || "—"}</TableCell>
               <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell>
               <TableCell>{schedule.service || "—"}</TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
+              <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} retryLimit={callingSettings.data?.retry.maxConsecutiveNoAnswer} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
+              <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} retryLimit={callingSettings.data?.retry.maxConsecutiveNoAnswer} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
               <TableCell><StatusChip compact status={status} /></TableCell>
               <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
             </TableRow>)}

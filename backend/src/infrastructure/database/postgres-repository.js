@@ -956,14 +956,16 @@ class PostgresRepository {
       patient: { id: patient.id || null, name: patient.name || "Unknown patient" },
       scheduledStartAt: session.scheduledStartAt,
       scheduledEndAt: session.scheduledEndAt,
-      checkIn: { status: session.checkInStatus, reportedAt: context.checkIn?.reportedAt || null, nextCallAt: session.checkInStatus === "follow_up" ? context.checkIn?.nextCallAt || null : null },
-      checkOut: { status: session.checkOutStatus, reportedAt: context.checkOut?.reportedAt || null, nextCallAt: session.checkOutStatus === "follow_up" ? context.checkOut?.nextCallAt || null : null },
+      checkIn: { status: session.checkInStatus, reportedAt: context.checkIn?.reportedAt || null, nextCallAt: ["follow_up", "retry", "escalated"].includes(session.checkInStatus) ? context.checkIn?.nextCallAt || null : null },
+      checkOut: { status: session.checkOutStatus, reportedAt: context.checkOut?.reportedAt || null, nextCallAt: ["follow_up", "retry", "escalated"].includes(session.checkOutStatus) ? context.checkOut?.nextCallAt || null : null },
       stageReasons: { checkIn: context.checkIn?.reason || null, checkOut: context.checkOut?.reason || null },
       sessionStatus: session.sessionStatus,
       backendDeliveryStatus: session.backendDeliveryStatus,
       callAttemptCount: Number(row.call_attempt_count || 0),
       checkInAttemptCount: Number(row.check_in_attempt_count || 0),
       checkOutAttemptCount: Number(row.check_out_attempt_count || 0),
+      checkInCareManagerAttemptCount: Number(row.check_in_care_manager_attempt_count || 0),
+      checkOutCareManagerAttemptCount: Number(row.check_out_care_manager_attempt_count || 0),
       metadata: session.metadata || {},
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -976,7 +978,9 @@ class PostgresRepository {
     const r = await this.pool.query(
       `SELECT s.*, COUNT(a.id)::int AS call_attempt_count,
          COUNT(a.id) FILTER (WHERE a.stage='check_in' AND a.call_target_role='employee')::int AS check_in_attempt_count,
-         COUNT(a.id) FILTER (WHERE a.stage='check_out' AND a.call_target_role='employee')::int AS check_out_attempt_count
+         COUNT(a.id) FILTER (WHERE a.stage='check_out' AND a.call_target_role='employee')::int AS check_out_attempt_count,
+         COUNT(a.id) FILTER (WHERE a.stage='check_in' AND a.call_target_role='care_manager')::int AS check_in_care_manager_attempt_count,
+         COUNT(a.id) FILTER (WHERE a.stage='check_out' AND a.call_target_role='care_manager')::int AS check_out_care_manager_attempt_count
        FROM attendance_sessions s
        LEFT JOIN attendance_call_attempts a ON a.session_id=s.id
        WHERE s.organization_id=$1
