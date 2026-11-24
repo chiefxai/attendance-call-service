@@ -378,7 +378,11 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       }
       if (postCall.status === "failed") {
         const failure = postCall.failure && typeof postCall.failure === "object" ? postCall.failure : {};
-        if (isNoAnswerFailureCode(failure.code || postCall.failure_code)) {
+        const transcriptUnavailable = postCall.transcript_status === "no_data"
+          || postCall.last_error_type === "NoTranscriptDataError"
+          || postCall.decision_reason === "recording_transcription_failed";
+        const failureCode = failure.code || postCall.failure_code || postCall.last_error_type || postCall.decision_reason;
+        if (isNoAnswerFailureCode(failureCode) || transcriptUnavailable) {
           await repository.updateCallByProviderId({
             provider: "chiefvoice",
             providerCallId: attempt.providerCallId,
@@ -387,8 +391,8 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
             endedAt: callStatus.ended_at || new Date().toISOString(),
             failure: {
               stage: "post_call",
-              code: String(failure.code || postCall.failure_code),
-              retryable: failure.retryable === true,
+              code: String(failureCode || "no_transcript_data"),
+              retryable: transcriptUnavailable || failure.retryable === true,
               attempts: Number.isSafeInteger(failure.attempts) ? failure.attempts : null,
             },
             rawEvent: {

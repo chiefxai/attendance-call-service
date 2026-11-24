@@ -14,6 +14,10 @@ const NO_ANSWER_FAILURE_CODES = new Set([
   "busy",
   "user_busy",
   "subscriber_busy",
+  // Unavailable post-call transcript means attendance is unverified; retry it.
+  "no_transcript_data_error",
+  "notranscriptdataerror",
+  "recording_transcription_failed",
 ]);
 
 function isNoAnswerFailureCode(code) {
