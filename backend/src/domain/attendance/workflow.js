@@ -106,7 +106,7 @@ function chooseAttendanceAction(stage, outcome = {}) {
     // The check-out prompt confirms completion on the assigned caregiver phone
     // and intentionally does not ask for a name. Requiring employeeVerified
     // here would force an extra identity question and contradict that flow.
-    if (outcome.employeeIntent === "departure_confirmed" && outcome.dutyComplete === true && outcome.reportedDepartureTime) {
+    if (outcome.employeeIntent === "departure_confirmed" && outcome.dutyComplete === true) {
       return { action: "confirm_stage", reportedAt: outcome.reportedDepartureTime || null };
     }
     if (outcome.employeeIntent === "still_on_duty" || outcome.requestedCallbackAt) {
