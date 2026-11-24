@@ -234,6 +234,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       if (callTargetRole === "care_manager") {
         const stageLabel = stage === "check_out" ? "check-out" : "check-in";
         callContext.call_purpose = "care_manager_escalation";
+        callContext.attendance_stage = stage;
         callContext.care_manager_name = person.name || "Care Manager";
         callContext.organization_id = session.organizationId;
         callContext.expected_staff_name = session.employee?.name || session.employee?.fullName || "";
