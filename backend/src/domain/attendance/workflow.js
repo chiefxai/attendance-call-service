@@ -76,17 +76,6 @@ function chiefVoiceTemplateScenario({ stage, attemptNumber = 1, consecutiveNoAns
   return stageKey;
 }
 
-function identityCandidates(expectedValue, maleNames, femaleNames) {
-  const expected = String(expectedValue || "").trim();
-  if (!expected) return [];
-  const normalizedExpected = expected.toLocaleLowerCase();
-  const choose = (values, count) => values.filter((value) => value.toLocaleLowerCase() !== normalizedExpected).slice(0, count);
-  const decoys = femaleNames.length
-    ? [...choose(maleNames, 3), ...choose(femaleNames, 2)]
-    : choose(maleNames, 5);
-  return [...decoys, expected].filter(Boolean);
-}
-
 function chooseAttendanceAction(stage, outcome = {}) {
   if (outcome.employeeIntent === "no_human_answer") return { action: "retry_no_answer" };
   if (outcome.exceptionCode || outcome.employeeIntent === "wrong_assignment") {
@@ -203,25 +192,6 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         schedule: { start_at: session.scheduledStartAt, end_at: session.scheduledEndAt },
         language: session.language,
         expected_staff_name: expectedStaffName,
-        expected_patient_name: expectedPatientName,
-        expected_patient_address: expectedPatientAddress,
-        identity_reference_candidates: JSON.stringify({
-          caregiver_names: identityCandidates(expectedStaffName,
-            ["Arjun", "Karthik", "Vignesh", "Suresh", "Manoj", "Ravi"],
-            ["Priya", "Kavitha", "Divya", "Meena", "Lakshmi"]),
-          patient_names: identityCandidates(expectedPatientName,
-            ["Arjun", "Karthik", "Vignesh", "Suresh", "Manoj", "Ravi"],
-            ["Priya", "Kavitha", "Divya", "Meena", "Lakshmi"]),
-          patient_addresses: identityCandidates(expectedPatientAddress, [
-            "12 Anna Nagar, Chennai, Tamil Nadu",
-            "8 Velachery Main Road, Chennai, Tamil Nadu",
-            "4 T. Nagar, Chennai, Tamil Nadu",
-            "6 Adyar, Chennai, Tamil Nadu",
-            "10 Perungudi, Chennai, Tamil Nadu",
-            "3 Besant Nagar, Chennai, Tamil Nadu",
-          ], []),
-        }),
-        identity_reference_instructions: "Use expected_staff_name, expected_patient_name, and expected_patient_address as the correct assignment facts. identity_reference_candidates contains five decoy names (three masculine and two feminine) or five unrelated addresses, followed by the corresponding correct value as the final item. These candidates are internal recognition references only: never read them aloud, offer them as alternatives, or change the assigned identity/address to a decoy. Ask naturally and judge the caller's actual response against the correct expected values; accept clear partial names and distinctive locality matches without requiring exact full-string repetition.",
         scheduled_check_in_at: session.scheduledStartAt || "",
         scheduled_check_out_at: session.scheduledEndAt || "",
         attempt_number: String(attemptNumber || 1),
@@ -271,11 +241,6 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       };
       const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer, technicalFailureRetry });
       const selectedScenario = callTargetRole === "care_manager" ? "CARE_MANAGER_ESCALATION" : templateScenario;
-      const callSettings = await repository.getOrganizationCallSettings(session.organizationId);
-      const callPrompts = require("./call-prompts").normalizeCallPrompts(callSettings.callPrompts);
-      const scenarioPrompts = callPrompts[selectedScenario];
-      callContext.app_live_prompt_instructions = scenarioPrompts.live;
-      postCallContext.app_post_call_prompt_instructions = scenarioPrompts.post;
       // ChiefVoice counts workflow_context separately from post_call.context.
       // Send only the assignment facts its attendance validator consumes
       // instead of duplicating prompts and operational metadata a third time.

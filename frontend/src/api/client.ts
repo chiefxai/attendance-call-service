@@ -413,18 +413,6 @@ export interface CallingSettings {
   source: { defaultFromNumber: "settings" | "environment"; lateScheduleGraceMinutes: "settings" | "environment"; retry: "settings" | "environment" };
 }
 
-export interface CallPromptScenario {
-  id: string;
-  label: string;
-  live: string;
-  post: string;
-}
-
-export interface CallPromptsResponse {
-  scenarios: CallPromptScenario[];
-  defaults?: Record<string, { live: string; post: string }>;
-}
-
 export type CallingSettingsUpdate = Omit<CallingSettings, "source" | "webhookSecretConfigured" | "webhookSecretEnvironmentConfigured" | "webhookSecretSource" | "chiefvoiceApiKeyConfigured" | "chiefvoiceApiKeyEnvironmentConfigured" | "chiefvoiceApiKeySource">
   & { chiefvoiceWebhookSecret?: string; clearChiefVoiceWebhookSecret?: boolean; chiefvoiceApiKey?: string; clearChiefVoiceApiKey?: boolean };
 
@@ -587,16 +575,6 @@ export async function saveCallingSettings(settings: CallingSettingsUpdate) {
 
 export async function resetCallingSettings() {
   const response = await api.post<CallingSettings>("/settings/calling/reset");
-  return response.data;
-}
-
-export async function fetchCallPrompts() {
-  const response = await api.get<CallPromptsResponse>("/settings/call-prompts");
-  return response.data;
-}
-
-export async function saveCallPrompts(prompts: Record<string, { live: string; post: string }>) {
-  const response = await api.put<CallPromptsResponse>("/settings/call-prompts", { prompts });
   return response.data;
 }
 

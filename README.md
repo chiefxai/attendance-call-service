@@ -18,10 +18,9 @@ flowchart TD
   Worker -->|Confirmed check-in / check-out| Platform[Athulya platform API]
 ```
 
-The service does not run a local speech model, transcription pipeline, Gemini/Vertex agent, or telephony media bridge. The reusable ChiefVoice templates provide the conversation and extraction behavior. Each outbound request supplies the employee, patient, assignment, schedule, language, and attendance stage as context. Configure the live template to use `app_live_prompt_instructions` and the post-call template to use `app_post_call_prompt_instructions`; administrators can edit these scenario-specific instructions from **Attendance calls → Call prompts**. The app includes defaults for check-in, check-out, retries, follow-ups, and care-manager escalation. Keep the service's identity checks and required output schema in the templates; prompt edits supplement the app's deterministic attendance rules and validation.
+The service does not run a local speech model, transcription pipeline, Gemini/Vertex agent, or telephony media bridge. ChiefVoice owns the live conversation and post-call extraction. The attendance app selects the configured ChiefVoice template for each call scenario and supplies operational context. Prompt instructions are managed in ChiefVoice and are not editable in the app.
 
-The live call context also contains `expected_staff_name`, `expected_patient_name`, and `expected_patient_address`, plus `identity_reference_candidates` (a JSON string with five hard-coded decoys and the correct value last for each supplied field). Reference `identity_reference_instructions` in the live prompt. Treat the expected fields as authoritative; the candidates are internal recognition hints only. Never read candidate names or addresses to the caller or report a decoy as the assigned identity. For post-call attendance matching, continue using the authoritative `expected_*` fields, not the candidate lists.
-
+The live agent receives the caregiver's name for its greeting and schedule context, but no patient name or address. Patient identity and address are sent only in the post-call context so the post-call agent can reconcile the caregiver's answers. The post-call agent should interpret Chennai Thunglish and tolerate partial names, locality-only addresses, and clear agent readbacks confirmed by the caregiver.
 ## ChiefVoice configuration
 
 Copy `.env.docker.example` to `.env` and configure:

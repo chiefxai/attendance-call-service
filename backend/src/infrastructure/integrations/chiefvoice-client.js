@@ -208,11 +208,10 @@ function createChiefVoiceClient({
         identity: {
           type: "object",
           properties: {
-            caregiver_name_matches: { type: "boolean", description: "True for a clear, unambiguous partial name that matches the expected caregiver name; do not require the caller to say every name part." },
             patient_name_matches: { type: "boolean", description: "True for a clear, unambiguous partial patient name matching a part of the expected name (for example Ram for Ram Kumar), when the call context supports the same patient." },
             patient_address_matches: { type: "boolean", description: "Compare distinctive locality/place names, not exact full-string spelling. Correct obvious ASR or transliteration variants using the call audio/transcript and expected address. A stated locality such as Subiksha Nagar can match 1 Subiksha Nagar, Chennai, Tamil Nadu when consistent; do not invent unstated details or accept contradictions." },
           },
-          required: ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"],
+          required: ["patient_name_matches", "patient_address_matches"],
           additionalProperties: false,
         },
         reported_at: {

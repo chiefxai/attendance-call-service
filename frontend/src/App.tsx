@@ -6,7 +6,6 @@ import { AppBar, Avatar, Box, Divider, Drawer, IconButton, List, ListItemButton,
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
-import HeadsetMicRoundedIcon from "@mui/icons-material/HeadsetMicRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import ElderlyRoundedIcon from "@mui/icons-material/ElderlyRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
@@ -17,7 +16,6 @@ import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
 import { ApiAccessPage } from "./pages/ApiAccessPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { CallCenterPage } from "./pages/CallCenterPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { StaffRecordsPage } from "./pages/StaffRecordsPage";
 import { PatientRecordsPage } from "./pages/PatientRecordsPage";
@@ -39,7 +37,6 @@ const navigation: Array<{ label: string; path: string; icon: ReactNode; adminOnl
   { label: "Patients", path: "/patients", icon: <ElderlyRoundedIcon /> },
   { label: "Schedule & Attendance", path: "/attendance", icon: <FactCheckRoundedIcon /> },
   { label: "Mock schedules", path: "/mock-schedules", icon: <ScienceRoundedIcon />, adminOnly: true, mockOnly: true },
-  { label: "Attendance calls", path: "/call-center", icon: <HeadsetMicRoundedIcon /> },
 ];
 
 function App() {
@@ -129,7 +126,7 @@ function App() {
           <Route path="/mock-schedules" element={user.role === "admin" && mockSchedulesEnabled ? <MockSchedulesPage /> : <Navigate to="/settings" replace />} />
           <Route path="/scheduled-calls" element={user.role === "admin" ? <ScheduledCallsPage /> : <Navigate to="/" replace />} />
           <Route path="/schedules" element={<AttendanceSchedulesPage userRole={user.role} />} />
-          <Route path="/call-center" element={<CallCenterPage canEditPrompts={user.role === "admin"} />} />
+          <Route path="/call-center" element={<Navigate to="/attendance" replace />} />
           <Route path="/reports" element={<Navigate to="/" replace />} />
           <Route path="/staff" element={<StaffRecordsPage />} />
           <Route path="/patients" element={<PatientRecordsPage />} />

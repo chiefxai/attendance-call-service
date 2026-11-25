@@ -55,9 +55,8 @@ test("ChiefVoice outbound call uses live and post-call templates with structured
     ]);
     assert.equal(captured.payload.post_call.output_schema.properties.schema_version.enum[0], "1.0");
     assert.deepEqual(captured.payload.post_call.output_schema.properties.identity.required, [
-      "caregiver_name_matches", "patient_name_matches", "patient_address_matches",
+      "patient_name_matches", "patient_address_matches",
     ]);
-    assert.equal(captured.payload.post_call.output_schema.properties.identity.properties.caregiver_name_matches.type, "boolean");
   } finally {
     for (const name of names) {
       if (previous[name] === undefined) delete process.env[name];

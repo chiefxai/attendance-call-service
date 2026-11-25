@@ -32,7 +32,6 @@ patches assignments through the same API.
 - Operations overview: live attendance metrics, call pipeline, and recent assignments
 - Attendance management: organization-scoped session filters and CSV export
 - Duty schedules: saved assignments and scheduled check-in/check-out times
-- Attendance calls: active provider calls and durable retries
 - Exceptions: live not-answered and review statuses
 - Supervision queue: prioritized no-answer, verification, and check-out review
 - Approved attendance ledger: completed sessions and backend delivery state
