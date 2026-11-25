@@ -660,6 +660,9 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     const stageTimeField = attempt.stage === "check_in" ? "reportedArrivalTime" : "reportedDepartureTime";
     const stageTimeMentionedField = attempt.stage === "check_in" ? "reportedArrivalTimeMentioned" : "reportedDepartureTimeMentioned";
     const scheduledStageTime = attempt.stage === "check_in" ? session.scheduledStartAt : session.scheduledEndAt;
+    const stageKey = attempt.stage === "check_in" ? "checkIn" : "checkOut";
+    const stageContext = session.activeContext?.[stageKey] || {};
+    const isCallbackCall = Boolean(stageContext.lastCallbackAt || stageContext.reason === "employee_requested_callback");
     const reportedTimeError = noCallerSpeech ? null : validateReportedTime(outcome[stageTimeField], now);
     if (reportedTimeError === "reported_time_invalid") {
       // A malformed optional extraction should not invalidate an otherwise
@@ -674,10 +677,10 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     }
     if (!reportedTimeError || reportedTimeError === "reported_time_invalid") {
       if (outcome.employeeIntent === (attempt.stage === "check_in" ? "arrival_confirmed" : "departure_confirmed") && outcome[stageTimeMentionedField] === false) {
-        const scheduledDate = scheduledStageTime ? new Date(scheduledStageTime) : null;
+        const scheduledDate = !isCallbackCall && scheduledStageTime ? new Date(scheduledStageTime) : null;
         const safeScheduledDate = scheduledDate && Number.isFinite(scheduledDate.getTime()) && scheduledDate <= now ? scheduledDate : null;
         outcome[stageTimeField] = safeScheduledDate ? safeScheduledDate.toISOString() : callEndedAt;
-        outcome[`${stageTimeField}Source`] = safeScheduledDate ? "scheduled_time_fallback" : "call_time_fallback";
+        outcome[`${stageTimeField}Source`] = safeScheduledDate ? "scheduled_time_fallback" : isCallbackCall ? "callback_call_time_fallback" : "call_time_fallback";
         const fallbackTimeError = validateReportedTime(outcome[stageTimeField], now);
         if (fallbackTimeError) {
           outcome.exceptionCode = fallbackTimeError === "future_reported_time" ? "scheduled_time_in_future" : fallbackTimeError;
