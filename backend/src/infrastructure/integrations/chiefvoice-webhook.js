@@ -35,6 +35,7 @@ function validatePostCallResult(result) {
   if (result.schema_version === "1.0") {
     const requiredCommon = ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary"];
     const identityFields = ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"];
+    const requiredIdentityFields = ["patient_name_matches", "patient_address_matches"];
     const expectedKeys = result.stage === "check_in"
       ? [...requiredCommon, "identity", "transcript_summary"]
       : [...requiredCommon, "transcript_summary"];
@@ -65,8 +66,10 @@ function validatePostCallResult(result) {
     if (result.stage === "check_in") {
       if (!result.identity || typeof result.identity !== "object" || Array.isArray(result.identity)
         || Object.keys(result.identity).some((field) => !identityFields.includes(field))
-        || identityFields.some((field) => typeof result.identity[field] !== "boolean")) {
-        throw new Error("ChiefVoice check-in identity must contain the three boolean match fields");
+        || requiredIdentityFields.some((field) => typeof result.identity[field] !== "boolean")
+        || (Object.prototype.hasOwnProperty.call(result.identity, "caregiver_name_matches")
+          && typeof result.identity.caregiver_name_matches !== "boolean")) {
+        throw new Error("ChiefVoice check-in identity must contain boolean patient name and address match fields");
       }
     }
     return;
