@@ -18,6 +18,14 @@ function todayInIndia() {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+function attendanceTimeOnScheduleDate(dateValue: string | null | undefined, timeValue: string | null | undefined) {
+  const date = String(dateValue || "").slice(0, 10);
+  const time = String(timeValue || "").slice(0, 5);
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !/^\\d{2}:\\d{2}$/.test(time)) return null;
+  const instant = new Date(`${date}T${time}:00+05:30`);
+  return Number.isNaN(instant.getTime()) ? null : instant;
+}
+
 function serviceDateBounds(date: string) {
   const start = new Date(`${date}T00:00:00+05:30`);
   const end = new Date(`${date}T23:59:59.999+05:30`);
@@ -239,15 +247,19 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
   const [sortBy, setSortBy] = useState<ScheduleSort>("check_in_descending");
   const [selectedSchedule, setSelectedSchedule] = useState<AthulyaSchedule | null>(null);
   const [reviewFocus, setReviewFocus] = useState<{ sessionId: string; stage: "check_in" | "check_out" } | null>(null);
-  const [reviewActualAt, setReviewActualAt] = useState("");
+  const [reviewActualTime, setReviewActualAt] = useState("");
   const [reviewMessage, setReviewMessage] = useState<{ severity: "success" | "error"; text: string } | null>(null);
   const queryClient = useQueryClient();
   const reviewDecision = useMutation({
     mutationFn: (action: "approve" | "cancel") => {
       if (!reviewFocus) throw new Error("Select an attendance stage to review.");
+      const actualAt = action === "approve"
+        ? attendanceTimeOnScheduleDate(selectedSchedule?.date, reviewActualTime)
+        : null;
+      if (action === "approve" && !actualAt) throw new Error("Select a valid attendance time.");
       return submitAttendanceReviewDecision(reviewFocus.sessionId, {
         action, stage: reviewFocus.stage,
-        ...(action === "approve" ? { actualAt: new Date(reviewActualAt).toISOString() } : {}),
+        ...(actualAt ? { actualAt: actualAt.toISOString() } : {}),
       });
     },
     onSuccess: async (_result, action) => {
@@ -429,9 +441,12 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                   {transcript?.text && <Box sx={{ p: 1.25, bgcolor: "#f6f8f7", borderRadius: 1.5 }}><Typography variant="caption" fontWeight={750}>TRANSCRIPT</Typography><Typography variant="body2" sx={{ whiteSpace: "pre-wrap", mt: 0.5 }}>{transcript.text}</Typography></Box>}
                 </Stack>}
                 {reviewMessage && <Alert severity={reviewMessage.severity} sx={{ mb: 1.25 }}>{reviewMessage.text}</Alert>}
-                <TextField size="small" type="datetime-local" label="Actual attendance time" value={reviewActualAt} onChange={(event) => setReviewActualAt(event.target.value)} InputLabelProps={{ shrink: true }} helperText="Required to mark this stage completed." sx={{ mb: 1.25, width: { xs: "100%", sm: 330 } }} />
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 1.25 }}>
+                  <TextField size="small" type="date" label="Schedule date" value={selectedSchedule.date.slice(0, 10)} disabled InputLabelProps={{ shrink: true }} sx={{ width: { xs: "100%", sm: 190 } }} />
+                  <TextField size="small" type="time" label="Actual attendance time" value={reviewActualTime} onChange={(event) => setReviewActualTime(event.target.value)} inputProps={{ step: 60 }} InputLabelProps={{ shrink: true }} helperText="Date is fixed to the schedule. Enter the confirmed time." sx={{ width: { xs: "100%", sm: 230 } }} />
+                </Stack>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                  <Button variant="contained" color="success" disabled={!attempt || reviewDecision.isPending || !reviewActualAt || !Number.isFinite(new Date(reviewActualAt).getTime())} onClick={() => reviewDecision.mutate("approve")}>Mark stage completed</Button>
+                  <Button variant="contained" color="success" disabled={!attempt || reviewDecision.isPending || !attendanceTimeOnScheduleDate(selectedSchedule.date, reviewActualTime)} onClick={() => reviewDecision.mutate("approve")}>Mark stage completed</Button>
                   <Button variant="outlined" color="error" disabled={reviewDecision.isPending} onClick={() => reviewDecision.mutate("cancel")}>Cancel duty</Button>
                 </Stack>
               </Card>;
