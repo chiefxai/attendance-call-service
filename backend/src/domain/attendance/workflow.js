@@ -321,7 +321,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       await queue.enqueue("process_call_result", { callAttemptId }, { idempotencyKey: `call-result:${callAttemptId}` });
       return;
     }
-remove care manager early-complete poll    try {
+    try {
       const postCall = await chiefvoice.getPostCallResult(attempt.providerCallId);
       if (postCall.status === "completed" && postCall.result) {
         const eventId = `poll:${attempt.providerCallId}:analysis-completed`;
