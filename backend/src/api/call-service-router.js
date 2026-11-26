@@ -884,7 +884,7 @@ function createCallServiceRouter({ express, repository, queue, recordings }) {
       if (!["approve", "cancel"].includes(action)) return res.status(400).json({ error: "Choose approve or cancel." });
       if (!["check_in", "check_out"].includes(stage)) return res.status(400).json({ error: "Choose a check-in or check-out stage." });
       const stageStatus = stage === "check_in" ? session.checkInStatus : session.checkOutStatus;
-      if (action !== "cancel" && !["review", "unresolved", "not_answered", "missed"].includes(stageStatus)) {
+      if (action !== "cancel" && !["review", "unresolved", "not_answered", "missed", "escalated"].includes(stageStatus)) {
         return res.status(409).json({ error: "This stage is no longer waiting for a care manager decision." });
       }
 

@@ -244,8 +244,8 @@ function AttendanceStage({ records, stage, scheduleDate, scheduledTime, emptyLab
           <Typography variant="body2" color={stageStatus.status === "confirmed" ? "text.primary" : displayTime ? "text.secondary" : "text.disabled"} sx={{ minWidth: 68, whiteSpace: "nowrap" }}>
             {displayTime ? scheduleClock(displayTime) : emptyLabel}
           </Typography>
-          {["review", "unresolved", "not_answered", "missed"].includes(stageStatus.status)
-            ? <Chip size="small" color="error" label="Review" clickable onClick={() => onReviewClick?.(record.sessionId, stage === "checkIn" ? "check_in" : "check_out")} />
+          {["review", "unresolved", "not_answered", "missed", "escalated"].includes(stageStatus.status)
+            ? <Chip size="small" color={stageStatus.status === "escalated" ? "warning" : "error"} label={stageStatus.status === "escalated" ? "Escalation" : "Review"} clickable onClick={() => onReviewClick?.(record.sessionId, stage === "checkIn" ? "check_in" : "check_out")} />
             : <StatusChip compact status={displayStatus} />}
         </Stack>
         {hint && <Typography variant="caption" color={hint.startsWith("Retry") ? "error.main" : hint.startsWith("Care manager") ? "warning.dark" : hint.includes("follow-up") ? "error.main" : "text.secondary"} sx={{ fontSize: 11, lineHeight: 1.2 }}>{hint}</Typography>}
@@ -460,7 +460,7 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                   <TextField size="small" type="time" label="Actual attendance time" value={reviewActualTime} onChange={(event) => setReviewActualAt(event.target.value)} inputProps={{ step: 60 }} InputLabelProps={{ shrink: true }} helperText="Date is fixed to the schedule. Enter the confirmed time." sx={{ width: { xs: "100%", sm: 230 } }} />
                 </Stack>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                  <Button variant="contained" color="success" disabled={!attempt || reviewDecision.isPending || !attendanceTimeOnScheduleDate(selectedSchedule.date, reviewActualTime)} onClick={() => reviewDecision.mutate("approve")}>Mark stage completed</Button>
+                  <Button variant="contained" color="success" disabled={!attempt || reviewDecision.isPending || !attendanceTimeOnScheduleDate(selectedSchedule.date, reviewActualTime)} onClick={() => reviewDecision.mutate("approve")}>{record[reviewFocus.stage === "check_in" ? "checkIn" : "checkOut"].status === "escalated" ? "Mark escalation done" : "Mark stage completed"}</Button>
                   <Button variant="outlined" color="error" disabled={reviewDecision.isPending} onClick={() => reviewDecision.mutate("cancel")}>Cancel duty</Button>
                 </Stack>
               </Card>;

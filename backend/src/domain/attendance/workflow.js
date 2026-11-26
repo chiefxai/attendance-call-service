@@ -211,9 +211,9 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         callContext.message = `Athulya attendance alert. ${session.employee?.name || "Assigned caregiver"} did not answer the configured ${stageLabel} call attempts for the assigned schedule. Please contact operations.`;
         callContext.escalation_message = `Repeated ${stageLabel} calls were unanswered. Please contact operations.`;
         callContext.care_manager_attendance_confirmation_instructions = stage === "check_in"
-          ? "After explaining the alert, ask whether the care manager has directly confirmed that the caregiver reached the patient's place. If yes, confirm the caregiver's actual arrival time if known and read it back for confirmation. If the care manager has not confirmed yet but asks for a callback, ask when to call, repeat the callback time to confirm it, and do not mark attendance confirmed. On a scheduled callback, ask whether the caregiver reached the patient's place; if yes, confirm the actual arrival time. If no, record not confirmed. Do not disclose patient name or address."
-          : "After explaining the alert, ask whether the care manager has directly confirmed that the caregiver completed duty and left the patient's place. If yes, confirm the caregiver's actual departure time if known and read it back for confirmation. If the care manager has not confirmed yet but asks for a callback, ask when to call, repeat the callback time to confirm it, and do not mark attendance confirmed. On a scheduled callback, ask whether the caregiver completed duty and left; if yes, confirm the actual departure time. If no, record not confirmed. Do not disclose patient name or address.";
-        callContext.care_manager_callback_instructions = "When the care manager requests a callback, capture the requested time as an absolute ISO 8601 callback_at using current_local_time and time_zone. A callback is a scheduled follow-up, not a failed-call retry. On the callback, ask for the attendance update directly. If confirmed, return attendance_confirmed=true and the actual reported_at when known; if not confirmed or still unknown, return attendance_confirmed=false and accurately summarize the manager's answer.";
+          ? "Speak natural Chennai Thunglish from the first word. On the first call, say the caregiver's name, explain they missed check-in calls, ask whether they reached the patient's place, and ask the manager to check. If the manager agrees to check or follow up, ask when Athulya should call back, repeat the requested time, and confirm it. If the manager says the caregiver already arrived, ask the actual arrival time, repeat it, and confirm. On ordinary retries, the alert is already known: briefly mention caregiver name and check-in issue, then ask current status without repeating the full explanation. On a scheduled callback (care_manager_callback=true), ask only the current status; do not ask them to check again. If still pending or unclear, record unconfirmed so the platform can schedule the next configured retry. Never disclose patient name or address."
+          : "Speak natural Chennai Thunglish from the first word. On the first call, say the caregiver's name, explain they missed check-out calls, ask whether they completed duty and left the patient's place, and ask the manager to check. If the manager agrees to check or follow up, ask when Athulya should call back, repeat the requested time, and confirm it. If the manager says the caregiver already checked out, ask the actual departure time, repeat it, and confirm. On ordinary retries, the alert is already known: briefly mention caregiver name and check-out issue, then ask current status without repeating the full explanation. On a scheduled callback (care_manager_callback=true), ask only the current status; do not ask them to check again. If still pending or unclear, record unconfirmed so the platform can schedule the next configured retry. Never disclose patient name or address.";
+        callContext.care_manager_callback_instructions = "When the care manager agrees to check/follow up and requests a callback time, capture the requested time as an absolute ISO 8601 callback_at using current_local_time and time_zone. A requested callback is a scheduled follow-up. On the scheduled callback, ask for the current attendance update only. If the manager confirms completion, return attendance_confirmed=true and the actual reported_at time; if still pending or unclear, return attendance_confirmed=false with an accurate summary and no new callback time.";
         callContext.care_manager_callback = stageContext.reason === "care_manager_requested_callback";
       }
       const postCallContext = {
@@ -516,6 +516,16 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         }
         if (callbackAt && !isCallbackCall) {
           const nextNumber = await repository.nextAttemptNumber(attempt.sessionId, attempt.stage, "care_manager");
+          if (nextNumber > maxAttempts) {
+            await repository.setStageStatus(attempt.sessionId, attempt.stage, "unresolved", {
+              reason: "care_manager_retry_limit_reached", careManagerAttendanceConfirmed: false,
+              careManagerAttemptNumber: attempt.attemptNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
+            });
+            await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
+              idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-unresolved:${attempt.stage}`,
+            });
+            return;
+          }
           await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
             reason: "care_manager_requested_callback", nextCallAt: callbackAt.toISOString(),
             careManagerAttendanceConfirmed: false, careManagerCallbackAt: callbackAt.toISOString(),
@@ -531,35 +541,39 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
           });
           return;
         }
-        if (isCallbackCall) {
-          await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
-            reason: attempt.stage === "check_in" ? "care_manager_reported_not_arrived" : "care_manager_reported_still_on_duty",
+        if (attempt.attemptNumber >= maxAttempts) {
+          await repository.setStageStatus(attempt.sessionId, attempt.stage, "unresolved", {
+            reason: isCallbackCall ? "care_manager_retry_limit_reached_after_callback" : "care_manager_retry_limit_reached",
             careManagerAttendanceConfirmed: false, careManagerReportedAt: attempt.outcome?.careManagerReportedAt || null,
-            careManagerSummary: attempt.outcome?.summary || null, careManagerAttemptNumber: attempt.attemptNumber,
-            careManagerMaxAttempts: maxAttempts, callAttemptId,
-          });
-          return;
-        }
-        if (attempt.outcome?.outcome === "not_arrived" || attempt.outcome?.outcome === "still_on_duty"
-          || attempt.outcome?.outcome === "attendance_not_confirmed") {
-          await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
-            reason: attempt.outcome.outcome === "not_arrived" ? "care_manager_reported_not_arrived"
-              : attempt.outcome.outcome === "still_on_duty" ? "care_manager_reported_still_on_duty"
-                : "care_manager_attendance_unconfirmed",
-            careManagerAttendanceConfirmed: false,
-            careManagerReportedOutcome: attempt.outcome.outcome,
-            careManagerReportedAt: attempt.outcome?.careManagerReportedAt || null,
-            careManagerSummary: attempt.outcome?.summary || null,
+            careManagerReportedOutcome: attempt.outcome?.outcome || null, careManagerSummary: attempt.outcome?.summary || null,
             careManagerAttemptNumber: attempt.attemptNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
           });
+          await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
+            idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-unresolved:${attempt.stage}`,
+          });
           return;
         }
+        const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
+        const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
+        const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
+        const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, {
+          initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000,
+        }));
+        const nextNumber = await repository.nextAttemptNumber(attempt.sessionId, attempt.stage, "care_manager");
         await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
-          reason: "care_manager_reached", careManagerAnsweredAt: attempt.answeredAt || attempt.endedAt || new Date().toISOString(),
-          careManagerAttemptNumber: attempt.attemptNumber, callAttemptId,
+          reason: isCallbackCall ? "care_manager_retry_after_callback" : "care_manager_retry_after_unconfirmed_response",
+          nextCallAt: runAt.toISOString(), careManagerAttendanceConfirmed: false,
+          careManagerReportedAt: attempt.outcome?.careManagerReportedAt || null,
+          careManagerReportedOutcome: attempt.outcome?.outcome || null,
+          careManagerSummary: attempt.outcome?.summary || null, careManagerAttemptNumber: attempt.attemptNumber,
+          careManagerNextAttemptNumber: nextNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
         });
-        await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
-          idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-reached:${attempt.stage}`,
+        const session = await repository.getAttendanceSession(attempt.sessionId);
+        await queue.enqueue("place_call", {
+          sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
+          attemptNumber: nextNumber, callTargetRole: "care_manager",
+        }, {
+          idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:care_manager:${nextNumber}`, runAt,
         });
         return;
       }
