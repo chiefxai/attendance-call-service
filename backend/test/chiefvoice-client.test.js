@@ -112,7 +112,7 @@ test("care-manager escalation requests include a post-call output schema", async
 
     assert.equal(payload.post_call.template_id, "manager-post-template");
     assert.deepEqual(payload.post_call.output_schema.required, [
-      "schema_version", "stage", "outcome", "escalation_message_delivered", "attendance_confirmed", "reported_at", "summary", "transcript_summary",
+      "schema_version", "stage", "outcome", "escalation_message_delivered", "attendance_confirmed", "reported_at", "callback_at", "summary", "transcript_summary",
     ]);
   } finally {
     for (const name of names) {
