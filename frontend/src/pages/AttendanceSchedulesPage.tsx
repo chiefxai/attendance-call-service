@@ -21,9 +21,18 @@ function todayInIndia() {
 function attendanceTimeOnScheduleDate(dateValue: string | null | undefined, timeValue: string | null | undefined) {
   const date = String(dateValue || "").slice(0, 10);
   const time = String(timeValue || "").slice(0, 5);
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !/^\\d{2}:\\d{2}$/.test(time)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
   const instant = new Date(`${date}T${time}:00+05:30`);
   return Number.isNaN(instant.getTime()) ? null : instant;
+}
+
+function currentTimeInIndia() {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
 }
 
 function serviceDateBounds(date: string) {
@@ -394,8 +403,8 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
               <TableCell>{schedule.patient.name || "—"}</TableCell>
               <TableCell>{schedule.caregivers.map((caregiver) => caregiver.name || caregiver.phone).join(", ") || "—"}</TableCell>
               <TableCell>{schedule.service || "—"}</TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} retryLimit={callingSettings.data?.retry.maxConsecutiveNoAnswer} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
-              <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} retryLimit={callingSettings.data?.retry.maxConsecutiveNoAnswer} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(""); setReviewMessage(null); }} /></TableCell>
+              <TableCell><AttendanceStage records={localTasks} stage="checkIn" scheduleDate={schedule.date} scheduledTime={schedule.startTime} retryLimit={callingSettings.data?.retry.maxConsecutiveNoAnswer} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(currentTimeInIndia()); setReviewMessage(null); }} /></TableCell>
+              <TableCell><AttendanceStage records={localTasks} stage="checkOut" scheduleDate={schedule.date} scheduledTime={schedule.endTime} retryLimit={callingSettings.data?.retry.maxConsecutiveNoAnswer} canAssessCall={attendance.isSuccess} emptyLabel={attendance.isLoading ? "Loading…" : attendance.isError ? "Unavailable" : "—"} onReviewClick={(sessionId, stage) => { setSelectedSchedule(schedule); setReviewFocus({ sessionId, stage }); setReviewActualAt(currentTimeInIndia()); setReviewMessage(null); }} /></TableCell>
               <TableCell><StatusChip compact status={status} /></TableCell>
               <TableCell><Button size="small" onClick={() => setSelectedSchedule(schedule)}>Details</Button></TableCell>
             </TableRow>)}
