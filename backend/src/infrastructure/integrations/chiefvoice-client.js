@@ -255,12 +255,14 @@ function createChiefVoiceClient({
       properties: {
         schema_version: { type: "string", enum: ["1.0"] },
         stage: { type: "string", enum: ["check_in", "check_out"] },
-        outcome: { type: "string", enum: ["notified", "unable_to_contact", "unclear"] },
+        outcome: { type: "string", enum: ["notified", "unable_to_contact", "attendance_confirmed", "unclear"], description: "Use attendance_confirmed only when the care manager explicitly confirms that the caregiver reached the patient for check-in or completed checkout, as appropriate for stage." },
         escalation_message_delivered: { type: "boolean" },
+        attendance_confirmed: { type: "boolean", description: "True only when the care manager directly and clearly confirms the caregiver completed this call's attendance stage. For check_in this means the caregiver reached the patient; for check_out this means the caregiver left after completing duty. Do not infer from an agreement to follow up." },
+        reported_at: { type: ["string", "null"], description: "The actual arrival/departure time the care manager explicitly confirms, as ISO 8601 with the call's timezone. Return null if they do not know it; never copy the scheduled time." },
         summary: { type: "string" },
         transcript_summary: { type: "string" },
       },
-      required: ["schema_version", "stage", "outcome", "escalation_message_delivered", "summary", "transcript_summary"],
+      required: ["schema_version", "stage", "outcome", "escalation_message_delivered", "attendance_confirmed", "reported_at", "summary", "transcript_summary"],
       additionalProperties: false,
     };
     // Every configured post-call template must receive an output schema unless
@@ -269,7 +271,7 @@ function createChiefVoiceClient({
       ? careManagerOutputSchema
       : stage === "check_out" ? checkOutOutputSchema : checkInOutputSchema;
     const mandatoryFields = scenario === "CARE_MANAGER_ESCALATION"
-      ? ["escalation_message_delivered"]
+      ? ["escalation_message_delivered", "attendance_confirmed"]
       : stage === "check_out"
         ? ["checkout_status", "caregiver_confirmation"]
         : ["caregiver_identity", "patient_identity", "patient_address", "check_in_status", "caregiver_confirmation"];

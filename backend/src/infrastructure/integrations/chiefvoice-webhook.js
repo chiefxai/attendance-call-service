@@ -33,6 +33,41 @@ function validatePostCallResult(result) {
     throw new Error("ChiefVoice webhook is missing the structured result object");
   }
   if (result.schema_version === "1.0") {
+    // Care-manager escalation has a separate result contract from caregiver
+    // check-in/check-out. Accept legacy results while validating new fields.
+    if (Object.prototype.hasOwnProperty.call(result, "escalation_message_delivered")) {
+      const allowedKeys = new Set([
+        "schema_version", "stage", "outcome", "escalation_message_delivered",
+        "attendance_confirmed", "reported_at", "summary", "transcript_summary",
+      ]);
+      if (!["check_in", "check_out"].includes(result.stage)
+        || Object.keys(result).some((field) => !allowedKeys.has(field))
+        || !["schema_version", "stage", "outcome", "escalation_message_delivered", "summary", "transcript_summary"]
+          .every((field) => Object.prototype.hasOwnProperty.call(result, field))) {
+        throw new Error("ChiefVoice care-manager result does not match schema version 1.0");
+      }
+      if (!["notified", "unable_to_contact", "attendance_confirmed", "unclear"].includes(result.outcome)) {
+        throw new Error("ChiefVoice care-manager result outcome is unsupported");
+      }
+      if (typeof result.escalation_message_delivered !== "boolean"
+        || typeof result.summary !== "string"
+        || typeof result.transcript_summary !== "string") {
+        throw new Error("ChiefVoice care-manager result has invalid field types");
+      }
+      if (Object.prototype.hasOwnProperty.call(result, "attendance_confirmed")
+        && typeof result.attendance_confirmed !== "boolean") {
+        throw new Error("ChiefVoice attendance_confirmed must be a boolean");
+      }
+      if (Object.prototype.hasOwnProperty.call(result, "reported_at")) {
+        if (result.reported_at !== null && typeof result.reported_at !== "string") {
+          throw new Error("ChiefVoice care-manager reported_at must be a string or null");
+        }
+        if (result.reported_at !== null && !Number.isFinite(Date.parse(result.reported_at))) {
+          throw new Error("ChiefVoice care-manager reported_at must be an ISO timestamp or null");
+        }
+      }
+      return;
+    }
     const requiredCommon = ["schema_version", "stage", "outcome", "reported_at", "callback_at", "exception_code", "summary"];
     const identityFields = ["caregiver_name_matches", "patient_name_matches", "patient_address_matches"];
     const requiredIdentityFields = ["patient_name_matches", "patient_address_matches"];

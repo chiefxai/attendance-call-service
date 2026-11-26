@@ -208,8 +208,11 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         callContext.care_manager_name = person.name || "Care Manager";
         callContext.organization_id = session.organizationId;
         callContext.expected_staff_name = session.employee?.name || session.employee?.fullName || "";
-        callContext.message = `Athulya attendance alert. ${session.employee?.name || "Assigned caregiver"} did not answer the configured ${stageLabel} call attempts for ${session.patient?.name || "the assigned patient"}. Please contact operations.`;
+        callContext.message = `Athulya attendance alert. ${session.employee?.name || "Assigned caregiver"} did not answer the configured ${stageLabel} call attempts for the assigned schedule. Please contact operations.`;
         callContext.escalation_message = `Repeated ${stageLabel} calls were unanswered. Please contact operations.`;
+        callContext.care_manager_attendance_confirmation_instructions = stage === "check_in"
+          ? "After explaining the alert, ask whether the care manager has directly confirmed that the caregiver reached the patient's place. If yes, confirm the caregiver's actual arrival time if known and read it back for confirmation. If they do not know or only agree to follow up, record attendance as unconfirmed. Do not disclose patient name or address."
+          : "After explaining the alert, ask whether the care manager has directly confirmed that the caregiver completed duty and left the patient's place. If yes, confirm the caregiver's actual departure time if known and read it back for confirmation. If they do not know or only agree to follow up, record attendance as unconfirmed. Do not disclose patient name or address.";
       }
       const postCallContext = {
         // Keep the post-call payload focused on extraction facts. Copying the
@@ -237,6 +240,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
           care_manager_name: person.name || "Care Manager",
           message: callContext.message,
           escalation_message: callContext.escalation_message,
+          care_manager_attendance_confirmation_instructions: callContext.care_manager_attendance_confirmation_instructions,
         } : {}),
       };
       const templateScenario = chiefVoiceTemplateScenario({ stage, attemptNumber, consecutiveNoAnswer, technicalFailureRetry });
@@ -317,18 +321,7 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
       await queue.enqueue("process_call_result", { callAttemptId }, { idempotencyKey: `call-result:${callAttemptId}` });
       return;
     }
-    if (attempt.callTargetRole === "care_manager" && callDisposition === "answered"
-      && (Boolean(callStatus.ended_at || callStatus.endedAt) || String(callStatus.status || "").toLowerCase() === "completed")) {
-      await repository.updateCallByProviderId({
-        provider: "chiefvoice", providerCallId: attempt.providerCallId, status: callStatus.status,
-        durationSeconds: callStatus.duration_seconds || callStatus.durationSeconds || null,
-        endedAt: callStatus.ended_at || new Date().toISOString(),
-        rawEvent: { AnswerTime: callStatus.answered_at || callStatus.answer_time || callStatus.AnswerTime || null, EndTime: callStatus.ended_at || null },
-      });
-      await queue.enqueue("process_call_result", { callAttemptId }, { idempotencyKey: `call-result:${callAttemptId}` });
-      return;
-    }
-    try {
+remove care manager early-complete poll    try {
       const postCall = await chiefvoice.getPostCallResult(attempt.providerCallId);
       if (postCall.status === "completed" && postCall.result) {
         const eventId = `poll:${attempt.providerCallId}:analysis-completed`;
@@ -460,6 +453,30 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
     const callDisposition = classifyCallStatus(attempt.status);
     if (attempt.callTargetRole === "care_manager") {
       if (callDisposition === "answered") {
+        if (attempt.outcome?.careManagerAttendanceConfirmed === true) {
+          const parsedEndedAt = new Date(attempt.endedAt || Date.now());
+          const endedAt = Number.isFinite(parsedEndedAt.getTime()) ? parsedEndedAt : new Date();
+          const callTimeFallback = endedAt.toISOString();
+          const reportedAt = attempt.outcome.careManagerReportedAt;
+          const attendanceAt = reportedAt && !validateReportedTime(reportedAt, endedAt)
+            ? new Date(reportedAt).toISOString()
+            : callTimeFallback;
+          await repository.setStageStatus(attempt.sessionId, attempt.stage, "confirmed", {
+            reason: "care_manager_confirmed_attendance",
+            reportedAt: attendanceAt,
+            nextCallAt: null,
+            careManagerAnsweredAt: attempt.answeredAt || attempt.endedAt || callTimeFallback,
+            careManagerAttemptNumber: attempt.attemptNumber,
+            callAttemptId,
+          });
+          await queue.enqueue("deliver_attendance", {
+            sessionId: attempt.sessionId, stage: attempt.stage, callAttemptId,
+          }, { idempotencyKey: `deliver:${attempt.sessionId}:${attempt.stage}:${callAttemptId}` });
+          await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
+            idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-confirmed:${attempt.stage}`,
+          });
+          return;
+        }
         await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
           reason: "care_manager_reached", careManagerAnsweredAt: attempt.answeredAt || attempt.endedAt || new Date().toISOString(),
           careManagerAttemptNumber: attempt.attemptNumber, callAttemptId,

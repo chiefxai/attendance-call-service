@@ -22,8 +22,32 @@ async function processChiefVoiceResult({ event, repository, queue }) {
 
     if (attempt.sessionId) {
       if (attempt.callTargetRole === "care_manager") {
+        const session = await repository.getAttendanceSession(attempt.sessionId);
+        if (event.transcript) {
+          await repository.saveTranscript({
+            organizationId: attempt.organizationId,
+            sessionId: attempt.sessionId,
+            callAttemptId: attempt.id,
+            language: event.transcriptLanguage || session?.language || "",
+            text: event.transcript,
+          });
+        }
+        const result = event.postCallResult || {};
+        if (result.stage && result.stage !== attempt.stage) {
+          throw new Error("ChiefVoice care-manager result stage does not match the call stage");
+        }
+        await repository.saveCallOutcome(attempt.id, {
+          ...result,
+          careManagerAttendanceConfirmed: result.attendance_confirmed === true
+            && result.outcome === "attendance_confirmed",
+          careManagerReportedAt: result.reported_at || null,
+        });
         await queue.enqueue("process_call_result", { callAttemptId: attempt.id }, {
           idempotencyKey: `call-result:${attempt.id}`, client,
+        });
+        await queue.enqueue("sync_chiefvoice_artifacts", { callAttemptId: attempt.id, pollCount: 0 }, {
+          idempotencyKey: `chiefvoice-artifacts:${attempt.id}:0`, client,
+          runAt: new Date(Date.now() + 10_000),
         });
         return { duplicate: false, careManagerAttempt: true };
       }
