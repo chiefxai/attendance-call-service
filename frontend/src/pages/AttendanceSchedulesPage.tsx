@@ -442,8 +442,8 @@ export function AttendanceSchedulesPage({ userRole = "admin" }: { userRole?: "ad
                 </Stack>}
                 {reviewMessage && <Alert severity={reviewMessage.severity} sx={{ mb: 1.25 }}>{reviewMessage.text}</Alert>}
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 1.25 }}>
-                  <TextField size="small" type="date" label="Schedule date" value={selectedSchedule.date.slice(0, 10)} disabled InputLabelProps={{ shrink: true }} sx={{ width: { xs: "100%", sm: 190 } }} />
-                  <TextField size="small" type="time" label="Actual attendance time" value={reviewActualTime} onChange={(event) => setReviewActualTime(event.target.value)} inputProps={{ step: 60 }} InputLabelProps={{ shrink: true }} helperText="Date is fixed to the schedule. Enter the confirmed time." sx={{ width: { xs: "100%", sm: 230 } }} />
+                  <TextField size="small" type="date" label="Schedule date" value={selectedSchedule.date?.slice(0, 10) || ""} disabled InputLabelProps={{ shrink: true }} sx={{ width: { xs: "100%", sm: 190 } }} />
+                  <TextField size="small" type="time" label="Actual attendance time" value={reviewActualTime} onChange={(event) => setReviewActualAt(event.target.value)} inputProps={{ step: 60 }} InputLabelProps={{ shrink: true }} helperText="Date is fixed to the schedule. Enter the confirmed time." sx={{ width: { xs: "100%", sm: 230 } }} />
                 </Stack>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                   <Button variant="contained" color="success" disabled={!attempt || reviewDecision.isPending || !attendanceTimeOnScheduleDate(selectedSchedule.date, reviewActualTime)} onClick={() => reviewDecision.mutate("approve")}>Mark stage completed</Button>
