@@ -38,7 +38,7 @@ function validatePostCallResult(result) {
     if (Object.prototype.hasOwnProperty.call(result, "escalation_message_delivered")) {
       const allowedKeys = new Set([
         "schema_version", "stage", "outcome", "escalation_message_delivered",
-        "attendance_confirmed", "reported_at", "summary", "transcript_summary",
+        "attendance_confirmed", "reported_at", "callback_at", "summary", "transcript_summary",
       ]);
       if (!["check_in", "check_out"].includes(result.stage)
         || Object.keys(result).some((field) => !allowedKeys.has(field))
@@ -46,7 +46,7 @@ function validatePostCallResult(result) {
           .every((field) => Object.prototype.hasOwnProperty.call(result, field))) {
         throw new Error("ChiefVoice care-manager result does not match schema version 1.0");
       }
-      if (!["notified", "unable_to_contact", "attendance_confirmed", "unclear"].includes(result.outcome)) {
+      if (!["notified", "unable_to_contact", "attendance_confirmed", "attendance_not_confirmed", "not_arrived", "still_on_duty", "unclear"].includes(result.outcome)) {
         throw new Error("ChiefVoice care-manager result outcome is unsupported");
       }
       if (typeof result.escalation_message_delivered !== "boolean"
@@ -65,6 +65,11 @@ function validatePostCallResult(result) {
         if (result.reported_at !== null && !Number.isFinite(Date.parse(result.reported_at))) {
           throw new Error("ChiefVoice care-manager reported_at must be an ISO timestamp or null");
         }
+      }
+      if (Object.prototype.hasOwnProperty.call(result, "callback_at")
+        && result.callback_at !== null
+        && (typeof result.callback_at !== "string" || !Number.isFinite(Date.parse(result.callback_at)))) {
+        throw new Error("ChiefVoice care-manager callback_at must be an ISO timestamp or null");
       }
       return;
     }

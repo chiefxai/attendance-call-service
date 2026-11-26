@@ -119,7 +119,7 @@ async function main() {
         const retryLimit = due.callTargetRole === "care_manager"
           ? due.careManagerMaxAttempts || config.callRetry.maxConsecutiveNoAnswer
           : config.callRetry.maxConsecutiveNoAnswer;
-        if (due.callTargetRole === "care_manager" && due.maxCallAttempt >= retryLimit) {
+        if (due.callTargetRole === "care_manager" && due.reason !== "care_manager_requested_callback" && due.maxCallAttempt >= retryLimit) {
           await repository.setStageStatus(due.sessionId, due.stage, "unresolved", {
             reason: "care_manager_retry_limit_reached", careManagerAttemptNumber: due.maxCallAttempt,
             careManagerMaxAttempts: retryLimit,

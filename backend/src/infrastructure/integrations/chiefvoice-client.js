@@ -255,14 +255,15 @@ function createChiefVoiceClient({
       properties: {
         schema_version: { type: "string", enum: ["1.0"] },
         stage: { type: "string", enum: ["check_in", "check_out"] },
-        outcome: { type: "string", enum: ["notified", "unable_to_contact", "attendance_confirmed", "unclear"], description: "Use attendance_confirmed only when the care manager explicitly confirms that the caregiver reached the patient for check-in or completed checkout, as appropriate for stage." },
+        outcome: { type: "string", enum: ["notified", "unable_to_contact", "attendance_confirmed", "attendance_not_confirmed", "not_arrived", "still_on_duty", "unclear"], description: "Use attendance_confirmed only when the care manager explicitly confirms the stage. Use not_arrived for check-in when the caregiver has not reached the patient, and still_on_duty for checkout when they have not left." },
         escalation_message_delivered: { type: "boolean" },
         attendance_confirmed: { type: "boolean", description: "True only when the care manager directly and clearly confirms the caregiver completed this call's attendance stage. For check_in this means the caregiver reached the patient; for check_out this means the caregiver left after completing duty. Do not infer from an agreement to follow up." },
         reported_at: { type: ["string", "null"], description: "The actual arrival/departure time the care manager explicitly confirms, as ISO 8601 with the call's timezone. Return null if they do not know it; never copy the scheduled time." },
+        callback_at: { type: ["string", "null"], description: "If the care manager asks to be called later, return the absolute ISO 8601 callback time with timezone offset, calculated from current_local_time and time_zone. Use null if no callback was requested or the time is unclear." },
         summary: { type: "string" },
         transcript_summary: { type: "string" },
       },
-      required: ["schema_version", "stage", "outcome", "escalation_message_delivered", "attendance_confirmed", "reported_at", "summary", "transcript_summary"],
+      required: ["schema_version", "stage", "outcome", "escalation_message_delivered", "attendance_confirmed", "reported_at", "callback_at", "summary", "transcript_summary"],
       additionalProperties: false,
     };
     // Every configured post-call template must receive an output schema unless

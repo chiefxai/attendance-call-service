@@ -166,8 +166,13 @@ function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOu
     return current.value.nextCallAt ? `Callback · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Callback requested";
   }
   if (current.value.status === "escalated") {
-    const attempt = current.record[stage === "checkIn" ? "checkInCareManagerAttemptCount" : "checkOutCareManagerAttemptCount"] + 1;
-    const count = retryLimit ? ` · attempt ${attempt} of ${retryLimit}` : ` · attempt ${attempt}`;
+    const completedOrActiveAttempts = current.record[stage === "checkIn" ? "checkInCareManagerAttemptCount" : "checkOutCareManagerAttemptCount"];
+    const storedAttempt = current.value.careManagerAttemptNumber || 0;
+    const attempt = current.value.nextCallAt
+      ? Math.max(completedOrActiveAttempts, storedAttempt) + 1
+      : Math.max(completedOrActiveAttempts, storedAttempt, 1);
+    const limit = current.value.careManagerMaxAttempts || retryLimit;
+    const count = limit ? ` · ${attempt} of ${limit}` : ` · ${attempt}`;
     return `Care manager${count}${current.value.nextCallAt ? ` · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : " follow-up"}`;
   }
   if (current.value.status === "unresolved") return "Manual follow-up needed";

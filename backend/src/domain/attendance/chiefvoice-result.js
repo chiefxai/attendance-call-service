@@ -41,6 +41,7 @@ async function processChiefVoiceResult({ event, repository, queue }) {
           careManagerAttendanceConfirmed: result.attendance_confirmed === true
             && result.outcome === "attendance_confirmed",
           careManagerReportedAt: result.reported_at || null,
+          careManagerCallbackAt: result.callback_at ?? result.requestedCallbackAt ?? result.requested_callback_at ?? null,
         });
         await queue.enqueue("process_call_result", { callAttemptId: attempt.id }, {
           idempotencyKey: `call-result:${attempt.id}`, client,

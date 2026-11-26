@@ -379,8 +379,8 @@ export interface AttendanceRecord {
   patient: { id: string | null; name: string };
   scheduledStartAt: string;
   scheduledEndAt: string;
-  checkIn: { status: string; reportedAt: string | null; nextCallAt: string | null };
-  checkOut: { status: string; reportedAt: string | null; nextCallAt: string | null };
+  checkIn: { status: string; reportedAt: string | null; nextCallAt: string | null; careManagerAttemptNumber?: number; careManagerMaxAttempts?: number };
+  checkOut: { status: string; reportedAt: string | null; nextCallAt: string | null; careManagerAttemptNumber?: number; careManagerMaxAttempts?: number };
   stageReasons: { checkIn: string | null; checkOut: string | null };
   sessionStatus: string;
   backendDeliveryStatus: string;
