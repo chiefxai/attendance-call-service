@@ -71,16 +71,20 @@ test("caregiver retry exhaustion escalates into care-manager attempt one", async
   assert.equal(escalationJob.payload.taskId, "task-in");
 });
 
-test("answered care-manager call keeps the case escalated", async () => {
-  const h = harness({ caregiverStatus: "escalated" });
-  h.attempts.set("manager-success", {
-    id: "manager-success", sessionId: h.session.id, organizationId: h.session.organizationId,
+test("answered but unconfirmed care-manager call schedules a retry with a brief status check", async () => {
+  const h = harness({ caregiverStatus: "escalated", managerLimit: 3 });
+  h.attempts.set("manager-answered-unconfirmed", {
+    id: "manager-answered-unconfirmed", sessionId: h.session.id, organizationId: h.session.organizationId,
     stage: "check_in", callTargetRole: "care_manager", attemptNumber: 1,
     status: "completed", answeredAt: new Date().toISOString(), endedAt: new Date().toISOString(),
+    outcome: { careManagerAttendanceConfirmed: false, outcome: "notified", summary: "Manager will check the attendance issue." },
   });
-  await h.handlers.process_call_result({ callAttemptId: "manager-success" });
+  await h.handlers.process_call_result({ callAttemptId: "manager-answered-unconfirmed" });
+  const retry = h.jobs.find((job) => job.type === "place_call" && job.payload.callTargetRole === "care_manager");
   assert.equal(h.session.checkInStatus, "escalated");
-  assert.equal(h.changes.at(-1).patch.reason, "care_manager_reached");
+  assert.equal(retry.payload.attemptNumber, 2);
+  assert.equal(retry.payload.callTargetRole, "care_manager");
+  assert.equal(h.changes.at(-1).patch.reason, "care_manager_retry_after_unconfirmed_response");
 });
 
 test("care-manager retry uses its own attempt sequence and remains escalated", async () => {
