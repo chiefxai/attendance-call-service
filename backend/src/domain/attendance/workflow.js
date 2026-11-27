@@ -558,7 +558,6 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
           careManagerSummary: attempt.outcome?.summary || null, careManagerAttemptNumber: attempt.attemptNumber,
           careManagerNextAttemptNumber: nextNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
         });
-        const session = await repository.getAttendanceSession(attempt.sessionId);
         await queue.enqueue("place_call", {
           sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
           attemptNumber: nextNumber, callTargetRole: "care_manager",
