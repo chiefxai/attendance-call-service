@@ -166,14 +166,14 @@ function localStageHint(records: AttendanceRecord[], stage: "checkIn" | "checkOu
     return current.value.nextCallAt ? `Callback · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : "Callback requested";
   }
   if (current.value.status === "escalated") {
-    const completedOrActiveAttempts = current.record[stage === "checkIn" ? "checkInCareManagerAttemptCount" : "checkOutCareManagerAttemptCount"];
+    if (current.reason === "care_manager_requested_callback") {
+      return `Care manager follow-up${current.value.nextCallAt ? ` · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : ""}`;
+    }
     const storedAttempt = current.value.careManagerAttemptNumber || 0;
-    const attempt = current.value.nextCallAt
-      ? Math.max(completedOrActiveAttempts, storedAttempt) + 1
-      : Math.max(completedOrActiveAttempts, storedAttempt, 1);
+    const attempt = current.value.nextCallAt ? storedAttempt + 1 : Math.max(storedAttempt, 1);
     const limit = current.value.careManagerMaxAttempts || retryLimit;
     const count = limit ? ` · ${attempt} of ${limit}` : ` · ${attempt}`;
-    return `Care manager${count}${current.value.nextCallAt ? ` · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : " follow-up"}`;
+    return `Care manager retry${count}${current.value.nextCallAt ? ` · ${compactScheduleTime(current.value.nextCallAt, scheduleDate)}` : ""}`;
   }
   if (current.value.status === "unresolved") return "Manual follow-up needed";
   return null;

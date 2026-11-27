@@ -114,14 +114,15 @@ async function main() {
       const dueCalls = await repository.listDueFollowUpCalls(100);
       for (const due of dueCalls) {
         if (due.hasRunningJob) continue;
+        const lastAttemptWasMissed = ["noanswer", "cancelled", "canceled"].includes(due.lastAttemptStatus);
         const noAnswerCount = due.reason === "employee_requested_callback" ? 0
-          : due.lastAttemptStatus === "noanswer" ? due.lastNoAnswerBefore + 1 : due.lastNoAnswerBefore;
+          : lastAttemptWasMissed ? due.lastNoAnswerBefore + 1 : due.lastNoAnswerBefore;
         const retryLimit = due.callTargetRole === "care_manager"
           ? due.careManagerMaxAttempts || config.callRetry.maxConsecutiveNoAnswer
           : config.callRetry.maxConsecutiveNoAnswer;
-        if (due.callTargetRole === "care_manager" && due.reason !== "care_manager_requested_callback" && due.maxCallAttempt >= retryLimit) {
+        if (due.callTargetRole === "care_manager" && noAnswerCount >= retryLimit) {
           await repository.setStageStatus(due.sessionId, due.stage, "unresolved", {
-            reason: "care_manager_retry_limit_reached", careManagerAttemptNumber: due.maxCallAttempt,
+            reason: "care_manager_retry_limit_reached", careManagerAttemptNumber: noAnswerCount,
             careManagerMaxAttempts: retryLimit,
           });
           continue;
@@ -140,7 +141,8 @@ async function main() {
           || Math.max(due.maxCallAttempt, due.maxJobAttempt) + 1;
         const consecutiveNoAnswer = due.reason === "employee_requested_callback"
           ? 0
-          : due.lastAttemptStatus === "noanswer" ? due.lastNoAnswerBefore + 1 : due.lastNoAnswerBefore;
+          : due.callTargetRole === "care_manager" && due.reason === "care_manager_requested_callback" ? 0
+            : lastAttemptWasMissed ? due.lastNoAnswerBefore + 1 : due.lastNoAnswerBefore;
         const payload = {
           sessionId: due.sessionId,
           taskId: due.taskId,

@@ -211,9 +211,9 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         callContext.message = `Athulya attendance alert. ${session.employee?.name || "Assigned caregiver"} did not answer the configured ${stageLabel} call attempts for the assigned schedule. Please contact operations.`;
         callContext.escalation_message = `Repeated ${stageLabel} calls were unanswered. Please contact operations.`;
         callContext.care_manager_attendance_confirmation_instructions = stage === "check_in"
-          ? "Speak natural Chennai Thunglish from the first word. On the first call, say the caregiver's name, explain they missed check-in calls, ask whether they reached the patient's place, and ask the manager to check. If the manager agrees to check or follow up, ask when Athulya should call back, repeat the requested time, and confirm it. If the manager says the caregiver already arrived, ask the actual arrival time, repeat it, and confirm. On ordinary retries, the alert is already known: briefly mention caregiver name and check-in issue, then ask current status without repeating the full explanation. On a scheduled callback (care_manager_callback=true), ask only the current status; do not ask them to check again. If still pending or unclear, record unconfirmed so the platform can schedule the next configured retry. Never disclose patient name or address."
-          : "Speak natural Chennai Thunglish from the first word. On the first call, say the caregiver's name, explain they missed check-out calls, ask whether they completed duty and left the patient's place, and ask the manager to check. If the manager agrees to check or follow up, ask when Athulya should call back, repeat the requested time, and confirm it. If the manager says the caregiver already checked out, ask the actual departure time, repeat it, and confirm. On ordinary retries, the alert is already known: briefly mention caregiver name and check-out issue, then ask current status without repeating the full explanation. On a scheduled callback (care_manager_callback=true), ask only the current status; do not ask them to check again. If still pending or unclear, record unconfirmed so the platform can schedule the next configured retry. Never disclose patient name or address.";
-        callContext.care_manager_callback_instructions = "When the care manager agrees to check/follow up and requests a callback time, capture the requested time as an absolute ISO 8601 callback_at using current_local_time and time_zone. A requested callback is a scheduled follow-up. On the scheduled callback, ask for the current attendance update only. If the manager confirms completion, return attendance_confirmed=true and the actual reported_at time; if still pending or unclear, return attendance_confirmed=false with an accurate summary and no new callback time.";
+          ? "Speak natural Chennai Thunglish from the first word. On the first call, say the caregiver's name, explain they missed check-in calls, ask whether they reached the patient's place, and ask the manager to check. If the manager agrees to check or follow up, ask when Athulya should call back, repeat the requested time, and confirm it. If the manager says the caregiver already arrived, ask the actual arrival time, repeat it, and confirm. On ordinary retries, the alert is already known: briefly mention caregiver name and check-in issue, then ask current status without repeating the full explanation. On a scheduled callback (care_manager_callback=true), ask only the current status; do not ask them to check again. If still pending or unclear, ask when to call back, repeat and confirm that time, and return it as callback_at. Each manager-requested callback is a follow-up and can be scheduled repeatedly without consuming the unanswered-call retry limit. If the manager answers but gives no confirmed status and requests no callback, return unconfirmed for manual review; do not trigger an automatic retry. Never disclose patient name or address."
+          : "Speak natural Chennai Thunglish from the first word. On the first call, say the caregiver's name, explain they missed check-out calls, ask whether they completed duty and left the patient's place, and ask the manager to check. If the manager agrees to check or follow up, ask when Athulya should call back, repeat the requested time, and confirm it. If the manager says the caregiver already checked out, ask the actual departure time, repeat it, and confirm. On ordinary retries, the alert is already known: briefly mention caregiver name and check-out issue, then ask current status without repeating the full explanation. On a scheduled callback (care_manager_callback=true), ask only the current status; do not ask them to check again. If still pending or unclear, ask when to call back, repeat and confirm that time, and return it as callback_at. Each manager-requested callback is a follow-up and can be scheduled repeatedly without consuming the unanswered-call retry limit. If the manager answers but gives no confirmed status and requests no callback, return unconfirmed for manual review; do not trigger an automatic retry. Never disclose patient name or address.";
+        callContext.care_manager_callback_instructions = "When the care manager agrees to check/follow up and requests a callback time, capture the requested time as an absolute ISO 8601 callback_at using current_local_time and time_zone. A requested callback is a scheduled follow-up. On the scheduled callback, ask for the current attendance update only. If the manager confirms completion, return attendance_confirmed=true and the actual reported_at time. If still pending or unclear and the manager requests another call, capture the new callback_at; repeated manager-requested callbacks are allowed and do not consume the unanswered-call retry limit. If no new callback is requested, return attendance_confirmed=false with an accurate summary for manual review.";
         callContext.care_manager_callback = stageContext.reason === "care_manager_requested_callback";
       }
       const postCallContext = {
@@ -514,66 +514,32 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
           });
           return;
         }
-        if (callbackAt && !isCallbackCall) {
+        if (callbackAt) {
           const nextNumber = await repository.nextAttemptNumber(attempt.sessionId, attempt.stage, "care_manager");
-          if (nextNumber > maxAttempts) {
-            await repository.setStageStatus(attempt.sessionId, attempt.stage, "unresolved", {
-              reason: "care_manager_retry_limit_reached", careManagerAttendanceConfirmed: false,
-              careManagerAttemptNumber: attempt.attemptNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
-            });
-            await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
-              idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-unresolved:${attempt.stage}`,
-            });
-            return;
-          }
           await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
             reason: "care_manager_requested_callback", nextCallAt: callbackAt.toISOString(),
             careManagerAttendanceConfirmed: false, careManagerCallbackAt: callbackAt.toISOString(),
-            careManagerAttemptNumber: attempt.attemptNumber, careManagerNextAttemptNumber: nextNumber,
-            careManagerMaxAttempts: maxAttempts, callAttemptId,
+            careManagerAttemptNumber: attempt.consecutiveNoAnswerBefore || 0,
+            careManagerNextAttemptNumber: nextNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
           });
           await queue.enqueue("place_call", {
             sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id,
             stage: attempt.stage, attemptNumber: nextNumber, callTargetRole: "care_manager",
+            consecutiveNoAnswer: 0,
           }, {
             idempotencyKey: "call:" + attempt.sessionId + ":" + attempt.stage + ":care_manager:callback:" + nextNumber,
             runAt: callbackAt,
           });
           return;
         }
-        if (attempt.attemptNumber >= maxAttempts) {
-          await repository.setStageStatus(attempt.sessionId, attempt.stage, "unresolved", {
-            reason: isCallbackCall ? "care_manager_retry_limit_reached_after_callback" : "care_manager_retry_limit_reached",
-            careManagerAttendanceConfirmed: false, careManagerReportedAt: attempt.outcome?.careManagerReportedAt || null,
-            careManagerReportedOutcome: attempt.outcome?.outcome || null, careManagerSummary: attempt.outcome?.summary || null,
-            careManagerAttemptNumber: attempt.attemptNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
-          });
-          await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
-            idempotencyKey: `evaluate:${attempt.sessionId}:care-manager-unresolved:${attempt.stage}`,
-          });
-          return;
-        }
-        const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
-        const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
-        const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
-        const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, {
-          initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000,
-        }));
-        const nextNumber = await repository.nextAttemptNumber(attempt.sessionId, attempt.stage, "care_manager");
-        await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
-          reason: isCallbackCall ? "care_manager_retry_after_callback" : "care_manager_retry_after_unconfirmed_response",
-          nextCallAt: runAt.toISOString(), careManagerAttendanceConfirmed: false,
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
+          reason: isCallbackCall ? "care_manager_callback_status_unconfirmed" : "care_manager_response_unconfirmed",
+          careManagerAttendanceConfirmed: false,
           careManagerReportedAt: attempt.outcome?.careManagerReportedAt || null,
           careManagerReportedOutcome: attempt.outcome?.outcome || null,
-          careManagerSummary: attempt.outcome?.summary || null, careManagerAttemptNumber: attempt.attemptNumber,
-          careManagerNextAttemptNumber: nextNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
-        });
-        const session = await repository.getAttendanceSession(attempt.sessionId);
-        await queue.enqueue("place_call", {
-          sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
-          attemptNumber: nextNumber, callTargetRole: "care_manager",
-        }, {
-          idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:care_manager:${nextNumber}`, runAt,
+          careManagerSummary: attempt.outcome?.summary || null,
+          careManagerAttemptNumber: attempt.consecutiveNoAnswerBefore || 0,
+          careManagerMaxAttempts: maxAttempts, callAttemptId,
         });
         return;
       }
@@ -581,9 +547,10 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         const settings = repository.getOrganizationCallSettings ? await repository.getOrganizationCallSettings(attempt.organizationId) : {};
         const retrySettings = settings.callRetry || {};
         const maxAttempts = retrySettings.maxConsecutiveNoAnswer ?? retry.maxConsecutiveNoAnswer ?? 3;
-        if (attempt.attemptNumber >= maxAttempts) {
+        const noAnswerCount = (attempt.consecutiveNoAnswerBefore || 0) + 1;
+        if (noAnswerCount >= maxAttempts) {
           await repository.setStageStatus(attempt.sessionId, attempt.stage, "unresolved", {
-            reason: "care_manager_retry_limit_reached", careManagerAttemptNumber: attempt.attemptNumber,
+            reason: "care_manager_retry_limit_reached", careManagerAttemptNumber: noAnswerCount,
             careManagerMaxAttempts: maxAttempts, callAttemptId,
           });
           await queue.enqueue("evaluate_session", { sessionId: attempt.sessionId, stage: attempt.stage }, {
@@ -594,18 +561,18 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
         const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
         const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
         const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
-        const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, {
+        const runAt = new Date(Date.now() + backoffMilliseconds(noAnswerCount - 1, {
           initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000,
         }));
         const nextNumber = await repository.nextAttemptNumber(attempt.sessionId, attempt.stage, "care_manager");
         await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
-          reason: "care_manager_retry", nextCallAt: runAt.toISOString(), careManagerAttemptNumber: attempt.attemptNumber,
+          reason: "care_manager_retry", nextCallAt: runAt.toISOString(), careManagerAttemptNumber: noAnswerCount,
           careManagerMaxAttempts: maxAttempts, callAttemptId,
         });
         const session = await repository.getAttendanceSession(attempt.sessionId);
         await queue.enqueue("place_call", {
           sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
-          attemptNumber: nextNumber, callTargetRole: "care_manager",
+          attemptNumber: nextNumber, callTargetRole: "care_manager", consecutiveNoAnswer: noAnswerCount,
         }, {
           idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:care_manager:${nextNumber}`, runAt,
         });
