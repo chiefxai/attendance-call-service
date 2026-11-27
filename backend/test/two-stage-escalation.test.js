@@ -101,12 +101,31 @@ test("care-manager retry uses its own attempt sequence and remains escalated", a
   assert.equal(h.changes.at(-1).patch.reason, "care_manager_retry");
 });
 
+test("repeated care-manager callback requests stay scheduled beyond the unanswered retry limit", async () => {
+  const h = harness({ caregiverStatus: "escalated", managerLimit: 3 });
+  h.session.activeContext.checkIn = { reason: "care_manager_requested_callback" };
+  const callbackAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  h.attempts.set("manager-later-callback", {
+    id: "manager-later-callback", sessionId: h.session.id, organizationId: h.session.organizationId,
+    stage: "check_in", callTargetRole: "care_manager", attemptNumber: 8,
+    consecutiveNoAnswerBefore: 0, status: "completed", answeredAt: new Date().toISOString(),
+    endedAt: new Date().toISOString(),
+    outcome: { careManagerAttendanceConfirmed: false, careManagerCallbackAt: callbackAt, summary: "Manager requested another callback." },
+  });
+  await h.handlers.process_call_result({ callAttemptId: "manager-later-callback" });
+  const callback = h.jobs.find((job) => job.type === "place_call" && job.payload.callTargetRole === "care_manager");
+  assert.equal(h.session.checkInStatus, "escalated");
+  assert.equal(h.changes.at(-1).patch.reason, "care_manager_requested_callback");
+  assert.equal(callback.options.runAt.toISOString(), new Date(callbackAt).toISOString());
+  assert.equal(callback.payload.consecutiveNoAnswer, 0);
+});
+
 test("care-manager retry exhaustion marks the attendance case unresolved", async () => {
   const h = harness({ caregiverStatus: "escalated", managerLimit: 3 });
   h.attempts.set("manager-third", {
     id: "manager-third", sessionId: h.session.id, organizationId: h.session.organizationId,
     stage: "check_in", callTargetRole: "care_manager", attemptNumber: 3,
-    status: "no-answer",
+    consecutiveNoAnswerBefore: 2, status: "no-answer",
   });
   await h.handlers.process_call_result({ callAttemptId: "manager-third" });
   assert.equal(h.session.checkInStatus, "unresolved");

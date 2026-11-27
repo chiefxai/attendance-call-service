@@ -532,14 +532,38 @@ function createAttendanceHandlers({ repository, queue, chiefvoice, recordings = 
           });
           return;
         }
-        await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
-          reason: isCallbackCall ? "care_manager_callback_status_unconfirmed" : "care_manager_response_unconfirmed",
-          careManagerAttendanceConfirmed: false,
+        if (attempt.attemptNumber >= maxAttempts) {
+          await repository.setStageStatus(attempt.sessionId, attempt.stage, "review", {
+            reason: "care_manager_response_unconfirmed", careManagerAttendanceConfirmed: false,
+            careManagerReportedAt: attempt.outcome?.careManagerReportedAt || null,
+            careManagerReportedOutcome: attempt.outcome?.outcome || null,
+            careManagerSummary: attempt.outcome?.summary || null,
+            careManagerAttemptNumber: attempt.consecutiveNoAnswerBefore || 0,
+            careManagerMaxAttempts: maxAttempts, callAttemptId,
+          });
+          return;
+        }
+        const initialMinutes = retrySettings.initialMinutes ?? retry.initialMinutes ?? 3;
+        const multiplier = retrySettings.multiplier ?? retry.multiplier ?? 1.2;
+        const maxMinutes = retrySettings.maxMinutes ?? retry.maxMinutes ?? 30;
+        const runAt = new Date(Date.now() + backoffMilliseconds(attempt.attemptNumber, {
+          initialMs: initialMinutes * 60_000, multiplier, maxMs: maxMinutes * 60_000,
+        }));
+        const nextNumber = await repository.nextAttemptNumber(attempt.sessionId, attempt.stage, "care_manager");
+        await repository.setStageStatus(attempt.sessionId, attempt.stage, "escalated", {
+          reason: isCallbackCall ? "care_manager_retry_after_callback" : "care_manager_retry_after_unconfirmed_response",
+          nextCallAt: runAt.toISOString(), careManagerAttendanceConfirmed: false,
           careManagerReportedAt: attempt.outcome?.careManagerReportedAt || null,
           careManagerReportedOutcome: attempt.outcome?.outcome || null,
-          careManagerSummary: attempt.outcome?.summary || null,
-          careManagerAttemptNumber: attempt.consecutiveNoAnswerBefore || 0,
-          careManagerMaxAttempts: maxAttempts, callAttemptId,
+          careManagerSummary: attempt.outcome?.summary || null, careManagerAttemptNumber: attempt.attemptNumber,
+          careManagerNextAttemptNumber: nextNumber, careManagerMaxAttempts: maxAttempts, callAttemptId,
+        });
+        const session = await repository.getAttendanceSession(attempt.sessionId);
+        await queue.enqueue("place_call", {
+          sessionId: attempt.sessionId, taskId: taskFor(session, attempt.stage)?.id, stage: attempt.stage,
+          attemptNumber: nextNumber, callTargetRole: "care_manager",
+        }, {
+          idempotencyKey: `call:${attempt.sessionId}:${attempt.stage}:care_manager:${nextNumber}`, runAt,
         });
         return;
       }
