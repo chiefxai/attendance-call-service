@@ -85,11 +85,11 @@ function App() {
           <ListItemIcon sx={{ minWidth: 38, color: settingsSectionOpen ? "primary.main" : "inherit" }}><SettingsRoundedIcon /></ListItemIcon>
           <ListItemText primary="Settings" primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
         </ListItemButton>}
-        <ListItemButton component={NavLink} to="/api-access" onClick={() => setMobileOpen(false)}
+        {user?.role === "admin" && <ListItemButton component={NavLink} to="/api-access" onClick={() => setMobileOpen(false)}
           sx={{ borderRadius: 2.5, mb: 0.5, py: 1.15, color: "text.secondary", "&.active": { color: "primary.dark", bgcolor: "#eaf3ef", "& .MuiListItemIcon-root": { color: "primary.main" } } }}>
           <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}><MenuBookRoundedIcon /></ListItemIcon>
           <ListItemText primary="API documentation" primaryTypographyProps={{ fontSize: 14, fontWeight: 650 }} />
-        </ListItemButton>
+        </ListItemButton>}
       </List>
       <Box sx={{ flexGrow: 1 }} />
       <Divider sx={{ my: 2 }} />
@@ -136,7 +136,7 @@ function App() {
           <Route path="/settings/calling" element={user.role === "admin" ? <SettingsPage section="calling" /> : <Navigate to="/" replace />} />
           <Route path="/settings/api" element={user.role === "admin" ? <SettingsPage section="api" /> : <Navigate to="/" replace />} />
           <Route path="/settings/athulya" element={user.role === "admin" ? <SettingsPage section="athulya" /> : <Navigate to="/" replace />} />
-          <Route path="/api-access" element={<ApiAccessPage section="docs" />} />
+          <Route path="/api-access" element={user.role === "admin" ? <ApiAccessPage section="docs" /> : <Navigate to="/" replace />} />
           <Route path="*" element={<OverviewPage />} />
         </Routes>
         </PageHeaderTargetContext.Provider>
